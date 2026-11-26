@@ -67,15 +67,32 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
-	held, err := q.standingHold(ctx, ws, turn)
+	held, err := q.heldForAction(ctx, ws, turn, log, opRelease)
 	if err != nil {
-		log.Warn(opRelease, "there is no such standing hold to release", dlog.Context{"cause": err.Error()})
 		return err
 	}
 	if err := q.unclaimed(ws, held, log, opRelease); err != nil {
 		return err
 	}
 	return q.settleRelease(ctx, d, held, q.decideRelease(ctx, d, held, log), false, log)
+}
+
+// heldForAction resolves the standing hold a hold action (a release, a drop)
+// names. A hold that is no longer standing is the user's press on a card the
+// tray had not yet taken down when they pressed it, such as a prompt the
+// queue delivered a moment before, never a fault: it is refused at INFO. Only
+// a failed read is recorded at ERROR.
+func (q *queue) heldForAction(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger, op string) (wsm.HeldPrompt, error) {
+	held, err := q.standingHold(ctx, ws, turn)
+	switch {
+	case errors.Is(err, ErrAlreadyDelivered):
+		log.Info(op, "the action is refused: the prompt was already delivered", nil)
+	case errors.Is(err, ErrNoSuchHold):
+		log.Info(op, "the action is refused: no hold stands under the turn", nil)
+	case err != nil:
+		log.Error(op, "could not read the hold the action names", dlog.Context{"cause": err.Error()})
+	}
+	return held, err
 }
 
 // releaseVerdict is what a release decided about its prompt.
@@ -326,9 +343,8 @@ func (q *queue) Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) e
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
-	held, err := q.standingHold(ctx, ws, turn)
+	held, err := q.heldForAction(ctx, ws, turn, log, opDrop)
 	if err != nil {
-		log.Warn(opDrop, "there is no such standing hold to drop", dlog.Context{"cause": err.Error()})
 		return err
 	}
 	return q.dropLocked(ctx, d, held, tombstoneDropped, opDrop, log)

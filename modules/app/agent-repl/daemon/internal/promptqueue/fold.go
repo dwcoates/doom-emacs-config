@@ -116,19 +116,20 @@ func (q *queue) Fold(ctx context.Context, ws ids.WorkspaceID, turn, above ids.Tu
 // logged at INFO: it is the user's click on a card the tray has not yet taken
 // down, never a fault.
 func (q *queue) heldForFold(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) (wsm.HeldPrompt, error) {
-	held, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
-	if err != nil {
-		log.Error(opFold, "could not read the hold the fold names", dlog.Context{"cause": err.Error()})
-		return wsm.HeldPrompt{}, fmt.Errorf("read hold %q on %q: %w", turn, ws, err)
-	}
+	held, err := q.holdUnder(ctx, ws, turn)
 	switch {
-	case !found || held.Workspace != ws:
+	case errors.Is(err, ErrNoSuchHold):
 		log.Info(opFold, "the fold is refused: no hold was ever recorded under the turn", nil)
-		return wsm.HeldPrompt{}, ErrNoSuchHold
-	case held.Tombstone != nil:
+		return wsm.HeldPrompt{}, err
+	case errors.Is(err, ErrAlreadyDelivered), errors.Is(err, ErrNotHeld):
+		// The fold's arms name no delivered prompt: one delivered is no
+		// longer held, like any other retired one.
 		log.Info(opFold, "the fold is refused: the prompt is no longer held",
 			dlog.Context{"tombstone": held.Tombstone.Kind})
 		return wsm.HeldPrompt{}, ErrNotHeld
+	case err != nil:
+		log.Error(opFold, "could not read the hold the fold names", dlog.Context{"cause": err.Error()})
+		return wsm.HeldPrompt{}, err
 	}
 	if err := q.unclaimed(ws, held, log, opFold); err != nil {
 		return wsm.HeldPrompt{}, err

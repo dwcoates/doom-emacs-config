@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -424,14 +425,118 @@ func TestReleaseOfAHoldWaitingOnASessionComingUpWaitsForIt(t *testing.T) {
 	}
 }
 
-func TestReleaseReportsAnUnknownHold(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	// Act
-	err := h.q.Release(context.Background(), theWorkspace, "never-held")
-	// Assert
-	if !errors.Is(err, ErrNoSuchHold) {
-		t.Fatalf("err = %v, want ErrNoSuchHold", err)
+// TestAHoldActionOnAHoldNoLongerStandingIsRefusedAtInfo pins that a release
+// or a drop pressed on a card the tray had not yet taken down is the user's
+// press, never a fault: it is refused with the arm saying why, at INFO, and
+// nothing is sent. Production 2026-11-25: a "Send now" pressed 80ms after the
+// queue delivered the prompt as an interjection was recorded at WARN.
+func TestAHoldActionOnAHoldNoLongerStandingIsRefusedAtInfo(t *testing.T) {
+	actions := []struct {
+		name string
+		op   string
+		act  func(h *harness, turn ids.TurnID) error
+	}{
+		{"a release", opRelease, func(h *harness, turn ids.TurnID) error {
+			return h.q.Release(context.Background(), theWorkspace, turn)
+		}},
+		{"a drop", opDrop, func(h *harness, turn ids.TurnID) error {
+			return h.q.Drop(context.Background(), theWorkspace, turn)
+		}},
+	}
+	states := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.TurnID
+		want    error
+		message string
+	}{
+		{
+			name:    "on a turn nothing was held under",
+			arrange: func(*testing.T, *harness) ids.TurnID { return "never-held" },
+			want:    ErrNoSuchHold,
+			message: "the action is refused: no hold stands under the turn",
+		},
+		{
+			name: "on a prompt already delivered",
+			arrange: func(t *testing.T, h *harness) ids.TurnID {
+				queuedBehind(t, h, "t1")
+				turnEnds(h)
+				return "t1"
+			},
+			want:    ErrAlreadyDelivered,
+			message: "the action is refused: the prompt was already delivered",
+		},
+		{
+			name: "on a prompt already dropped",
+			arrange: func(t *testing.T, h *harness) ids.TurnID {
+				queuedBehind(t, h, "t1")
+				if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+					t.Fatalf("Drop: %v", err)
+				}
+				return "t1"
+			},
+			want:    ErrNoSuchHold,
+			message: "the action is refused: no hold stands under the turn",
+		},
+	}
+	for _, action := range actions {
+		for _, state := range states {
+			t.Run(action.name+" "+state.name, func(t *testing.T) {
+				// Arrange
+				h := newHarness(t)
+				turn := state.arrange(t, h)
+				sentBefore := len(h.sender.started())
+				// Act
+				err := action.act(h, turn)
+				// Assert
+				if !errors.Is(err, state.want) {
+					t.Fatalf("err = %v, want %v", err, state.want)
+				}
+				if !logged(h.log.Records(), "info", action.op, state.message) {
+					t.Fatalf("records = %+v, want %q at info under %s", h.log.Records(), state.message, action.op)
+				}
+				if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); ok {
+					t.Fatalf("records = %+v, want nothing at warn", h.log.Records())
+				}
+				if sent := len(h.sender.started()); sent != sentBefore {
+					t.Fatalf("started %d turns, want none sent by the refused action", sent-sentBefore)
+				}
+			})
+		}
+	}
+}
+
+func TestAHoldActionThatCannotReadTheHoldIsLoggedAtError(t *testing.T) {
+	actions := []struct {
+		name string
+		op   string
+		act  func(h *harness) error
+	}{
+		{"a release", opRelease, func(h *harness) error { return h.q.Release(context.Background(), theWorkspace, "t1") }},
+		{"a drop", opDrop, func(h *harness) error { return h.q.Drop(context.Background(), theWorkspace, "t1") }},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			queuedBehind(t, h, "t1")
+			h.db.byTurnErr = errors.New("database is locked")
+			// Act
+			err := action.act(h)
+			// Assert
+			if err == nil || errors.Is(err, ErrNoSuchHold) || errors.Is(err, ErrAlreadyDelivered) {
+				t.Fatalf("err = %v, want the read failure", err)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+				Level: "error", Operation: action.op, Message: "could not read the hold the action names",
+				Match: func(r dlog.Record) bool { return r.Context["cause"] == err.Error() && r.Context["turn"] == "t1" },
+			}); !ok {
+				t.Fatalf("records = %+v, want the read failure at error with its cause", h.log.Records())
+			}
+			h.db.byTurnErr = nil
+			if tomb := h.db.hold("t1").Tombstone; tomb != nil {
+				t.Fatalf("tombstone = %+v, want the prompt still standing", tomb)
+			}
+		})
 	}
 }
 
@@ -682,8 +787,8 @@ func TestSupersedeFailsLoudlyAndRetiresNothing(t *testing.T) {
 		message string
 	}{
 		{
-			name:    "the holds cannot be read",
-			arrange: func(h *harness) { h.db.heldErr = errors.New("disk gone") },
+			name:    "the hold cannot be read",
+			arrange: func(h *harness) { h.db.byTurnErr = errors.New("disk gone") },
 			message: "could not read the holds to supersede a prompt; it stands",
 		},
 		{
@@ -707,7 +812,7 @@ func TestSupersedeFailsLoudlyAndRetiresNothing(t *testing.T) {
 			if err == nil || retired {
 				t.Fatalf("Supersede = (%v, %v), want (false, an error)", retired, err)
 			}
-			h.db.heldErr = nil
+			h.db.byTurnErr = nil
 			if tomb := h.db.hold("t1").Tombstone; tomb != nil {
 				t.Fatalf("tombstone = %+v, want the prompt still standing", tomb)
 			}
