@@ -4,7 +4,8 @@ This workspace has no summary, so set one now, before you go on with your work: 
 The long summary describes the workspace's task in more detail than a title can:
 
 - Two to four sentences, in one paragraph with no line break, and eighty words at most.
-- Say what the work is, what it touches, and what done looks like, specifically enough that a reader who has not seen the conversation knows what this workspace is for.
+- Say what the workspace is working on now and what it worked on earlier in the session, specifically enough that a reader who has not seen the conversation knows what this workspace is for.
+- Never a definition of done: nothing about what finishing, landing or the merge queue would mean.
 - Nothing about the person, the date, or how the workspace was started.
 
 The short summary states the workspace's high-level task:

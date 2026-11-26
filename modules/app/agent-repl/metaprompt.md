@@ -348,13 +348,14 @@
 ### The workspace keeps its own topbar summary current
 
 - The workspace's topbar summary is its own statement of its high-level task, which its agent sets in two parts.
-  - The long summary, written first, describes the task in two to four sentences, and a hover on the topbar's title shows it.
+  - The long summary, written first, says in two to four sentences what the workspace is working on now and what it worked on earlier in the session, and a hover on the topbar's title shows it.
+  - It never states a definition of done, such as "done means it is landed through the merge queue" (owner ruling, 2026-11-26).
   - The short summary, distilled from the long one, is one sentence, and the topbar draws it as its title.
   - The daemon derives no summary, so a workspace that sets none shows none.
   - While none stands, or only a short one does, the daemon closes each prompt with a note asking for one, and that note holds the format.
-- The workspace sets its summary again whenever its high-level task materially changes, without asking.
-  - A step within the task is never a reason to change it.
-  - A one-shot's task is fixed at its creation, so a one-shot rarely changes its summary.
+- The workspace keeps its summary current, setting it again without asking whenever what it is working on moves on (owner ruling, 2026-11-26).
+  - A new request, a finished part of the work, or a change of focus within the task is each a reason to set it again.
+  - So a reader always sees what the workspace is doing now, beside what it did before.
 - The verb and its flags are `/agent-repl-workspaces`'.
 
 ## Workspace links
