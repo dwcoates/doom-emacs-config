@@ -46,6 +46,7 @@ import {
   rosterStatusColor,
   statusStepKey,
   toneClass,
+  wireColor,
   topbarConnectivityColor,
   topbarTone,
 } from "../src/vocab.js";
@@ -589,5 +590,15 @@ describe("statusStepKey", () => {
   it("keeps different pairs apart", () => {
     // Arrange / Act / Assert
     expect(statusStepKey("idle", "done")).not.toBe(statusStepKey("idle", "ready"));
+  });
+});
+
+describe("wireColor", () => {
+  it.each(["none", "blue", "purple", "red", "turquoise", "yellow", "green"])("accepts the declared color %s", (name) => {
+    expect(wireColor(name, "X.tone")).toBe(name);
+  });
+
+  it("refuses a color the vocabulary does not declare", () => {
+    expect(() => wireColor("chartreuse", "X.tone")).toThrow(MalformedView);
   });
 });
