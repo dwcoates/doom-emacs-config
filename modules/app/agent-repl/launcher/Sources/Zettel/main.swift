@@ -8,6 +8,12 @@ import ZettelLauncher
 
 /// The application whose window a click or an open by hand brings forward.
 let emacsBundleID = "org.gnu.Emacs"
+/// Zettel's own bundle ID: the bundle is unusable without one, so its absence
+/// stops the launcher at start.
+let zettelBundleID: String = {
+    guard let id = Bundle.main.bundleIdentifier else { fatalError("Zettel runs outside its bundle: no bundle identifier") }
+    return id
+}()
 
 /// The launcher's launchd agent, which an open by hand starts when it is
 /// not running.
@@ -77,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             NSApp.terminate(nil)
             return
         }
-        server = BannerServer(listener: listener, exchange: BannerExchange(center: NotificationCenterPoster(), log: log), log: log)
+        server = BannerServer(listener: listener, exchange: BannerExchange(center: NotificationCenterPoster(bundle: zettelBundleID, focusStore: focusStoreDirectory(home: FileManager.default.homeDirectoryForCurrentUser)), log: log), log: log)
         server.start()
         do {
             let build = try executableBuild(at: Bundle.main.executableURL!)

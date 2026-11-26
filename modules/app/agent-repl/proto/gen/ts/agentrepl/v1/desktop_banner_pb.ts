@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/desktop_banner.proto.
  */
 export const file_agentrepl_v1_desktop_banner: GenFile = /*@__PURE__*/
-  fileDesc("CiFhZ2VudHJlcGwvdjEvZGVza3RvcF9iYW5uZXIucHJvdG8SDGFnZW50cmVwbC52MSLWAQoNRGVza3RvcEJhbm5lchIvCgV0aXRsZRgBIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyVGl0bGUSLQoEYm9keRgCIAEoCzIfLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyQm9keRIvCgVncm91cBgDIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyR3JvdXASNAoFY2xpY2sYBCABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4iIgoSRGVza3RvcEJhbm5lclRpdGxlEgwKBHRleHQYASABKAkiIQoRRGVza3RvcEJhbm5lckJvZHkSDAoEdGV4dBgBIAEoCSIgChJEZXNrdG9wQmFubmVyR3JvdXASCgoCaWQYASABKAkiSAoXRGVza3RvcEJhbm5lckNsaWNrVG9rZW4SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiLuAQoYRGVza3RvcEJhbm5lclBvc3RPdXRjb21lEj4KBnBvc3RlZBgBIAEoCzIsLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVQb3N0ZWRIABJHCgtub3RfYWxsb3dlZBgCIAEoCzIwLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVOb3RBbGxvd2VkSAASPgoGZmFpbGVkGAMgASgLMiwuYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZUZhaWxlZEgAQgkKB291dGNvbWUiIAoeRGVza3RvcEJhbm5lclBvc3RPdXRjb21lUG9zdGVkIjUKIkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZU5vdEFsbG93ZWQSDwoHc2V0dGluZxgBIAEoCSI4Ch5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVGYWlsZWQSFgoOcGxhdGZvcm1fZXJyb3IYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiFhZ2VudHJlcGwvdjEvZGVza3RvcF9iYW5uZXIucHJvdG8SDGFnZW50cmVwbC52MSLWAQoNRGVza3RvcEJhbm5lchIvCgV0aXRsZRgBIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyVGl0bGUSLQoEYm9keRgCIAEoCzIfLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyQm9keRIvCgVncm91cBgDIAEoCzIgLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyR3JvdXASNAoFY2xpY2sYBCABKAsyJS5hZ2VudHJlcGwudjEuRGVza3RvcEJhbm5lckNsaWNrVG9rZW4iIgoSRGVza3RvcEJhbm5lclRpdGxlEgwKBHRleHQYASABKAkiIQoRRGVza3RvcEJhbm5lckJvZHkSDAoEdGV4dBgBIAEoCSIgChJEZXNrdG9wQmFubmVyR3JvdXASCgoCaWQYASABKAkiSAoXRGVza3RvcEJhbm5lckNsaWNrVG9rZW4SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKyAgoYRGVza3RvcEJhbm5lclBvc3RPdXRjb21lEj4KBnBvc3RlZBgBIAEoCzIsLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVQb3N0ZWRIABJHCgtub3RfYWxsb3dlZBgCIAEoCzIwLmFnZW50cmVwbC52MS5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVOb3RBbGxvd2VkSAASPgoGZmFpbGVkGAMgASgLMiwuYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZUZhaWxlZEgAEkIKCHNpbGVuY2VkGAQgASgLMi4uYWdlbnRyZXBsLnYxLkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZVNpbGVuY2VkSABCCQoHb3V0Y29tZSIgCh5EZXNrdG9wQmFubmVyUG9zdE91dGNvbWVQb3N0ZWQiNQoiRGVza3RvcEJhbm5lclBvc3RPdXRjb21lTm90QWxsb3dlZBIPCgdzZXR0aW5nGAEgASgJIlgKIERlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZVNpbGVuY2VkEg8KBWZvY3VzGAEgASgJSAASGgoQZm9jdXNfdW5yZWFkYWJsZRgCIAEoCUgAQgcKBWNhdXNlIjgKHkRlc2t0b3BCYW5uZXJQb3N0T3V0Y29tZUZhaWxlZBIWCg5wbGF0Zm9ybV9lcnJvchgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * One banner for the launcher to post, as the user sees it, plus what the
@@ -182,8 +182,8 @@ export type DesktopBannerPostOutcome = Message<"agentrepl.v1.DesktopBannerPostOu
      * The notification center accepted the banner, and Zettel's settings
      * draw it on screen: notifications are allowed, alerts are on, and their
      * style is banners or alerts. The daemon rings the banner's chime on this
-     * answer alone, so a sound always means a banner on screen. A Focus that
-     * files the banner silently is not reported.
+     * answer alone, so a sound always means a banner on screen. No Focus on
+     * now silences Zettel (`silenced` otherwise).
      *
      * @generated from field: agentrepl.v1.DesktopBannerPostOutcomePosted posted = 1;
      */
@@ -206,6 +206,17 @@ export type DesktopBannerPostOutcome = Message<"agentrepl.v1.DesktopBannerPostOu
      */
     value: DesktopBannerPostOutcomeFailed;
     case: "failed";
+  } | {
+    /**
+     * The notification center took the banner, but it is not known to be on
+     * screen: a Focus silences Zettel, so macOS files it in Notification
+     * Center without drawing it, or the Focus state could not be read. The
+     * daemon rings no chime for it.
+     *
+     * @generated from field: agentrepl.v1.DesktopBannerPostOutcomeSilenced silenced = 4;
+     */
+    value: DesktopBannerPostOutcomeSilenced;
+    case: "silenced";
   } | { case: undefined; value?: undefined };
 };
 
@@ -254,6 +265,45 @@ export const DesktopBannerPostOutcomeNotAllowedSchema: GenMessage<DesktopBannerP
   messageDesc(file_agentrepl_v1_desktop_banner, 7);
 
 /**
+ * A banner the notification center took but did not draw on screen.
+ *
+ * @generated from message agentrepl.v1.DesktopBannerPostOutcomeSilenced
+ */
+export type DesktopBannerPostOutcomeSilenced = Message<"agentrepl.v1.DesktopBannerPostOutcomeSilenced"> & {
+  /**
+   * THE ARM IS WHY. REQUIRED.
+   *
+   * @generated from oneof agentrepl.v1.DesktopBannerPostOutcomeSilenced.cause
+   */
+  cause: {
+    /**
+     * The name of the Focus on now that silences Zettel ("Work"), as System
+     * Settings shows it.
+     *
+     * @generated from field: string focus = 1;
+     */
+    value: string;
+    case: "focus";
+  } | {
+    /**
+     * Why the Focus state could not be read, for the record: whether a Focus
+     * silences the banner is unknown, so it is not taken to be drawn.
+     *
+     * @generated from field: string focus_unreadable = 2;
+     */
+    value: string;
+    case: "focusUnreadable";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.DesktopBannerPostOutcomeSilenced.
+ * Use `create(DesktopBannerPostOutcomeSilencedSchema)` to create a new message.
+ */
+export const DesktopBannerPostOutcomeSilencedSchema: GenMessage<DesktopBannerPostOutcomeSilenced> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_desktop_banner, 8);
+
+/**
  * The notification center refused the banner for a reason other than
  * permission.
  *
@@ -273,5 +323,5 @@ export type DesktopBannerPostOutcomeFailed = Message<"agentrepl.v1.DesktopBanner
  * Use `create(DesktopBannerPostOutcomeFailedSchema)` to create a new message.
  */
 export const DesktopBannerPostOutcomeFailedSchema: GenMessage<DesktopBannerPostOutcomeFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_desktop_banner, 8);
+  messageDesc(file_agentrepl_v1_desktop_banner, 9);
 

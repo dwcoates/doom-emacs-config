@@ -276,7 +276,7 @@ final class NotificationCenterTests: XCTestCase {
         var added = 0
 
         // Act
-        let result = await gatedPost(DisplaySettings(authorization: .denied, alert: .enabled, style: .banner)) { added += 1 }
+        let result = await gatedPost(DisplaySettings(authorization: .denied, alert: .enabled, style: .banner), bundle: "app.zettel", focus: noFocus) { added += 1 }
 
         // Assert
         XCTAssertEqual(result, .notAllowed("notifications are denied"))
@@ -288,7 +288,7 @@ final class NotificationCenterTests: XCTestCase {
         var added = 0
 
         // Act
-        let result = await gatedPost(drawn) { added += 1 }
+        let result = await gatedPost(drawn, bundle: "app.zettel", focus: noFocus) { added += 1 }
 
         // Assert
         XCTAssertEqual(result, .posted)
@@ -297,10 +297,50 @@ final class NotificationCenterTests: XCTestCase {
 
     func testABannerMacOSRefusesAnswersItsError() async {
         // Act
-        let result = await gatedPost(drawn) { throw NSError(domain: "X", code: 3, userInfo: [NSLocalizedDescriptionKey: "bad"]) }
+        let result = await gatedPost(drawn, bundle: "app.zettel", focus: noFocus) { throw NSError(domain: "X", code: 3, userInfo: [NSLocalizedDescriptionKey: "bad"]) }
 
         // Assert
         XCTAssertEqual(result, .failed("X 3: bad"))
+    }
+
+    /// A Focus state with no Focus on.
+    let noFocus: () throws -> FocusState = { FocusState(active: [], modes: [:]) }
+
+    func testABannerAFocusSilencesIsPostedButNotOnScreen() async {
+        // Arrange
+        var added = 0
+        var fixture = FocusStoreFixture()
+        fixture.active = ["com.apple.focus.work"]
+
+        // Act
+        let result = await gatedPost(drawn, bundle: "app.zettel", focus: { try fixture.parse() }) { added += 1 }
+
+        // Assert
+        XCTAssertEqual(result, .silenced(.focus("Work")))
+        XCTAssertEqual(added, 1)
+    }
+
+    func testABannerAFocusAllowsIsPosted() async {
+        // Arrange
+        let fixture = FocusStoreFixture()
+
+        // Act
+        let result = await gatedPost(drawn, bundle: "com.example.allowed", focus: { try fixture.parse() }) {}
+
+        // Assert
+        XCTAssertEqual(result, .posted)
+    }
+
+    func testABannerWhoseFocusStateCannotBeReadIsPostedButNotOnScreen() async {
+        // Arrange
+        var added = 0
+
+        // Act
+        let result = await gatedPost(drawn, bundle: "app.zettel", focus: { throw FocusReadError("Assertions.json is not JSON") }) { added += 1 }
+
+        // Assert
+        XCTAssertEqual(result, .silenced(.focusUnreadable("Assertions.json is not JSON")))
+        XCTAssertEqual(added, 1)
     }
 
     func testTheCheckReportsTheSameAnswerAPostGets() {

@@ -40,7 +40,11 @@ click selects. It is the SERVER of the posts and the reporter of the clicks.
   (`offScreenSetting`), and a banner they keep off (denied, alerts off, style
   None, provisional) is never handed to macOS and answers `not_allowed`
   naming that setting, because macOS's own `add` takes such a banner without
-  an error. `--check-notifications` asks the same function.
+  an error. `--check-notifications` asks the same function. A banner macOS
+  took while a Focus silences Zettel answers `silenced` (the Focus's name, a
+  WARN), read from the Do Not Disturb store's private files
+  (`Focus.swift`), whose unrecognized layout is an ERROR, never a guess: either
+  way the daemon rings no chime for it.
 - On a click it brings Emacs forward (the click is the one moment macOS lets it
   activate another app) and reports `ReportDesktopBannerClicked` with the
   banner's click token, to whichever daemon `<state>/daemon.addr` advertises at
@@ -65,7 +69,7 @@ is never lost to a stop or a handover.
 | Path | What |
 |---|---|
 | `Package.swift`, `Package.resolved` | the SwiftPM package; `swift-protobuf` pinned exactly |
-| `Sources/ZettelLauncher/` | everything the launcher does, unit-tested: `BannerServer` (the exchange and the accept loop), `Delimited` (the framing, `SocketChannel`), `HolderSocket` (`takeHeldSocket`), `Resident` (the instance lock, the build report), `Clicks` (`ClickReporter`, `ConnectDaemon`), `Connect` (the unary Connect client over HTTP/1.1, binary protobuf), `DaemonAddress`, `NotificationCenter`, `Options` (`--resident`, `--log`, `--holder`, `--run-dir`, `--state-dir`, `--check-notifications`, `--request-notifications`), `Log` |
+| `Sources/ZettelLauncher/` | everything the launcher does, unit-tested: `BannerServer` (the exchange and the accept loop), `Delimited` (the framing, `SocketChannel`), `HolderSocket` (`takeHeldSocket`), `Resident` (the instance lock, the build report), `Clicks` (`ClickReporter`, `ConnectDaemon`), `Connect` (the unary Connect client over HTTP/1.1, binary protobuf), `DaemonAddress`, `Focus` (the Do Not Disturb store's reader), `NotificationCenter`, `Options` (`--resident`, `--log`, `--holder`, `--run-dir`, `--state-dir`, `--check-notifications`, `--request-notifications`), `Log` |
 | `Sources/Zettel/main.swift` | the AppKit shell: the app delegate, the notification delegate, the permission modes |
 | `Sources/ZettelIcon/` | renders the icon at one size (`bin/build-launcher.sh` packs every size) |
 | `Sources/ZettelProto` | a link to `proto/gen/swift`, the generated bindings |

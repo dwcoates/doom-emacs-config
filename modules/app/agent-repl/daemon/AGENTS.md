@@ -704,7 +704,9 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   `PostBannerResponse` once macOS's notification center took or refused the
   banner. The chime rings and the banner is held only once that answer says the
   platform took it; no answer within `desktopnotify.LauncherPostBound` (5s, not
-  yet measured; each post records `duration_ms`), a refusal (`not_allowed` names
+  yet measured; each post records `duration_ms`), a banner a Focus silences
+  (`silenced`: WARN naming the Focus, `desktopnotify.SilencedError`; never
+  held), a refusal (`not_allowed` names
   its remedy) or a dial that fails is an ERROR on that banner
   (`daemon.desktopnotify.post`), which is never queued. The launcher writes a
   build report, and a deploy restarts it when that build is not the one it

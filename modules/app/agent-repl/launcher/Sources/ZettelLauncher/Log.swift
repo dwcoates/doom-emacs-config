@@ -22,6 +22,9 @@ extension Logger {
     public func debug(_ operation: String, _ message: String, _ context: LogContext = [:]) {
         log(.debug, operation, message, context)
     }
+    public func warn(_ operation: String, _ message: String, _ context: LogContext = [:]) {
+        log(.warn, operation, message, context)
+    }
     public func error(_ operation: String, _ message: String, _ context: LogContext = [:]) {
         log(.error, operation, message, context)
     }

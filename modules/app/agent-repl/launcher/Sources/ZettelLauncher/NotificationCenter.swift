@@ -69,16 +69,29 @@ public func offScreenSetting(_ settings: DisplaySettings) -> String? {
 
 /// Posts one banner only when SETTINGS draw it on screen: otherwise it is not
 /// handed to macOS at all and answers the setting that keeps it off. ADD hands
-/// the banner to the notification center.
-public func gatedPost(_ settings: DisplaySettings, add: () async throws -> Void) async -> PostResult {
+/// the banner to the notification center. A banner macOS took is `posted`
+/// only when no Focus on now silences BUNDLE (FOCUS reads the Focus state);
+/// otherwise it is `silenced`, since macOS files it in Notification Center
+/// without drawing it, and a Focus state that cannot be read leaves it
+/// `silenced` too: a banner not known to be on screen rings no chime.
+public func gatedPost(
+    _ settings: DisplaySettings, bundle: String, focus: () throws -> FocusState, add: () async throws -> Void
+) async -> PostResult {
     if let setting = offScreenSetting(settings) {
         return .notAllowed(setting)
     }
     do {
         try await add()
-        return .posted
     } catch {
         return postResult(for: error)
+    }
+    do {
+        if let name = try silencingFocus(try focus(), bundle: bundle) {
+            return .silenced(.focus(name))
+        }
+        return .posted
+    } catch {
+        return .silenced(.focusUnreadable("\(error)"))
     }
 }
 
@@ -102,7 +115,15 @@ public func clickToken(from userInfo: [AnyHashable: Any]) -> Data? {
 /// notification's identifier, so a banner replaces the earlier one of its
 /// group.
 public struct NotificationCenterPoster: BannerCenter {
-    public init() {}
+    /// The app's bundle ID, which a Focus's app lists name it by.
+    let bundle: String
+    /// The Do Not Disturb store the Focus state is read from.
+    let focusStore: URL
+
+    public init(bundle: String, focusStore: URL) {
+        self.bundle = bundle
+        self.focusStore = focusStore
+    }
 
     public func post(_ banner: Agentrepl_V1_DesktopBanner) async -> PostResult {
         let content: UNMutableNotificationContent
@@ -114,7 +135,9 @@ public struct NotificationCenterPoster: BannerCenter {
         let request = UNNotificationRequest(identifier: banner.group.id, content: content, trigger: nil)
         let center = UNUserNotificationCenter.current()
         let settings = DisplaySettings(await center.notificationSettings())
-        return await gatedPost(settings) { try await center.add(request) }
+        return await gatedPost(settings, bundle: bundle, focus: { try readFocusState(dir: focusStore) }) {
+            try await center.add(request)
+        }
     }
 }
 

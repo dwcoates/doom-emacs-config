@@ -113,8 +113,16 @@ Consequences and reasoning:
   alerts on, banner or alert style) and posts only when they draw the banner;
   otherwise it answers `not_allowed` with
   `DesktopBannerPostOutcomeNotAllowed.setting`, and the installer's
-  `--check-notifications` asks the same function. A Focus that files the
-  banner silently is still not reported.
+  `--check-notifications` asks the same function.
+- **A Focus that silences Zettel is the `silenced` arm** (2026-11-25, owner
+  ruling: detect it and log a warning). No public API says whether a Focus
+  silences an app, so the launcher reads the Do Not Disturb store's own files
+  (`~/Library/DoNotDisturb/DB`: the Focuses on, each Focus's allow or silence
+  list) after macOS takes the banner. A silencing Focus answers
+  `silenced.focus` (its name), which the daemon records at WARN with no chime
+  and no hold; a store it cannot read or does not recognize answers
+  `silenced.focus_unreadable`, ERROR on both sides, also with no chime. The
+  banner is still posted, so it waits in Notification Center as macOS files it.
 - **`DesktopBannerPostOutcome` moved into `desktop_banner.proto`**, beside the
   banner, so `launcher.v1` imports one file for both.
 

@@ -179,8 +179,8 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
   /// The notification center accepted the banner, and Zettel's settings
   /// draw it on screen: notifications are allowed, alerts are on, and their
   /// style is banners or alerts. The daemon rings the banner's chime on this
-  /// answer alone, so a sound always means a banner on screen. A Focus that
-  /// files the banner silently is not reported.
+  /// answer alone, so a sound always means a banner on screen. No Focus on
+  /// now silences Zettel (`silenced` otherwise).
   public var posted: Agentrepl_V1_DesktopBannerPostOutcomePosted {
     get {
       if case .posted(let v)? = outcome {return v}
@@ -208,6 +208,18 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
     set {outcome = .failed(newValue)}
   }
 
+  /// The notification center took the banner, but it is not known to be on
+  /// screen: a Focus silences Zettel, so macOS files it in Notification
+  /// Center without drawing it, or the Focus state could not be read. The
+  /// daemon rings no chime for it.
+  public var silenced: Agentrepl_V1_DesktopBannerPostOutcomeSilenced {
+    get {
+      if case .silenced(let v)? = outcome {return v}
+      return Agentrepl_V1_DesktopBannerPostOutcomeSilenced()
+    }
+    set {outcome = .silenced(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// THE ARM IS THE OUTCOME. REQUIRED.
@@ -215,14 +227,19 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
     /// The notification center accepted the banner, and Zettel's settings
     /// draw it on screen: notifications are allowed, alerts are on, and their
     /// style is banners or alerts. The daemon rings the banner's chime on this
-    /// answer alone, so a sound always means a banner on screen. A Focus that
-    /// files the banner silently is not reported.
+    /// answer alone, so a sound always means a banner on screen. No Focus on
+    /// now silences Zettel (`silenced` otherwise).
     case posted(Agentrepl_V1_DesktopBannerPostOutcomePosted)
     /// Zettel's notification settings keep the banner off the screen, so it was
     /// not posted. Remedied only in System Settings → Notifications → Zettel.
     case notAllowed(Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed)
     /// The notification center refused the banner for another reason.
     case failed(Agentrepl_V1_DesktopBannerPostOutcomeFailed)
+    /// The notification center took the banner, but it is not known to be on
+    /// screen: a Focus silences Zettel, so macOS files it in Notification
+    /// Center without drawing it, or the Focus state could not be read. The
+    /// daemon rings no chime for it.
+    case silenced(Agentrepl_V1_DesktopBannerPostOutcomeSilenced)
 
   }
 
@@ -251,6 +268,51 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: Senda
   public var setting: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A banner the notification center took but did not draw on screen.
+public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcomeSilenced: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// THE ARM IS WHY. REQUIRED.
+  public var cause: Agentrepl_V1_DesktopBannerPostOutcomeSilenced.OneOf_Cause? = nil
+
+  /// The name of the Focus on now that silences Zettel ("Work"), as System
+  /// Settings shows it.
+  public var focus: String {
+    get {
+      if case .focus(let v)? = cause {return v}
+      return String()
+    }
+    set {cause = .focus(newValue)}
+  }
+
+  /// Why the Focus state could not be read, for the record: whether a Focus
+  /// silences the banner is unknown, so it is not taken to be drawn.
+  public var focusUnreadable: String {
+    get {
+      if case .focusUnreadable(let v)? = cause {return v}
+      return String()
+    }
+    set {cause = .focusUnreadable(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  /// THE ARM IS WHY. REQUIRED.
+  public nonisolated enum OneOf_Cause: Equatable, Sendable {
+    /// The name of the Focus on now that silences Zettel ("Work"), as System
+    /// Settings shows it.
+    case focus(String)
+    /// Why the Focus state could not be read, for the record: whether a Focus
+    /// silences the banner is unknown, so it is not taken to be drawn.
+    case focusUnreadable(String)
+
+  }
 
   public init() {}
 }
@@ -449,7 +511,7 @@ nonisolated extension Agentrepl_V1_DesktopBannerClickToken: SwiftProtobuf.Messag
 
 nonisolated extension Agentrepl_V1_DesktopBannerPostOutcome: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcome"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}posted\0\u{3}not_allowed\0\u{1}failed\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}posted\0\u{3}not_allowed\0\u{1}failed\0\u{1}silenced\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -496,6 +558,19 @@ nonisolated extension Agentrepl_V1_DesktopBannerPostOutcome: SwiftProtobuf.Messa
           self.outcome = .failed(v)
         }
       }()
+      case 4: try {
+        var v: Agentrepl_V1_DesktopBannerPostOutcomeSilenced?
+        var hadOneofValue = false
+        if let current = self.outcome {
+          hadOneofValue = true
+          if case .silenced(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.outcome = .silenced(v)
+        }
+      }()
       default: break
       }
     }
@@ -518,6 +593,10 @@ nonisolated extension Agentrepl_V1_DesktopBannerPostOutcome: SwiftProtobuf.Messa
     case .failed?: try {
       guard case .failed(let v)? = self.outcome else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .silenced?: try {
+      guard case .silenced(let v)? = self.outcome else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     }()
     case nil: break
     }
@@ -575,6 +654,63 @@ nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed: SwiftProt
 
   public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed, rhs: Agentrepl_V1_DesktopBannerPostOutcomeNotAllowed) -> Bool {
     if lhs.setting != rhs.setting {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Agentrepl_V1_DesktopBannerPostOutcomeSilenced: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DesktopBannerPostOutcomeSilenced"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}focus\0\u{3}focus_unreadable\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.cause != nil {try decoder.handleConflictingOneOf()}
+          self.cause = .focus(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.cause != nil {try decoder.handleConflictingOneOf()}
+          self.cause = .focusUnreadable(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.cause {
+    case .focus?: try {
+      guard case .focus(let v)? = self.cause else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .focusUnreadable?: try {
+      guard case .focusUnreadable(let v)? = self.cause else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Agentrepl_V1_DesktopBannerPostOutcomeSilenced, rhs: Agentrepl_V1_DesktopBannerPostOutcomeSilenced) -> Bool {
+    if lhs.cause != rhs.cause {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -2,10 +2,20 @@ import Foundation
 import ZettelProto
 
 /// What the platform's notification center did with one banner.
+/// Why a banner macOS took is not known to be on screen.
+public enum Silence: Equatable, Sendable {
+    /// The Focus on now, by name, silences Zettel.
+    case focus(String)
+    /// The Focus state could not be read, for the record.
+    case focusUnreadable(String)
+}
+
 public enum PostResult: Equatable, Sendable {
     case posted
     /// Zettel's settings keep the banner off screen; the setting that does.
     case notAllowed(String)
+    /// macOS took the banner, but it is not known to be on screen.
+    case silenced(Silence)
     case failed(String)
 }
 
@@ -39,6 +49,8 @@ public func answer(for result: PostResult) -> Launcher_V1_PostBannerResponse {
         switch result {
         case .posted: response.outcome.posted = .init()
         case .notAllowed(let setting): response.outcome.notAllowed.setting = setting
+        case .silenced(.focus(let name)): response.outcome.silenced.focus = name
+        case .silenced(.focusUnreadable(let cause)): response.outcome.silenced.focusUnreadable = cause
         case .failed(let platformError): response.outcome.failed.platformError = platformError
         }
     }
@@ -78,6 +90,10 @@ public struct BannerExchange: Sendable {
                 log.error(ServerOp.post, "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)", fields.merging(["setting": setting]) { $1 })
             case .failed(let cause):
                 log.error(ServerOp.post, "macOS refused the banner", fields.merging(["cause": cause]) { $1 })
+            case .silenced(.focus(let name)):
+                log.warn(ServerOp.post, "a Focus silences Zettel; the banner went to Notification Center unseen (System Settings → Focus → its Allowed Apps)", fields.merging(["focus": name]) { $1 })
+            case .silenced(.focusUnreadable(let cause)):
+                log.error(ServerOp.post, "the Focus state could not be read; the banner was posted but is not known to be on screen", fields.merging(["cause": cause]) { $1 })
             }
             response = answer(for: result)
         }
