@@ -115,6 +115,16 @@ const (
 	// ArmUnknownRequester is a create whose requesting workspace the registry
 	// does not hold.
 	ArmUnknownRequester = "unknown_requester"
+	// ArmUnknownSourceBranch refuses a create cut from a source branch that
+	// does not exist (agentrepl.v1.CreateWorkspaceError.unknown_source_branch).
+	ArmUnknownSourceBranch = "unknown_source_branch"
+	// ArmUnknownSubagent refuses a subagent fork no workspace's session holds
+	// (agentrepl.v1.CreateWorkspaceError.unknown_subagent).
+	ArmUnknownSubagent = "unknown_subagent"
+	// ArmUnknownCloseAfter refuses a one-shot whose close-after workspace is
+	// not open, is of another repository, or is its requester
+	// (agentrepl.v1.CreateWorkspaceError.unknown_close_after).
+	ArmUnknownCloseAfter = "unknown_close_after"
 	// ArmUnknownRepository is a creation naming a repository the daemon
 	// cannot act in. The registry may still hold the row -- what it names is
 	// gone from disk, which is the same answer to the client as a ref that

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
@@ -277,34 +276,6 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 	default:
 		return wsm.MergeSource{}, fmt.Errorf("merge: a request for %s names the undeclared source %s", ws, source.Kind)
 	}
-}
-
-// worktreeLister is what finding a branch's worktree asks of git.
-type worktreeLister interface {
-	MainWorktree(ctx context.Context, dir string) (string, error)
-	ListWorktrees(ctx context.Context, repoDir string) ([]gitclient.Worktree, error)
-}
-
-// worktreeHolding answers the worktree of the repository holding IN that has
-// BRANCH checked out (git checks a branch out in at most one), with the
-// repository's main worktree, and HELD false when none has it: THE ONE
-// LOOKUP of a branch's worktree, which an async merge's cleanup, its rule
-// check and a branch merge's subject share.
-func worktreeHolding(ctx context.Context, git worktreeLister, in, branch string) (dir, main string, held bool, err error) {
-	main, err = git.MainWorktree(ctx, in)
-	if err != nil {
-		return "", "", false, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
-	}
-	worktrees, err := git.ListWorktrees(ctx, main)
-	if err != nil {
-		return "", "", false, fmt.Errorf("merge: listing the repository's worktrees: %w", err)
-	}
-	for _, wt := range worktrees {
-		if !wt.Bare && wt.Branch == branch {
-			return wt.Dir, main, true, nil
-		}
-	}
-	return "", main, false, nil
 }
 
 // withCheckedOutBranch answers source carrying the branch checked out in the

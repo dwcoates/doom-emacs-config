@@ -58,10 +58,6 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 // for the main worktree to investigate.
 func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause error) {
 	log := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "create_failure": cause.Error()})
-	if spec.MergeOf != nil {
-		log.Debug(opCreateFailedReport, "a merge workspace's failed create is the merge queue's to hand back; it is not reported to the main worktree", nil)
-		return
-	}
 	if HandedOver(cause) {
 		log.Debug(opCreateFailedReport, "the create was handed over or this daemon is exiting; it is not reported as a failure", nil)
 		return
@@ -253,7 +249,7 @@ func describeCreateRequest(spec CreateSpec) string {
 	if spec.OneShot {
 		lines = append(lines, "- one-shot: yes")
 	}
-	add("base ref", spec.BaseRef)
+	add("source branch", spec.SourceBranch)
 	if spec.Parent != nil {
 		add("parent workspace id", string(*spec.Parent))
 	}

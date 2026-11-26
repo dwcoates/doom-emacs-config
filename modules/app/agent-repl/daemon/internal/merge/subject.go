@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -164,7 +165,7 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 	if err != nil {
 		return subject{}, err
 	}
-	dir, main, held, err := worktreeHolding(ctx, r.git, record.Dir, r.source.Branch)
+	dir, main, held, err := gitclient.WorktreeHolding(ctx, r.git, record.Dir, r.source.Branch)
 	if err != nil {
 		return subject{}, err
 	}

@@ -520,7 +520,7 @@ message CreateWorkspaceError {
   // Tag 36 (`async_merge_requester_queued`) is RETIRED (owner ruling,
   // 2026-11-12): each async request is recorded on its own, so a requester
   // asks for any number in one turn, beside a merge of its own branch.
-  // Tags 4, 18, 26, 28-35, 37, 38, 40, 41, 45, 56, 62 and 65 are RETIRED
+  // Tags 4, 26, 28-35, 37, 38, 40, 41, 45, 56, 62 and 65 are RETIRED
   // with the async merge form (CreateWorkspaceRequest.async_merge): the
   // refusals only it raised. A one-shot cut from a source branch is refused
   // `unknown_source_branch`, `unknown_subagent` and `unknown_close_after`
@@ -528,8 +528,8 @@ message CreateWorkspaceError {
   // Tag 54 (`requester_bypassing_queue`) is RETIRED (owner ruling,
   // 2026-11-14): the merge queue keeps running while a workspace holds the
   // queue bypass mode, so what it creates lands through the queue as usual.
-  reserved 3, 4, 5, 8, 9, 15, 18, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41, 45, 54, 56, 62, 65;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned", "async_merge_requester_queued", "requester_bypassing_queue", "name_reserved", "async_merge_unknown_branch", "async_merge_unknown_subagent", "async_merge_unknown_maker", "async_merge_context_not_maker", "async_merge_name_taken", "async_merge_unknown_close_after", "op_id_with_async_merge", "version_increment_required", "version_increment_unexpected", "async_merge_requester_merging", "async_merge_requester_session_deleted", "async_merge_no_deploy_config", "async_merge_deploy_config_invalid", "placement_behind_not_in_line", "placement_on_merge_workspace", "async_merge_name_off_queue", "async_merge_rule_checks_failed";
+  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41, 45, 54, 56, 62, 65;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned", "async_merge_requester_queued", "requester_bypassing_queue", "async_merge_unknown_branch", "async_merge_unknown_subagent", "async_merge_unknown_maker", "async_merge_context_not_maker", "async_merge_name_taken", "async_merge_unknown_close_after", "op_id_with_async_merge", "version_increment_required", "version_increment_unexpected", "async_merge_requester_merging", "async_merge_requester_session_deleted", "async_merge_no_deploy_config", "async_merge_deploy_config_invalid", "placement_behind_not_in_line", "placement_on_merge_workspace", "async_merge_name_off_queue", "async_merge_rule_checks_failed";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -569,6 +569,10 @@ message CreateWorkspaceError {
     // requesting workspace forking ITSELF is never refused on this arm: its
     // create waits for its turn (`waiting_for_requester_turn`).
     CreateWorkspaceForkSourceHasNoFinishedTurn fork_source_has_no_finished_turn = 48;
+    // The supplied name is being claimed by another create in flight, which
+    // registers under it. Nothing was named or built; the caller asks again
+    // with another name, or once that create has ended.
+    CreateWorkspaceNameReserved name_reserved = 18;
     // The supplied name is already the name or branch of a registered
     // workspace that has not landed, open or closed. Checked under the same
     // lock that claims a name, so two creates of one name can never both pass
@@ -872,6 +876,11 @@ message CreateWorkspaceUnknownOwner {
 message CreateWorkspaceUnknownLandingTarget {
   // The workspace as the request named it.
   workspace.v1.WorkspaceRef workspace = 1;
+}
+// The name another create in flight claims.
+message CreateWorkspaceNameReserved {
+  // The branch the supplied name resolves to.
+  string branch = 1;
 }
 // Names the source branch that does not exist.
 message CreateWorkspaceUnknownSourceBranch {

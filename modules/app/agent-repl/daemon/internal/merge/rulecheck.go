@@ -11,6 +11,7 @@ import (
 	"agentrepl/logging/logsite"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
@@ -167,6 +168,6 @@ func (o *orchestrator) ruleCheckTree(ctx context.Context, requester wsm.Workspac
 	if source.Kind == wsm.MergeSourceOwnBranch {
 		return requester.Dir, true, nil
 	}
-	dir, _, held, err := worktreeHolding(ctx, o.deps.Git, requester.Dir, source.Branch)
+	dir, _, held, err := gitclient.WorktreeHolding(ctx, o.deps.Git, requester.Dir, source.Branch)
 	return dir, held, err
 }

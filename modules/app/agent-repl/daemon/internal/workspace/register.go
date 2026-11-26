@@ -537,7 +537,7 @@ func (v *verbs) nameMainWorktree(ctx context.Context, log dlog.Logger, repo wsm.
 	fields := dlog.Context{"workspace": string(main.ID), "name": name, "previous": main.Name, "repo_dir": repo.Dir}
 	v.names.mu.Lock()
 	defer v.names.mu.Unlock()
-	held, err := v.holdersLocked(ctx, "")
+	held, err := v.holdersLocked(ctx)
 	if err != nil {
 		log.Error(opRegister, "could not read the names already taken; the main workspace is not renamed", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)

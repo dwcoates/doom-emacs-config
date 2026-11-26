@@ -77,18 +77,18 @@ func (s CreateSpec) registerPlacement() *wsm.RegisterPlacement {
 
 // userOneShot reports whether the create is a TOP-LEVEL ONE-SHOT THE USER
 // DISPATCHED (`SPC TAB o', `SPC TAB O', `SPC TAB M-o'): no workspace's agent
-// asked for it, it has no parent, it carries no merge, and no other system
+// asked for it, it has no parent, and no other system
 // (the Slack emoji acknowledger) originated it. Only such a one-shot joins
 // the one-shots subsection; a one-shot an agent creates is filed by that
 // agent, or sits wherever its owner does.
 func (s CreateSpec) userOneShot() bool {
-	return s.OneShot && s.Requester == nil && s.Parent == nil && s.MergeOf == nil &&
+	return s.OneShot && s.Requester == nil && s.Parent == nil &&
 		s.originator == lifecycleconfig.OriginatorUserOrWorkspace
 }
 
 // validatePlacement refuses a placement the create's own shape cannot carry,
 // before anything is read: the user has no agent to file for, a child sits
-// wherever its owner does, and a merge workspace is drawn nowhere.
+// wherever its owner does.
 func validatePlacement(log dlog.Logger, spec CreateSpec) error {
 	if spec.Placement == nil {
 		return nil
@@ -97,9 +97,6 @@ func validatePlacement(log dlog.Logger, spec CreateSpec) error {
 	case spec.Requester == nil:
 		return refuse(log, "CreateWorkspace", ArmPlacementRequiresWorkspace,
 			"a placement files the workspace on behalf of a workspace's agent, and this create was asked for by the user", false)
-	case spec.MergeOf != nil:
-		return refuse(log, "CreateWorkspace", ArmPlacementOnMergeWorkspace,
-			"a merge workspace is drawn nowhere until revealed, so it is never placed", false)
 	case spec.Parent != nil:
 		return refuse(log, "CreateWorkspace", ArmPlacementOnChild,
 			fmt.Sprintf("the workspace is a child of %s and sits wherever its owner does", *spec.Parent), false)
@@ -119,7 +116,7 @@ func (v *verbs) checkPlacement(ctx context.Context, log dlog.Logger, spec Create
 	if placement == nil {
 		return nil
 	}
-	err := v.deps.DB.RefusePlacement(ctx, repoDir, *placement, spec.Parent, spec.MergeOf != nil)
+	err := v.deps.DB.RefusePlacement(ctx, repoDir, *placement, spec.Parent)
 	if err == nil {
 		return nil
 	}
@@ -139,8 +136,6 @@ func placementRefusal(log dlog.Logger, err error) (*Refusal, bool) {
 	switch {
 	case errors.Is(err, wsm.ErrPlacementOnChild):
 		return refuse(log, "CreateWorkspace", ArmPlacementOnChild, err.Error(), false), true
-	case errors.Is(err, wsm.ErrPlacementOnMerge):
-		return refuse(log, "CreateWorkspace", ArmPlacementOnMergeWorkspace, err.Error(), false), true
 	case errors.Is(err, wsm.ErrBlankSubsectionName):
 		return refuse(log, "CreateWorkspace", ArmBlankPlacementSubsectionName, "the new subsection's name is blank", false), true
 	case errors.As(err, &unknown):
