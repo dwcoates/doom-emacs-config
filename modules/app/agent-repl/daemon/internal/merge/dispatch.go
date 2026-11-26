@@ -101,7 +101,7 @@ func renderProblems(problems []DeployProblem) string {
 		}
 		b.WriteString(fmt.Sprintf("%d. %s\n", i+1, p.Statement))
 		for _, r := range p.RaceFindings {
-			b.WriteString(fmt.Sprintf("   race `%s`: fix it at its source, never by loosening a bound, a retry or a sleep\n", r))
+			b.WriteString(fmt.Sprintf("   race %s: fix it at its source, never by loosening a bound, a retry or a sleep\n", renderRaceRef(r)))
 		}
 		for _, e := range p.Evidence {
 			b.WriteString(fmt.Sprintf("   > %s\n", e))

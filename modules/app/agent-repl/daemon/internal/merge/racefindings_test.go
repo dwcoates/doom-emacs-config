@@ -602,7 +602,38 @@ func TestRenderProblemsNamesTheRacesAProblemIs(t *testing.T) {
 	got := renderProblems([]DeployProblem{{Statement: "TestRacy races", Evidence: []string{"lost"}, RaceFindings: []wsm.RaceFindingRef{racyRef}}})
 
 	// Assert
-	if !strings.Contains(got, "1. TestRacy races\n   race `daemon/TestRacy`: fix it at its source, never by loosening a bound, a retry or a sleep\n   > lost") {
+	if !strings.Contains(got, "1. TestRacy races\n   race suite `daemon`, test `TestRacy`: fix it at its source, never by loosening a bound, a retry or a sleep\n   > lost") {
 		t.Fatalf("renderProblems = %q, want the race named between the statement and its evidence", got)
+	}
+}
+
+// TestBothBriefsNameARaceFindingAlike pins that the mediator's brief and the
+// fixer's dispatch brief render a finding in one shape, so a site that
+// hand-rolls its own rendering fails here.
+func TestBothBriefsNameARaceFindingAlike(t *testing.T) {
+	at := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		ref  wsm.RaceFindingRef
+		want string
+	}{
+		{name: "a plain test name", ref: racyRef, want: "suite `daemon`, test `TestRacy`"},
+		{name: "a test name holding a slash", ref: wsm.RaceFindingRef{Suite: "daemon", Test: "integration.TestFoo/case"}, want: "suite `daemon`, test `integration.TestFoo/case`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			briefs := map[string]string{
+				"the mediator's brief": RenderRaceFindings([]wsm.RaceFinding{{Ref: tt.ref, LastSeen: at, Recurrences: 1, Failure: "lost"}}),
+				"the dispatch brief":   renderProblems([]DeployProblem{{Statement: "it races", RaceFindings: []wsm.RaceFindingRef{tt.ref}}}),
+			}
+
+			// Assert
+			for brief, got := range briefs {
+				if !strings.Contains(got, tt.want) {
+					t.Fatalf("%s = %q, want the finding named %q", brief, got, tt.want)
+				}
+			}
+		})
 	}
 }
