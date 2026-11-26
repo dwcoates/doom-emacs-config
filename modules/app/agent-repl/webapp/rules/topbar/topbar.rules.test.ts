@@ -191,7 +191,7 @@ describe("the no-session cells", () => {
       declaration(".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-wifi-button",
+        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-production-checks-button,\n.topbar-wifi-button",
         "padding-block",
       ),
     );
@@ -201,7 +201,7 @@ describe("the no-session cells", () => {
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
     ".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
-    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-wifi-button",
+    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-production-checks-button,\n.topbar-wifi-button",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });

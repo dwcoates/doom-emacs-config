@@ -9694,8 +9694,10 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-production-checks-disc,
 .topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
 .topbar-remote-control[data-mode="on"] .topbar-remote-control-disc,
-.topbar-production-checks[data-standing="running"] .topbar-production-checks-disc,
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
+/* THE PRODUCTION-CHECKS CHIP lights the same green while its repository's
+   checks run; its arm is the standing, not a mode. */
+.topbar-production-checks[data-standing="running"] .topbar-production-checks-disc { fill: var(--wifi-mode-on-disc); }
 /* THE QUEUE-BYPASS CHIP (owner request, 2026-11-10): lit in the canonical
    orange while this workspace holds the mode, muted and inert while another
    workspace of the repository holds it. */
