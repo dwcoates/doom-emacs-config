@@ -2634,6 +2634,10 @@ type fakeGit struct {
 	// refuses over uncommitted changes (gitclient.ErrDirtyWorktree).
 	startsRefusedDirty int
 	rebaseCommands     []string
+	// startRebaseEndedCut is the error of the context the last StartRebase
+	// ended under, read once a hold on it released: nil when the run's
+	// cancellation never reached the command in flight.
+	startRebaseEndedCut error
 	// deletedBranches records DeleteBranchAt as BRANCH@HEAD; deleteBranchErr
 	// fails it.
 	deletedBranches []string
@@ -3039,10 +3043,11 @@ func (g *fakeGit) CommitIdentities(_ context.Context, _, base, tip string) ([]gi
 	return g.identities, g.identitiesErr
 }
 
-func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []string) (gitclient.RebaseStep, error) {
+func (g *fakeGit) StartRebase(ctx context.Context, _, onto string, commits []string) (gitclient.RebaseStep, error) {
 	g.record("start_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.startRebaseEndedCut = ctx.Err()
 	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
 	if g.startsRefusedDirty > 0 {
 		g.startsRefusedDirty--

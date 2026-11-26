@@ -555,11 +555,13 @@ func (r *run) stop(ctx context.Context, err error) {
 	r.teardown(ctx, outcome{failed: err.Error()}, nil)
 }
 
-// stopped classifies a run-ending error: a git the daemon itself cancelled
-// takes stop, and everything else takes abort. It answers whether the run
-// ended, so a caller reads as one branch.
+// stopped classifies a run-ending error: a git the daemon itself cancelled,
+// or one the run's gate refused to start once the run's context had ended
+// (*gitRefused), takes stop, and everything else takes abort. It answers
+// whether the run ended, so a caller reads as one branch.
 func (r *run) stopped(ctx context.Context, err error) bool {
-	if !gitclient.IsCancelled(err) {
+	var refused *gitRefused
+	if !gitclient.IsCancelled(err) && !errors.As(err, &refused) {
 		return false
 	}
 	r.stop(ctx, err)
@@ -1569,7 +1571,10 @@ func (r *run) abandonedFor() AbandonCause {
 
 // abandonRunning ABANDONS a merge that is running, whatever step it is on,
 // once dequeue recorded the abandonment on it (run.abandonedBy). Its context
-// is cancelled with the cause, whatever phase it is in stops, and it ends on
+// is cancelled with the cause, which stops the run at its next git command
+// (its gate refuses it) or its next context check (a wait, a turn, the test
+// gate). A git command in flight is never cut: it finishes first, and the
+// abandoned terminal then acts on the tree git left whole. The run ends on
 // the abandoned terminal through the one release path; this returns once that
 // is done, so the caller's answer is the released state. Only the daemon's
 // exit takes an abandoned run instead, and the abandonment is then refused:

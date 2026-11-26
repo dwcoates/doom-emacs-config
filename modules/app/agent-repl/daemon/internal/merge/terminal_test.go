@@ -1773,6 +1773,76 @@ func TestAnAbandonedRunningMergeNeverLands(t *testing.T) {
 	}
 }
 
+// TestAnAbandonWhileTheRebaseRunsLetsItFinishAndStartsNoMoreGit covers the
+// 2026-11-26 race: a workspace closed while its merge's `git rebase` ran
+// killed git halfway through writing its state, and the abandoned terminal's
+// abort then met a rebase git could not abort. The rebase in flight now runs
+// whole, the run's next git is refused, and the merge ends abandoned with no
+// ERROR record.
+func TestAnAbandonWhileTheRebaseRunsLetsItFinishAndStartsNoMoreGit(t *testing.T) {
+	// Arrange: a two-commit rebase whose start is held in flight, and the
+	// workspace closed while it runs; git is released once the run's context
+	// carries the abandonment.
+	h := newHarness(t)
+	landing(h, 2)
+	entered, release := h.git.hold("start_rebase")
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-entered
+	r, running := h.o.runFor(theWorkspace)
+	if !running {
+		t.Fatal("no run holds the rebase in flight")
+	}
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+	}()
+	receiveWithin(t, r.ctx.Done(), "the abandonment reaching the running merge")
+	close(release)
+	<-closed
+	<-done
+
+	// Act and Assert: each observation of the one scenario.
+	tests := []struct {
+		name  string
+		check func(t *testing.T)
+	}{
+		{name: "the rebase in flight ended under an uncut context", check: func(t *testing.T) {
+			h.git.mu.Lock()
+			defer h.git.mu.Unlock()
+			if h.git.startRebaseEndedCut != nil {
+				t.Fatalf("StartRebase ended under a cut context (%v), want it run whole", h.git.startRebaseEndedCut)
+			}
+		}},
+		{name: "no rebase command started after it", check: func(t *testing.T) {
+			if h.git.seen("continue_rebase") {
+				t.Fatalf("git was asked %v, want nothing after the rebase in flight", h.git.calls)
+			}
+		}},
+		{name: "nothing landed", check: func(t *testing.T) {
+			if h.git.seen("fast_forward") {
+				t.Fatalf("git was asked %v, want no landing", h.git.calls)
+			}
+		}},
+		{name: "the merge ended abandoned", check: func(t *testing.T) {
+			if _, found := recordAt(h, "info", "daemon.merge.abandoned"); !found {
+				t.Fatalf("records = %v, want the abandoned terminal", h.logs.Records())
+			}
+		}},
+		{name: "no ERROR record", check: func(t *testing.T) {
+			for _, record := range h.logs.Records() {
+				if record.Level == "error" {
+					t.Fatalf("an abandon during the rebase produced an ERROR record: %+v", record)
+				}
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, tt.check)
+	}
+}
+
 // --- a concluded merge's state retires once the workspace moves on --------
 
 // TestAConcludedMergesStateRetiresWhenTheWorkspaceMovesOn covers the lingering

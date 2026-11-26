@@ -182,6 +182,27 @@ func TestACancelledGitAtShutdownIsRecordedOnce(t *testing.T) {
 	}
 }
 
+// TestAGitTheGateRefusedAfterTheRunsCancellationIsAStop covers the gate's
+// half of the classification: a run's cancellation no longer kills its git,
+// the gate refuses the next command instead, and that refusal ends the run as
+// the killed git did, at INFO with no abort.
+func TestAGitTheGateRefusedAfterTheRunsCancellationIsAStop(t *testing.T) {
+	// Arrange: the run's first git answers the gate's refusal.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = &gitRefused{name: "MainWorktree", err: context.Canceled, cause: context.Canceled}
+	h.git.mu.Unlock()
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if _, found := recordAt(h, "info", "daemon.merge.stop"); !found {
+		t.Fatalf("the refusal was not recorded as a stop; records = %v", h.logs.Records())
+	}
+}
+
 // TestARealGitFailureStillAborts is the guard on the other side: the
 // classification must not have weakened what a genuine failure does.
 func TestARealGitFailureStillAborts(t *testing.T) {

@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,16 +11,28 @@ import (
 )
 
 // This file is a run's GIT GATE: every git command a merge run makes goes
-// through it, so the daemon's exit can wait for the one in flight to finish
-// and start no other.
+// through it, and it is the one place that decides what that command runs
+// under. The daemon's exit waits on it for the command in flight to finish
+// and start no other; a run's cancellation stops the run at it.
 //
-// THE DAEMON'S EXIT NEVER INTERRUPTS A MERGE'S GIT. A git killed halfway
-// through a checkout, a rebase step or a fast-forward leaves a tree that is
-// neither the state before the command nor the state after it, and the merge
-// that resumes on the next boot could not tell which of its steps had
-// happened. So the drain STOPS the gate -- no git starts after that -- and
-// waits, within MergeGitStopBound, for the command already running to end of
-// its own accord. Only then are the run's waits (a turn, the test gate) cut.
+// A MERGE'S GIT COMMAND IS NEVER CUT. A git killed halfway through a
+// checkout, a rebase step or a fast-forward leaves a tree that is neither the
+// state before the command nor the state after it (2026-11-26: a workspace
+// closed 7 ms into its merge's `git rebase -i` killed git between creating
+// its state directory and writing its state, and the abandoned terminal's
+// abort then met a rebase git could not abort). So the gate runs every
+// command it starts on a context the run's cancellation cannot reach
+// (context.WithoutCancel), and the command finishes whole: the tree is
+// always one git left. What ends a run is the NEXT command, which the gate
+// refuses:
+//
+//   - once the daemon's exit stopped the gate (errMergeStopping). The drain
+//     stops the gate and waits, within MergeGitStopBound, for the command
+//     already running to end of its own accord (awaitStoppingPoints); only
+//     then are the run's waits (a turn, the test gate) cut.
+//   - once the run's context ended -- an abandonment, a suspension, any
+//     cancellation -- before the command started (*gitRefused, which
+//     carries the context's error and its cause).
 //
 // A run's git calls are sequential (one run is one goroutine), so the gate
 // holds at most one command in flight; it names it for the drain's record.
@@ -62,15 +75,52 @@ func newGatedGit(inner gitclient.Git, now func() time.Time) *gatedGit {
 	return &gatedGit{inner: inner, now: now}
 }
 
-// enter starts one command, or refuses it once the gate is stopped.
-func (g *gatedGit) enter(name string) error {
+// gitRefused is what a gated git answers once the run's context has ended
+// before the command started: the command was never started, so the tree is
+// the one the previous command left whole. It unwraps to the context's error
+// (context.Canceled) and to its cause (an *abandonment, a suspension's cause,
+// errDaemonExiting), so a caller asking either reads it as it read a git the
+// cancellation killed; the run's end classifies it as a stop (run.stopped).
+type gitRefused struct {
+	// name is the gated method refused.
+	name string
+	// err is the context's error, cause its cause (the same error when the
+	// context was cancelled without one).
+	err, cause error
+}
+
+func (r *gitRefused) Error() string {
+	if r.cause == nil || r.cause == r.err {
+		return fmt.Sprintf("merge: git %s was not started: the merge's run was cancelled (%v)", r.name, r.err)
+	}
+	return fmt.Sprintf("merge: git %s was not started: the merge's run was cancelled (%v: %v)", r.name, r.err, r.cause)
+}
+
+// Unwrap exposes the context's error and its cause.
+func (r *gitRefused) Unwrap() []error {
+	if r.cause == nil || r.cause == r.err {
+		return []error{r.err}
+	}
+	return []error{r.err, r.cause}
+}
+
+// enter starts one command under CTX, the run's context, and answers the
+// context the command runs under: CTX without its cancellation, so nothing
+// the run's cancellation does cuts the command once it started. It refuses
+// the command once the gate is stopped (errMergeStopping) or once CTX has
+// ended (*gitRefused). A bound a gitclient method sets inside is its own and
+// stands; no merge git call relies on a deadline of its caller's.
+func (g *gatedGit) enter(ctx context.Context, name string) (context.Context, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.stopping {
-		return errMergeStopping
+		return nil, errMergeStopping
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, &gitRefused{name: name, err: err, cause: context.Cause(ctx)}
 	}
 	g.inFlight, g.since = name, g.now()
-	return nil
+	return context.WithoutCancel(ctx), nil
 }
 
 // leave ends the command enter started, and releases a drain waiting on it.
@@ -114,7 +164,8 @@ func (g *gatedGit) stop() (<-chan struct{}, gitInFlight) {
 var _ gitclient.Git = (*gatedGit)(nil)
 
 func (g *gatedGit) DefaultBranch(ctx context.Context, repoDir string) (string, error) {
-	if err := g.enter("DefaultBranch"); err != nil {
+	ctx, err := g.enter(ctx, "DefaultBranch")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -122,7 +173,8 @@ func (g *gatedGit) DefaultBranch(ctx context.Context, repoDir string) (string, e
 }
 
 func (g *gatedGit) RefreshPrimaryBranch(ctx context.Context, repoDir string) error {
-	if err := g.enter("RefreshPrimaryBranch"); err != nil {
+	ctx, err := g.enter(ctx, "RefreshPrimaryBranch")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -130,7 +182,8 @@ func (g *gatedGit) RefreshPrimaryBranch(ctx context.Context, repoDir string) err
 }
 
 func (g *gatedGit) ResolveRef(ctx context.Context, repoDir, ref string) (string, error) {
-	if err := g.enter("ResolveRef"); err != nil {
+	ctx, err := g.enter(ctx, "ResolveRef")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -138,7 +191,8 @@ func (g *gatedGit) ResolveRef(ctx context.Context, repoDir, ref string) (string,
 }
 
 func (g *gatedGit) ListRefs(ctx context.Context, repoDir, prefix string) ([]string, error) {
-	if err := g.enter("ListRefs"); err != nil {
+	ctx, err := g.enter(ctx, "ListRefs")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -146,7 +200,8 @@ func (g *gatedGit) ListRefs(ctx context.Context, repoDir, prefix string) ([]stri
 }
 
 func (g *gatedGit) BranchExists(ctx context.Context, repoDir, branch string) (bool, error) {
-	if err := g.enter("BranchExists"); err != nil {
+	ctx, err := g.enter(ctx, "BranchExists")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -154,7 +209,8 @@ func (g *gatedGit) BranchExists(ctx context.Context, repoDir, branch string) (bo
 }
 
 func (g *gatedGit) RefExists(ctx context.Context, repoDir, ref string) (bool, error) {
-	if err := g.enter("RefExists"); err != nil {
+	ctx, err := g.enter(ctx, "RefExists")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -162,7 +218,8 @@ func (g *gatedGit) RefExists(ctx context.Context, repoDir, ref string) (bool, er
 }
 
 func (g *gatedGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {
-	if err := g.enter("CreateWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "CreateWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -170,7 +227,8 @@ func (g *gatedGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef,
 }
 
 func (g *gatedGit) RestoreWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error {
-	if err := g.enter("RestoreWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "RestoreWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -178,7 +236,8 @@ func (g *gatedGit) RestoreWorktree(ctx context.Context, repoDir, worktreeDir, br
 }
 
 func (g *gatedGit) UnregisterMissingWorktree(ctx context.Context, repoDir, worktreeDir string) error {
-	if err := g.enter("UnregisterMissingWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "UnregisterMissingWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -186,7 +245,8 @@ func (g *gatedGit) UnregisterMissingWorktree(ctx context.Context, repoDir, workt
 }
 
 func (g *gatedGit) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error {
-	if err := g.enter("RemoveWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "RemoveWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -194,7 +254,8 @@ func (g *gatedGit) RemoveWorktree(ctx context.Context, repoDir, worktreeDir stri
 }
 
 func (g *gatedGit) MoveWorktree(ctx context.Context, repoDir, from, to string) error {
-	if err := g.enter("MoveWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "MoveWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -202,7 +263,8 @@ func (g *gatedGit) MoveWorktree(ctx context.Context, repoDir, from, to string) e
 }
 
 func (g *gatedGit) RenameBranch(ctx context.Context, repoDir, from, to string) error {
-	if err := g.enter("RenameBranch"); err != nil {
+	ctx, err := g.enter(ctx, "RenameBranch")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -210,7 +272,8 @@ func (g *gatedGit) RenameBranch(ctx context.Context, repoDir, from, to string) e
 }
 
 func (g *gatedGit) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir, commit string) error {
-	if err := g.enter("AddDetachedWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "AddDetachedWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -218,7 +281,8 @@ func (g *gatedGit) AddDetachedWorktree(ctx context.Context, repoDir, worktreeDir
 }
 
 func (g *gatedGit) FastForward(ctx context.Context, dir, commit string) error {
-	if err := g.enter("FastForward"); err != nil {
+	ctx, err := g.enter(ctx, "FastForward")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -226,7 +290,8 @@ func (g *gatedGit) FastForward(ctx context.Context, dir, commit string) error {
 }
 
 func (g *gatedGit) TagsMerged(ctx context.Context, dir, commit string) ([]string, error) {
-	if err := g.enter("TagsMerged"); err != nil {
+	ctx, err := g.enter(ctx, "TagsMerged")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -234,7 +299,8 @@ func (g *gatedGit) TagsMerged(ctx context.Context, dir, commit string) ([]string
 }
 
 func (g *gatedGit) TagsAt(ctx context.Context, dir, commit string) ([]string, error) {
-	if err := g.enter("TagsAt"); err != nil {
+	ctx, err := g.enter(ctx, "TagsAt")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -242,7 +308,8 @@ func (g *gatedGit) TagsAt(ctx context.Context, dir, commit string) ([]string, er
 }
 
 func (g *gatedGit) CreateAnnotatedTag(ctx context.Context, dir, name, commit, message string) error {
-	if err := g.enter("CreateAnnotatedTag"); err != nil {
+	ctx, err := g.enter(ctx, "CreateAnnotatedTag")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -250,7 +317,8 @@ func (g *gatedGit) CreateAnnotatedTag(ctx context.Context, dir, name, commit, me
 }
 
 func (g *gatedGit) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
-	if err := g.enter("IsAncestor"); err != nil {
+	ctx, err := g.enter(ctx, "IsAncestor")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -258,7 +326,8 @@ func (g *gatedGit) IsAncestor(ctx context.Context, dir, ancestor, descendant str
 }
 
 func (g *gatedGit) Nuke(ctx context.Context, repoDir, worktreeDir, branch string) error {
-	if err := g.enter("Nuke"); err != nil {
+	ctx, err := g.enter(ctx, "Nuke")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -266,7 +335,8 @@ func (g *gatedGit) Nuke(ctx context.Context, repoDir, worktreeDir, branch string
 }
 
 func (g *gatedGit) CommonDir(ctx context.Context, dir string) (string, error) {
-	if err := g.enter("CommonDir"); err != nil {
+	ctx, err := g.enter(ctx, "CommonDir")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -274,7 +344,8 @@ func (g *gatedGit) CommonDir(ctx context.Context, dir string) (string, error) {
 }
 
 func (g *gatedGit) MainWorktree(ctx context.Context, dir string) (string, error) {
-	if err := g.enter("MainWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "MainWorktree")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -282,7 +353,8 @@ func (g *gatedGit) MainWorktree(ctx context.Context, dir string) (string, error)
 }
 
 func (g *gatedGit) RepositoryOf(ctx context.Context, dir string) (string, bool, error) {
-	if err := g.enter("RepositoryOf"); err != nil {
+	ctx, err := g.enter(ctx, "RepositoryOf")
+	if err != nil {
 		return "", false, err
 	}
 	defer g.leave()
@@ -290,7 +362,8 @@ func (g *gatedGit) RepositoryOf(ctx context.Context, dir string) (string, bool, 
 }
 
 func (g *gatedGit) MergeNoFF(ctx context.Context, targetDir, sourceBranch, message string) (gitclient.MergeOutcome, error) {
-	if err := g.enter("MergeNoFF"); err != nil {
+	ctx, err := g.enter(ctx, "MergeNoFF")
+	if err != nil {
 		return gitclient.MergeOutcome{}, err
 	}
 	defer g.leave()
@@ -298,7 +371,8 @@ func (g *gatedGit) MergeNoFF(ctx context.Context, targetDir, sourceBranch, messa
 }
 
 func (g *gatedGit) Commit(ctx context.Context, dir, message string) (string, error) {
-	if err := g.enter("Commit"); err != nil {
+	ctx, err := g.enter(ctx, "Commit")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -306,7 +380,8 @@ func (g *gatedGit) Commit(ctx context.Context, dir, message string) (string, err
 }
 
 func (g *gatedGit) ConflictedFiles(ctx context.Context, dir string) ([]string, error) {
-	if err := g.enter("ConflictedFiles"); err != nil {
+	ctx, err := g.enter(ctx, "ConflictedFiles")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -314,7 +389,8 @@ func (g *gatedGit) ConflictedFiles(ctx context.Context, dir string) ([]string, e
 }
 
 func (g *gatedGit) AbortMerge(ctx context.Context, dir string) error {
-	if err := g.enter("AbortMerge"); err != nil {
+	ctx, err := g.enter(ctx, "AbortMerge")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -322,7 +398,8 @@ func (g *gatedGit) AbortMerge(ctx context.Context, dir string) error {
 }
 
 func (g *gatedGit) RevertMerge(ctx context.Context, targetDir, mergeCommit string) error {
-	if err := g.enter("RevertMerge"); err != nil {
+	ctx, err := g.enter(ctx, "RevertMerge")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -330,7 +407,8 @@ func (g *gatedGit) RevertMerge(ctx context.Context, targetDir, mergeCommit strin
 }
 
 func (g *gatedGit) LandedRange(ctx context.Context, targetDir, mergeCommit string) ([]gitclient.Commit, error) {
-	if err := g.enter("LandedRange"); err != nil {
+	ctx, err := g.enter(ctx, "LandedRange")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -338,7 +416,8 @@ func (g *gatedGit) LandedRange(ctx context.Context, targetDir, mergeCommit strin
 }
 
 func (g *gatedGit) ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]string, error) {
-	if err := g.enter("ChangedPaths"); err != nil {
+	ctx, err := g.enter(ctx, "ChangedPaths")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -346,7 +425,8 @@ func (g *gatedGit) ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]s
 }
 
 func (g *gatedGit) IsClean(ctx context.Context, dir string) (bool, error) {
-	if err := g.enter("IsClean"); err != nil {
+	ctx, err := g.enter(ctx, "IsClean")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -354,7 +434,8 @@ func (g *gatedGit) IsClean(ctx context.Context, dir string) (bool, error) {
 }
 
 func (g *gatedGit) CurrentBranch(ctx context.Context, dir string) (string, error) {
-	if err := g.enter("CurrentBranch"); err != nil {
+	ctx, err := g.enter(ctx, "CurrentBranch")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -362,7 +443,8 @@ func (g *gatedGit) CurrentBranch(ctx context.Context, dir string) (string, error
 }
 
 func (g *gatedGit) PathClean(ctx context.Context, dir, path string) (bool, error) {
-	if err := g.enter("PathClean"); err != nil {
+	ctx, err := g.enter(ctx, "PathClean")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -370,7 +452,8 @@ func (g *gatedGit) PathClean(ctx context.Context, dir, path string) (bool, error
 }
 
 func (g *gatedGit) CommitPath(ctx context.Context, dir, path, message string) (string, error) {
-	if err := g.enter("CommitPath"); err != nil {
+	ctx, err := g.enter(ctx, "CommitPath")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -378,7 +461,8 @@ func (g *gatedGit) CommitPath(ctx context.Context, dir, path, message string) (s
 }
 
 func (g *gatedGit) ListWorktrees(ctx context.Context, repoDir string) ([]gitclient.Worktree, error) {
-	if err := g.enter("ListWorktrees"); err != nil {
+	ctx, err := g.enter(ctx, "ListWorktrees")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -386,7 +470,8 @@ func (g *gatedGit) ListWorktrees(ctx context.Context, repoDir string) ([]gitclie
 }
 
 func (g *gatedGit) PruneWorktrees(ctx context.Context, repoDir string) error {
-	if err := g.enter("PruneWorktrees"); err != nil {
+	ctx, err := g.enter(ctx, "PruneWorktrees")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -394,7 +479,8 @@ func (g *gatedGit) PruneWorktrees(ctx context.Context, repoDir string) error {
 }
 
 func (g *gatedGit) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir string) error {
-	if err := g.enter("RemoveCleanWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "RemoveCleanWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -402,7 +488,8 @@ func (g *gatedGit) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir
 }
 
 func (g *gatedGit) AdminDir(ctx context.Context, worktreeDir string) (string, error) {
-	if err := g.enter("AdminDir"); err != nil {
+	ctx, err := g.enter(ctx, "AdminDir")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -410,7 +497,8 @@ func (g *gatedGit) AdminDir(ctx context.Context, worktreeDir string) (string, er
 }
 
 func (g *gatedGit) CommitterTime(ctx context.Context, dir, ref string) (time.Time, error) {
-	if err := g.enter("CommitterTime"); err != nil {
+	ctx, err := g.enter(ctx, "CommitterTime")
+	if err != nil {
 		return time.Time{}, err
 	}
 	defer g.leave()
@@ -418,7 +506,8 @@ func (g *gatedGit) CommitterTime(ctx context.Context, dir, ref string) (time.Tim
 }
 
 func (g *gatedGit) TreeOf(ctx context.Context, dir, ref string) (string, error) {
-	if err := g.enter("TreeOf"); err != nil {
+	ctx, err := g.enter(ctx, "TreeOf")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -426,7 +515,8 @@ func (g *gatedGit) TreeOf(ctx context.Context, dir, ref string) (string, error) 
 }
 
 func (g *gatedGit) MergeTree(ctx context.Context, dir, base, other string) (gitclient.MergeTreeOutcome, error) {
-	if err := g.enter("MergeTree"); err != nil {
+	ctx, err := g.enter(ctx, "MergeTree")
+	if err != nil {
 		return gitclient.MergeTreeOutcome{}, err
 	}
 	defer g.leave()
@@ -434,7 +524,8 @@ func (g *gatedGit) MergeTree(ctx context.Context, dir, base, other string) (gitc
 }
 
 func (g *gatedGit) DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error {
-	if err := g.enter("DeleteBranchAt"); err != nil {
+	ctx, err := g.enter(ctx, "DeleteBranchAt")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -442,7 +533,8 @@ func (g *gatedGit) DeleteBranchAt(ctx context.Context, repoDir, branch, head str
 }
 
 func (g *gatedGit) PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error) {
-	if err := g.enter("PreserveWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "PreserveWorktree")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -450,7 +542,8 @@ func (g *gatedGit) PreserveWorktree(ctx context.Context, repoDir, worktreeDir, r
 }
 
 func (g *gatedGit) CommitsBetween(ctx context.Context, dir, base, tip string) ([]gitclient.Commit, error) {
-	if err := g.enter("CommitsBetween"); err != nil {
+	ctx, err := g.enter(ctx, "CommitsBetween")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -458,7 +551,8 @@ func (g *gatedGit) CommitsBetween(ctx context.Context, dir, base, tip string) ([
 }
 
 func (g *gatedGit) GlobalIdentity(ctx context.Context, dir string) (gitclient.Identity, error) {
-	if err := g.enter("GlobalIdentity"); err != nil {
+	ctx, err := g.enter(ctx, "GlobalIdentity")
+	if err != nil {
 		return gitclient.Identity{}, err
 	}
 	defer g.leave()
@@ -466,7 +560,8 @@ func (g *gatedGit) GlobalIdentity(ctx context.Context, dir string) (gitclient.Id
 }
 
 func (g *gatedGit) CommitIdentities(ctx context.Context, dir, base, tip string) ([]gitclient.CommitIdentity, error) {
-	if err := g.enter("CommitIdentities"); err != nil {
+	ctx, err := g.enter(ctx, "CommitIdentities")
+	if err != nil {
 		return nil, err
 	}
 	defer g.leave()
@@ -474,7 +569,8 @@ func (g *gatedGit) CommitIdentities(ctx context.Context, dir, base, tip string) 
 }
 
 func (g *gatedGit) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
-	if err := g.enter("CountCommits"); err != nil {
+	ctx, err := g.enter(ctx, "CountCommits")
+	if err != nil {
 		return 0, err
 	}
 	defer g.leave()
@@ -482,7 +578,8 @@ func (g *gatedGit) CountCommits(ctx context.Context, dir, base, tip string) (uin
 }
 
 func (g *gatedGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
-	if err := g.enter("StartRebase"); err != nil {
+	ctx, err := g.enter(ctx, "StartRebase")
+	if err != nil {
 		return gitclient.RebaseStep{}, err
 	}
 	defer g.leave()
@@ -490,7 +587,8 @@ func (g *gatedGit) StartRebase(ctx context.Context, dir, onto string, commits []
 }
 
 func (g *gatedGit) ContinueRebase(ctx context.Context, dir string) (gitclient.RebaseStep, error) {
-	if err := g.enter("ContinueRebase"); err != nil {
+	ctx, err := g.enter(ctx, "ContinueRebase")
+	if err != nil {
 		return gitclient.RebaseStep{}, err
 	}
 	defer g.leave()
@@ -498,7 +596,8 @@ func (g *gatedGit) ContinueRebase(ctx context.Context, dir string) (gitclient.Re
 }
 
 func (g *gatedGit) AbortRebase(ctx context.Context, dir string) error {
-	if err := g.enter("AbortRebase"); err != nil {
+	ctx, err := g.enter(ctx, "AbortRebase")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -506,7 +605,8 @@ func (g *gatedGit) AbortRebase(ctx context.Context, dir string) error {
 }
 
 func (g *gatedGit) RestoreBranchHead(ctx context.Context, dir, head string) error {
-	if err := g.enter("RestoreBranchHead"); err != nil {
+	ctx, err := g.enter(ctx, "RestoreBranchHead")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -514,7 +614,8 @@ func (g *gatedGit) RestoreBranchHead(ctx context.Context, dir, head string) erro
 }
 
 func (g *gatedGit) RebaseInProgress(ctx context.Context, dir string) (bool, error) {
-	if err := g.enter("RebaseInProgress"); err != nil {
+	ctx, err := g.enter(ctx, "RebaseInProgress")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -522,7 +623,8 @@ func (g *gatedGit) RebaseInProgress(ctx context.Context, dir string) (bool, erro
 }
 
 func (g *gatedGit) AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error {
-	if err := g.enter("AddWorktree"); err != nil {
+	ctx, err := g.enter(ctx, "AddWorktree")
+	if err != nil {
 		return err
 	}
 	defer g.leave()
@@ -530,7 +632,8 @@ func (g *gatedGit) AddWorktree(ctx context.Context, repoDir, worktreeDir, branch
 }
 
 func (g *gatedGit) FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error) {
-	if err := g.enter("FetchBranch"); err != nil {
+	ctx, err := g.enter(ctx, "FetchBranch")
+	if err != nil {
 		return "", err
 	}
 	defer g.leave()
@@ -538,7 +641,8 @@ func (g *gatedGit) FetchBranch(ctx context.Context, repoDir, remote, branch stri
 }
 
 func (g *gatedGit) Upstream(ctx context.Context, repoDir, branch string) (gitclient.Upstream, bool, error) {
-	if err := g.enter("Upstream"); err != nil {
+	ctx, err := g.enter(ctx, "Upstream")
+	if err != nil {
 		return gitclient.Upstream{}, false, err
 	}
 	defer g.leave()
@@ -546,7 +650,8 @@ func (g *gatedGit) Upstream(ctx context.Context, repoDir, branch string) (gitcli
 }
 
 func (g *gatedGit) AheadBehind(ctx context.Context, dir, local, upstream string) (int, int, error) {
-	if err := g.enter("AheadBehind"); err != nil {
+	ctx, err := g.enter(ctx, "AheadBehind")
+	if err != nil {
 		return 0, 0, err
 	}
 	defer g.leave()
@@ -554,7 +659,8 @@ func (g *gatedGit) AheadBehind(ctx context.Context, dir, local, upstream string)
 }
 
 func (g *gatedGit) AnyPatchEquivalent(ctx context.Context, dir, upstream, head string) (bool, error) {
-	if err := g.enter("AnyPatchEquivalent"); err != nil {
+	ctx, err := g.enter(ctx, "AnyPatchEquivalent")
+	if err != nil {
 		return false, err
 	}
 	defer g.leave()
@@ -562,7 +668,8 @@ func (g *gatedGit) AnyPatchEquivalent(ctx context.Context, dir, upstream, head s
 }
 
 func (g *gatedGit) RemoteURL(ctx context.Context, repoDir, remote string) (string, bool, error) {
-	if err := g.enter("RemoteURL"); err != nil {
+	ctx, err := g.enter(ctx, "RemoteURL")
+	if err != nil {
 		return "", false, err
 	}
 	defer g.leave()
