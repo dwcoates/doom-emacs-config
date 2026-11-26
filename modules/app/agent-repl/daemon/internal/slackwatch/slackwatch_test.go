@@ -1085,11 +1085,11 @@ func TestATriggerSlackNamesNoLinkForIsRecordedOnceAndNotFiredAgain(t *testing.T)
 	r.w.PollReactions(context.Background())
 
 	// Assert
-	rec := r.record(t, "error", opReactions, message)
+	rec := r.record(t, "info", opReactions, message)
 	if rec.Context["dispatch_id"] != DispatchID("C1", "1.2", "agent-ack") || rec.Context["ts"] != "1.2" || rec.Context["channel"] != "C1" {
 		t.Fatalf("record context = %+v", rec.Context)
 	}
-	n := len(dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opReactions, Message: message}))
+	n := len(dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Operation: opReactions, Message: message}))
 	if n != 1 || len(r.intakes.got) != 0 {
 		t.Fatalf("logged %d times and fired %+v; want one record and no intake", n, r.intakes.got)
 	}

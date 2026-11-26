@@ -268,7 +268,7 @@ func (w *Watcher) fire(ctx context.Context, settings wsm.SlackReactionSettings, 
 		return
 	}
 	if link == "" {
-		w.deps.Log.Error(opReactions, "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing", fields)
+		w.deps.Log.Info(opReactions, "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing", fields)
 		return
 	}
 	values, err := w.intakeValues(b, channel, ts, link)
