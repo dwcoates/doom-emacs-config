@@ -23,7 +23,9 @@
 // this report says only while a WatchHostWorkspace stream of the workspace
 // stands, and forgets it when the last one ends, so an editor that exits or a
 // daemon that hands its workspaces on can never leave a page counted that no
-// web view holds. So Emacs RESTATES what it holds (the `held` or `not_held`
+// web view holds. A report that reaches the daemon while no such stream
+// stands (one sent before a release that closed the stream, landing after
+// it) sets nothing. So Emacs RESTATES what it holds (the `held` or `not_held`
 // arm) each time a workspace's host stream is subscribed, and a daemon that
 // has just taken a workspace over learns its page from that restatement.
 //
@@ -35,6 +37,10 @@
 // FIRE AND FORGET. The report changes no behavior: a call that fails is
 // recorded by Emacs and leaves the daemon's view stale only until the next
 // report or the next restatement.
+//
+// ONE REPORT OF A WORKSPACE IS IN FLIGHT AT A TIME. Emacs sends a workspace's
+// next report only once the last has been answered or has failed
+// (page-report.el), so the daemon applies them in the order they were made.
 
 syntax = "proto3";
 

@@ -824,6 +824,9 @@ re-routes their frontend resolution instead."
          ;; (host.el): a push one test applied must not order the next
          ;; one's completions.
          (agent-repl-host--composer-selections nil)
+         ;; Each workspace's page reports in flight (page-report.el): a
+         ;; report one test left unanswered must not hold the next one's.
+         (agent-repl-page-report--lines (make-hash-table :test 'equal))
          (agent-repl--webhost-buffer nil)
          (agent-repl--webhost-pages (make-hash-table :test 'equal))
          (agent-repl--webhost-shown nil)

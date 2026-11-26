@@ -1008,6 +1008,15 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		// afresh, so a page not yet connected is never read as one gone.
 		delete(s.webSeen, ws)
 	}
+	// AND SO IS EMACS'S REPORT OF THE WORKSPACE'S PAGE (pageheld): Emacs
+	// restates it on its next host subscribe. The forget is taken under the
+	// lock ReportPageState applies a report under (applyPageReport), so a
+	// report that raced this close either landed before it and is forgotten
+	// here, or finds no stream standing and sets nothing. Which pages are
+	// counted held is the web host's census, scoped to its own page stream.
+	if host && delta < 0 && s.hostHeld[ws] <= 0 {
+		s.deps.HeldPages.Forget(ws)
+	}
 	// A WORKSPACE THAT IS NOT VISIBLE HOLDS NO STREAMS BY DESIGN: the editor
 	// closes both when the roster stops showing it (wsm.Visibility), so their
 	// close is no severed hop, and its next open is awaited afresh. Read
@@ -1026,10 +1035,6 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	// stream or is retired here.
 	if host && delta < 0 && !hops.hostStream {
 		s.deps.Queue.EditorGone(ws)
-		// AND SO IS EMACS'S REPORT OF THE WORKSPACE'S PAGE (pageheld): Emacs
-		// restates it on its next host subscribe. Which pages are counted
-		// held is the web host's census, scoped to its own page stream.
-		s.deps.HeldPages.Forget(ws)
 	}
 
 	// INFO, NOT DEBUG: the participant set is what a handover's adoption
@@ -1079,7 +1084,8 @@ func (s *server) ReportPageUnloading(
 // ReportPageState records whether Emacs's web view holds a workspace's page,
 // and why it was loaded, in the held-page table (pageheld): a load or an
 // unload counted once, a restatement counted never. The state lasts while the
-// workspace's host stream stands (holdParticipant forgets it).
+// workspace's host stream stands (holdParticipant forgets it), so a report
+// that finds no host stream standing sets nothing (applyPageReport).
 func (s *server) ReportPageState(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportPageStateRequest],
@@ -1094,29 +1100,69 @@ func (s *server) ReportPageState(
 		return answer(resp, cerr)
 	}
 	ws := subject.Record.ID
+	var apply, applied func()
+	var arm string
 	switch report := req.Msg.GetReport().(type) {
 	case *agentreplv1.ReportPageStateRequest_Loaded:
 		reason := pageLoadReason(report.Loaded.GetReason())
-		s.deps.HeldPages.Loaded(ws, reason)
-		subject.Log.Info(opPageState, "Emacs loaded the workspace's page", dlog.Context{"report": "loaded", "reason": string(reason)})
+		arm = "loaded"
+		apply = func() { s.deps.HeldPages.Loaded(ws, reason) }
+		applied = func() {
+			subject.Log.Info(opPageState, "Emacs loaded the workspace's page", dlog.Context{"report": arm, "reason": string(reason)})
+		}
 	case *agentreplv1.ReportPageStateRequest_Unloaded:
 		reason := pageUnloadReason(report.Unloaded.GetReason())
-		s.deps.HeldPages.Unloaded(ws, reason)
-		subject.Log.Info(opPageState, "Emacs dropped the workspace's page", dlog.Context{"report": "unloaded", "reason": string(reason)})
+		arm = "unloaded"
+		apply = func() { s.deps.HeldPages.Unloaded(ws, reason) }
+		applied = func() {
+			subject.Log.Info(opPageState, "Emacs dropped the workspace's page", dlog.Context{"report": arm, "reason": string(reason)})
+		}
 	case *agentreplv1.ReportPageStateRequest_Held:
 		reason := pageLoadReason(report.Held.GetReason())
-		s.deps.HeldPages.Held(ws, reason)
-		subject.Log.Debug(opPageState, "Emacs restated that it holds the workspace's page", dlog.Context{"report": "held", "reason": string(reason)})
+		arm = "held"
+		apply = func() { s.deps.HeldPages.Held(ws, reason) }
+		applied = func() {
+			subject.Log.Debug(opPageState, "Emacs restated that it holds the workspace's page", dlog.Context{"report": arm, "reason": string(reason)})
+		}
 	case *agentreplv1.ReportPageStateRequest_NotHeld:
-		s.deps.HeldPages.Forget(ws)
-		subject.Log.Debug(opPageState, "Emacs restated that it holds no page of the workspace", dlog.Context{"report": "not_held"})
+		arm = "not_held"
+		apply = func() { s.deps.HeldPages.Forget(ws) }
+		applied = func() {
+			subject.Log.Debug(opPageState, "Emacs restated that it holds no page of the workspace", dlog.Context{"report": arm})
+		}
 	default:
 		// validateReportPageStateRequest refused an unset arm, and this build
 		// knows every arm the request declares.
 		panic(fmt.Sprintf("ReportPageState: unhandled report arm %T", report))
 	}
+	if s.applyPageReport(ws, apply) {
+		applied()
+	} else {
+		subject.Log.Info(opPageState, "a page report found no host stream of the workspace standing, so it set nothing; Emacs restates the page on its next host subscribe",
+			dlog.Context{"report": arm})
+	}
 	resp.Result = &agentreplv1.ReportPageStateResponse_Success{Success: &agentreplv1.ReportPageStateSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// applyPageReport runs APPLY, one page report's effect on the held-page table,
+// when a host stream of WS stands, and answers whether it ran.
+//
+// THE REPORT IS SCOPED TO THE HOST STREAM STRUCTURALLY. The check and APPLY
+// run under the lock holdParticipant forgets the page under when the last
+// host stream ends, so a report in flight across that close (2026-11-25
+// 12:33, a load sent before a release landed after the stream had ended and
+// left a page counted that no web view held) can never set state the close
+// already cleared. A report before the stream stands is lost to nothing:
+// Emacs restates the page once its subscribe opens.
+func (s *server) applyPageReport(ws ids.WorkspaceID, apply func()) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hostHeld[ws] <= 0 {
+		return false
+	}
+	apply()
+	return true
 }
 
 // opPageState is the operation every ReportPageState record is written under.

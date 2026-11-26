@@ -25,6 +25,14 @@
 ;; FIRE AND FORGET: a report that does not land is recorded by
 ;; `agent-repl-host--send-subject-verb' and changes nothing here; the next
 ;; report or restatement corrects the daemon's view.
+;;
+;; A WORKSPACE'S REPORTS REACH THE DAEMON IN THE ORDER THEY WERE MADE.  Each
+;; is a separate unary call, and two in flight at once can land in either
+;; order (2026-11-25 12:33, a load sent before a release landed after the
+;; release's unload, and the daemon counted a page no web view held).  So a
+;; workspace has at most one report in flight, and the next is sent only
+;; once the daemon has answered it or the call has failed
+;; (`agent-repl-page-report--lines').
 
 ;;; Code:
 
@@ -33,6 +41,8 @@
 (require 'log-site)
 
 (declare-function agent-repl-host--send-subject-verb "host" (ws op rpc on-success on-not-sent &optional extra))
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-serial-queue-send "core" (lines key send))
 (declare-function agent-repl-rpc-report-page-state "rpc" (conn request &rest keys))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-page-reason "webhost" (ws))
@@ -57,12 +67,29 @@ load's.")
   "WHY, a reason symbol, as the wire's keyword."
   (intern (concat ":" (symbol-name why))))
 
+(defvar agent-repl-page-report--lines (make-hash-table :test 'equal)
+  "Each workspace's reports not yet answered, by its daemon id, the one in
+flight first (`agent-repl-serial-queue-send').")
+
 (defun agent-repl-page-report--send (ws arm reason)
-  "Send WS's page report ARM with REASON (a symbol, or nil for `:not-held')."
+  "Send WS's page report ARM with REASON (a symbol, or nil for `:not-held'),
+once every earlier report of WS's daemon id has been answered.
+A workspace with no daemon ref yet is sent at once, which skips it
+\(`agent-repl-host--send-subject-verb')."
+  (let ((report (list :arm arm :value (and reason (agent-repl-page-report--keyword reason))))
+        (id (plist-get (agent-repl-host-ref ws) :id)))
+    (if (null id)
+        (agent-repl-page-report--call ws report #'ignore)
+      (agent-repl-serial-queue-send
+       agent-repl-page-report--lines id
+       (lambda (done) (agent-repl-page-report--call ws report done))))))
+
+(defun agent-repl-page-report--call (ws report done)
+  "Send WS's REPORT, calling DONE once the daemon answered or the call failed."
   (agent-repl-host--send-subject-verb
    ws "page-state" #'agent-repl-rpc-report-page-state
-   #'ignore #'ignore
-   (list :report (list :arm arm :value (and reason (agent-repl-page-report--keyword reason))))))
+   done done
+   (list :report report)))
 
 (defun agent-repl-page-report-check-load-reason (ws why)
   "Signal unless WHY is a reason WS's page is loaded for.

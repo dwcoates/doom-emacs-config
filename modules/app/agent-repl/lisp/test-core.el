@@ -7513,6 +7513,69 @@ A reporter that read the newest link itself would drift from the others."
     (funcall done)
     (should (equal reported '(first)))))
 
+(ert-deftest agent-repl-test-core-serial-queue-sends-when-its-line-is-empty ()
+  "A send under a key with nothing in flight runs at once."
+  (let ((lines (make-hash-table :test 'equal))
+        (sent 0))
+    (should (eq (agent-repl-serial-queue-send lines "a" (lambda (_done) (cl-incf sent))) :sent))
+    (should (= sent 1))))
+
+(ert-deftest agent-repl-test-core-serial-queue-holds-a-send-behind-the-one-in-flight ()
+  "A send under a key with a send in flight waits, running nothing."
+  (let ((lines (make-hash-table :test 'equal))
+        (sent nil))
+    (agent-repl-serial-queue-send lines "a" (lambda (_done) (push 'first sent)))
+    (should (eq (agent-repl-serial-queue-send lines "a" (lambda (_done) (push 'second sent))) :queued))
+    (should (equal sent '(first)))))
+
+(ert-deftest agent-repl-test-core-serial-queue-done-runs-every-waiting-send-in-order ()
+  "Each send's end runs the next waiting send, oldest first, none coalesced."
+  (let ((lines (make-hash-table :test 'equal))
+        (dones nil)
+        (sent nil))
+    (dolist (name '(first second third))
+      (agent-repl-serial-queue-send lines "a" (lambda (done) (push name sent) (setq dones (append dones (list done))))))
+    ;; Act
+    (funcall (pop dones))
+    (funcall (pop dones))
+    ;; Assert
+    (should (equal (reverse sent) '(first second third)))))
+
+(ert-deftest agent-repl-test-core-serial-queue-last-done-empties-the-line ()
+  "Once the last send under a key ends, the key holds no line."
+  (let ((lines (make-hash-table :test 'equal))
+        (done nil))
+    (agent-repl-serial-queue-send lines "a" (lambda (d) (setq done d)))
+    (funcall done)
+    (should (zerop (hash-table-count lines)))))
+
+(ert-deftest agent-repl-test-core-serial-queue-keys-never-wait-on-each-other ()
+  "A send in flight under one key holds back no send under another."
+  (let ((lines (make-hash-table :test 'equal))
+        (sent 0))
+    (agent-repl-serial-queue-send lines "a" #'ignore)
+    (should (eq (agent-repl-serial-queue-send lines "b" (lambda (_done) (cl-incf sent))) :sent))
+    (should (= sent 1))))
+
+(ert-deftest agent-repl-test-core-serial-queue-a-synchronous-done-runs-the-next ()
+  "A send that ends before it returns (a call skipped at once) still runs the next."
+  (let ((lines (make-hash-table :test 'equal))
+        (dones nil)
+        (sent nil))
+    (agent-repl-serial-queue-send lines "a" (lambda (done) (push 'first sent) (push done dones)))
+    (agent-repl-serial-queue-send lines "a" (lambda (done) (push 'second sent) (funcall done)))
+    (agent-repl-serial-queue-send lines "a" (lambda (_done) (push 'third sent)))
+    ;; Act
+    (funcall (pop dones))
+    ;; Assert
+    (should (equal (reverse sent) '(first second third)))))
+
+(ert-deftest agent-repl-test-core-every-event-report-goes-through-the-queue ()
+  "The page reports run through `agent-repl-serial-queue-send'.
+A reporter that kept its own line would drift from the queue's order."
+  (should (string-match-p "agent-repl-serial-queue-send"
+                          (format "%S" (symbol-function 'agent-repl-page-report--send)))))
+
 ;;;; ---- Tests: completion reads that tune ivy ----
 
 (defvar agent-repl-test-core--ivy-alist nil
