@@ -380,6 +380,17 @@ export async function serve(
   // Neither of these ever LISTENS. They exist to own a connection's protocol
   // state machine; the net server below feeds them sockets directly.
   const h1 = http.createServer(handler);
+  // THE SHIM NEVER CLOSES AN IDLE CONNECTION ON ITS OWN. Node closes an idle
+  // HTTP/1.1 keep-alive connection five seconds after its last response by
+  // default, and a client's keep-alive agent may pick that very socket for its
+  // next request at the same instant: the request is written into a socket
+  // the server is closing and dies with "write EPIPE" (2026-11-26, the session
+  // test's cold gate case in a merge gate). With the timeout off, only the
+  // client ever closes an idle connection, so no reuse can race a close. A
+  // client that hangs up is what this server waits for anyway (see
+  // {@link ShimServer.hungUp}), and `close()` cuts whatever is still open.
+  // The h2c server needs no counterpart: its idle `timeout` is off by default.
+  h1.keepAliveTimeout = 0;
   const h2 = http2.createServer(handler);
   h1.on("clientError", (err, socket) => {
     // warn: a defect because a client connection failed before the server could identify its request.

@@ -56,6 +56,13 @@ func (r DurableFeedRow) validate() error {
 // is refused — except on the one publication that settles a pinned row
 // (DurableFeedRow.SettledFrom), which moves it from its pin key to its settled
 // key exactly once.
+//
+// A READ-ONLY HANDLE HOLDS THE ROW INSTEAD, latest per row, and the promotion
+// writes it (writeHeldDurableRowsLocked). A joining successor's children
+// tracker and feed draw rows while the incumbent is still the writer
+// (2026-11-26: every child's bubble, drawn as the roster installed the
+// registry, was refused at ERROR on the read-only handle, and the feed logged
+// each as a row a new daemon would not draw).
 func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error {
 	const op = "daemon.wsm.put_durable_feed_row"
 	fields := dlog.Context{"workspace": string(row.Workspace), "row": row.RowID, "order_key": row.OrderKey}
@@ -63,6 +70,70 @@ func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 		s.log.Error(op, "refused a durable feed row that could not be drawn again", withError(fields, err))
 		return err
 	}
+	s.mu.RLock()
+	if s.ReadOnly() {
+		s.holdDurableRowLocked(row)
+		s.mu.RUnlock()
+		s.log.Debug(op, "held the durable feed row until this handle writes; the incumbent is still the writer", fields)
+		return nil
+	}
+	s.mu.RUnlock()
+	return s.writeDurableFeedRow(ctx, op, fields, row, false)
+}
+
+// heldRowKey names one held durable feed row: its workspace and its row.
+type heldRowKey struct {
+	workspace WorkspaceID
+	row       string
+}
+
+// holdDurableRowLocked keeps row as its row's latest held publication. The
+// caller holds mu's read side.
+//
+// A HELD SETTLE IS KEPT THROUGH A LATER RESTATEMENT: when the held row carries
+// SettledFrom and the replacing publication does not, the replacement keeps
+// the earlier SettledFrom. A pinned row settles exactly once, and every later
+// publication restates the settled key, so dropping the settle would make the
+// promotion's write fail its compare-and-set against the pin key still
+// recorded.
+func (s *store) holdDurableRowLocked(row DurableFeedRow) {
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	if s.heldDurableRows == nil {
+		s.heldDurableRows = make(map[heldRowKey]DurableFeedRow)
+	}
+	key := heldRowKey{workspace: row.Workspace, row: row.RowID}
+	if prior, held := s.heldDurableRows[key]; held && prior.SettledFrom != "" && row.SettledFrom == "" {
+		row.SettledFrom = prior.SettledFrom
+	}
+	s.heldDurableRows[key] = row
+}
+
+// writeHeldDurableRowsLocked writes every held durable feed row and forgets
+// it. The caller holds mu EXCLUSIVELY and the handle already writes. A failed
+// write is recorded at ERROR by the write itself and is not held again: the
+// feed's next publication of that row writes afresh.
+func (s *store) writeHeldDurableRowsLocked(ctx context.Context) {
+	const op = "daemon.wsm.put_durable_feed_row"
+	s.heldMu.Lock()
+	held := s.heldDurableRows
+	s.heldDurableRows = nil
+	s.heldMu.Unlock()
+	for _, row := range held {
+		fields := dlog.Context{"workspace": string(row.Workspace), "row": row.RowID, "order_key": row.OrderKey, "held": true}
+		if err := s.writeDurableFeedRow(ctx, op, fields, row, true); err == nil {
+			s.log.Debug(op, "wrote the durable feed row held while this handle was read-only", fields)
+		}
+	}
+}
+
+// writeDurableFeedRow is the row's one write. HELD says the row was held on a
+// read-only handle and is written at the promotion: a settle whose pin key
+// is recorded nowhere then means the pin itself was held and never written,
+// so the row is recorded at its settled key as a first publication. A settle
+// of an unrecorded row that was not held is still refused: nothing drew the
+// pin it claims to move from.
+func (s *store) writeDurableFeedRow(ctx context.Context, op string, fields dlog.Context, row DurableFeedRow, held bool) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var key string
 		err := tx.QueryRowContext(ctx, `SELECT order_key FROM durable_feed_rows WHERE workspace_id = ? AND row_id = ?`,
@@ -82,7 +153,7 @@ func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 		case key != row.OrderKey:
 			return fmt.Errorf("wsm: durable feed row %s was drawn at %q, not %q", row.RowID, key, row.OrderKey)
 		}
-		if row.SettledFrom != "" {
+		if row.SettledFrom != "" && !held {
 			return fmt.Errorf("wsm: durable feed row %s settles from %q but was never recorded", row.RowID, row.SettledFrom)
 		}
 		_, err = tx.ExecContext(ctx,

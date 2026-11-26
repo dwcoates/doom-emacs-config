@@ -7,7 +7,7 @@ import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
 import { connect as netConnect, type Socket } from "node:net";
-import { request as httpRequest } from "node:http";
+import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import { connect as http2Connect } from "node:http2";
 import { chmodSync, existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -214,6 +214,44 @@ describe("serve", () => {
 
     // Assert.
     expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+
+  it("never announces an idle timeout on an HTTP/1.1 keep-alive connection, so only the client closes it", async () => {
+    // Node writes `Keep-Alive: timeout=N` on every keep-alive response exactly
+    // when its server will close the idle connection N seconds later; with
+    // the idle close off it writes none. Reading the head proves the setting
+    // on the wire without idling a connection for the default five seconds.
+    // Arrange.
+    const sock = socketPath();
+    await start(sock);
+    const agent = new HttpAgent({ keepAlive: true });
+
+    // Act.
+    const head = await new Promise<{ connection: string | undefined; keepAlive: string | string[] | undefined }>(
+      (resolve, reject) => {
+        const request = httpRequest(
+          {
+            socketPath: sock,
+            agent,
+            path: `/${shimv1.Shim.typeName}/Hibernate`,
+            method: "POST",
+            headers: { "content-type": "application/json", "connect-protocol-version": "1" },
+          },
+          (response) => {
+            response.resume();
+            response.once("end", () =>
+              resolve({ connection: response.headers.connection, keepAlive: response.headers["keep-alive"] }),
+            );
+          },
+        );
+        request.on("error", reject);
+        request.end("{}");
+      },
+    );
+    agent.destroy();
+
+    // Assert.
+    expect(head).toEqual({ connection: "keep-alive", keepAlive: undefined });
   });
 
   it("serves the SAME router over h2c on the same socket", async () => {
