@@ -159,6 +159,7 @@
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
 (declare-function agent-repl-window--panel-window "window" (kind &optional ws frame))
+(declare-function agent-repl-window-fit-input "window" (ws win))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function agent-repl-bind-feed-zoom-keys "core" (map))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
@@ -454,6 +455,9 @@ nothing, since the transient it raised lapses on its own."
   ;; AN EDIT THE USER MAKES IS THEIR INTERACTION WITH THE WORKSPACE
   ;; (`agent-repl--input-typed-on-change'); per keystroke, so unlogged here.
   (add-hook 'after-change-functions #'agent-repl--input-typed-on-change nil t)
+  ;; THE COMPOSER GROWS AND SHRINKS WITH ITS TEXT (`agent-repl-window-fit-input'),
+  ;; which logs only an edit that changes how many lines the text takes.
+  (add-hook 'after-change-functions #'agent-repl--input-fit-on-change nil t)
   ;; A WORD STARTING WITH `/' completes against the workspace's runtime,
   ;; and a known one is marked purple (command-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
@@ -484,6 +488,15 @@ the roster does not already say, so a run of keys costs one report."
   (when this-command
     (when-let* ((ws (agent-repl--buffer-owner (current-buffer))))
       (agent-repl-host-report-interaction ws :composer-typed))))
+
+(defun agent-repl--input-fit-on-change (&rest _)
+  "Fit the composer's window to its text after an edit.
+Every edit counts, typed or inserted by the editor (a restored draft, a
+held prompt put back), since each changes the text the window shows.  A
+composer on no window of the selected frame has nothing to fit."
+  (when-let* ((win (get-buffer-window (current-buffer)))
+              (ws (agent-repl--buffer-owner (current-buffer))))
+    (agent-repl-window-fit-input ws win)))
 
 (defun agent-repl--input-buffer (ws)
   "Return WS's live input buffer, or nil."

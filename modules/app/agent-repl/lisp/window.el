@@ -64,6 +64,7 @@
 (defvar agent-repl--eager-open-in-progress)
 (defvar agent-repl-input-height-fraction)
 (defvar agent-repl-input-height-line-offset)
+(defvar agent-repl-input-max-height-factor)
 (defvar agent-repl-host-update-functions)
 
 (require 'cl-lib)
@@ -418,6 +419,11 @@ and never the request."
         (condition-case err
             (progn
               (window-resize win (- lines actual) nil t)
+              ;; A preserved height is the size Emacs defends for WIN, so a
+              ;; height preserved before this resize is re-taken at the new
+              ;; one, or the next rebalance would put the old one back.
+              (when (window-preserved-size win)
+                (window-preserve-size win nil t))
               (agent-repl--log log-ws
                                "window--apply-height: outcome=resized window={window} from={from} to={to} actual={actual}"
                                :window (prin1-to-string win) :from actual :to lines :actual (window-total-height win)))
@@ -427,20 +433,78 @@ and never the request."
                             :window (prin1-to-string win) :from actual :requested lines :actual (window-total-height win) :err (prin1-to-string err)))))
       (window-total-height win))))
 
+;;;; --- The composer grows to fit its text ---------------------------------
+;;
+;; The fixed height above is the composer's FLOOR.  Text that wraps past
+;; it grows the composer, up to `agent-repl-input-max-height-factor' times
+;; the floor, and the composer scrolls inside beyond that; deleting the
+;; text (a send clears it) shrinks it back.  The grown height is not a
+;; second number the reconcile could disagree with: every resize, the
+;; mount's, the reconcile's and the typing's, asks
+;; `agent-repl-window--input-target-height', so a reconcile can never undo
+;; a grown composer and the typing can never undo the floor.
+
+(defun agent-repl-window--input-content-lines (win max-lines)
+  "Total lines WIN needs to show all of its buffer, at most MAX-LINES.
+Measured by the display engine (`window-text-pixel-size') in WIN's own
+width, so soft-wrapped lines and the composer's images count at the
+height they are drawn at.  The measurement stops at MAX-LINES, so a long
+draft costs no more than a ceiling's worth of layout.  The lines WIN
+spends on anything but its body (its border rows) are added back."
+  (let* ((line (window-default-line-height win))
+         (overhead (- (window-total-height win) (window-body-height win)))
+         (pixels (cdr (window-text-pixel-size win nil nil nil (* max-lines line)))))
+    (min max-lines (+ overhead (max 1 (ceiling pixels line))))))
+
+(defun agent-repl-window--input-target-height (ws input-win)
+  "The height WS's composer INPUT-WIN should have for the text it holds.
+Never below the frame's composer height (`agent-repl-window--input-height'),
+never above `agent-repl-input-max-height-factor' times it, and otherwise
+the lines its text takes (`agent-repl-window--input-content-lines')."
+  (let* ((floor (agent-repl-window--input-height (window-frame input-win) ws))
+         (ceiling (* floor agent-repl-input-max-height-factor)))
+    (max floor (agent-repl-window--input-content-lines input-win ceiling))))
+
 (defun agent-repl-window--ensure-input-height (ws input-win)
   "Re-assert WS's composer height on INPUT-WIN, non-nil when it changed.
 The mount sizes the composer once (`agent-repl-window--apply-height'), but
 the frame can change under it afterwards: the tab bar's line appearing for
 a zettel chat thread took a line off the view and gave one to the
 composer, so a thread's composer stood a line taller than a workspace's.
-Every composer therefore answers to `agent-repl-window--input-height',
-the one source, at the mount AND at every layout reconcile.  A resize the
-frame refuses leaves the height as it was and answers nil, so the
-reconcile does not re-trigger itself on a height it cannot change."
-  (let* ((target (agent-repl-window--input-height (window-frame input-win) ws))
+Every composer therefore answers to `agent-repl-window--input-target-height',
+the one source, at the mount, at every layout reconcile, and as its text
+grows or shrinks.  A resize the frame refuses leaves the height as it was
+and answers nil, so the reconcile does not re-trigger itself on a height it
+cannot change."
+  (let* ((target (agent-repl-window--input-target-height ws input-win))
          (before (window-total-height input-win)))
     (unless (= before target)
       (/= before (agent-repl-window--apply-height input-win target ws)))))
+
+(defvar-local agent-repl-window--input-fitted-lines nil
+  "The lines the composer's text took when its height was last fitted.
+Compared on every edit, so the composer is resized, and its resize logged,
+only when an edit changes how many lines its text takes.")
+
+(defun agent-repl-window-fit-input (ws win)
+  "Fit WS's composer window WIN to its text as an edit leaves it.
+Called from the composer's `after-change-functions'
+\(`agent-repl--input-fit-on-change'), so per keystroke: it measures the
+text's lines (`agent-repl-window--input-content-lines') and does nothing
+more unless that count changed since the last fit, then re-asserts the
+height (`agent-repl-window--ensure-input-height').  A composer with no
+window (hidden behind a gate, or WS not on screen) is fitted by its next
+mount instead, so the caller passes only a live WIN.  Returns non-nil when
+the height changed."
+  ;; Bounded by the frame's main area, not the ceiling, so a keystroke
+  ;; that changes nothing reads no height (whose read is logged).
+  (let ((lines (agent-repl-window--input-content-lines
+                win (window-total-height (frame-root-window (window-frame win)))))
+        (buf (window-buffer win)))
+    (unless (eql lines (buffer-local-value 'agent-repl-window--input-fitted-lines buf))
+      (with-current-buffer buf
+        (setq agent-repl-window--input-fitted-lines lines))
+      (agent-repl-window--ensure-input-height ws win))))
 
 (defun agent-repl-window--unharden (win)
   "Undo every lock `agent-repl-window--harden' can put on WIN, but its fringes.
@@ -771,12 +835,18 @@ hides the input too."
 
 (defun agent-repl-window--gate-dock-pixels (ws)
   "The pixel height of the space WS's input window takes, for the docked gate.
-The live input window's own total height when it is on screen; otherwise
-the height a mount would give it, its line count on the frame
-\(`agent-repl-window--input-height') at the frame's line height."
+The input's normal height, never the height its text grew it to
+\(`agent-repl-window-fit-input'), so a gate's size never depends on the
+draft under it.  The live input window's own pixel height, less the lines
+it grew by, when it is on screen; otherwise the height a mount would give
+it, its line count on the frame (`agent-repl-window--input-height') at the
+frame's line height."
   (let ((win (agent-repl-window--panel-window :input ws)))
     (if (window-live-p win)
-        (window-pixel-height win)
+        (let ((floor (agent-repl-window--input-height (window-frame win) ws)))
+          (- (window-pixel-height win)
+             (* (max 0 (- (window-total-height win) floor))
+                (frame-char-height (window-frame win)))))
       (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
 
 (defun agent-repl-window-tell-gate-dock (ws)

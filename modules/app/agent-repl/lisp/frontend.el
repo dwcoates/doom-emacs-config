@@ -90,6 +90,7 @@
 (declare-function agent-repl-window--unharden "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 (declare-function agent-repl-window--input-height "agent-repl-window" (&optional frame ws))
+(declare-function agent-repl-window--input-target-height "agent-repl-window" (ws input-win))
 (declare-function agent-repl-window--apply-height "agent-repl-window" (win lines &optional ws))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
 (declare-function agent-repl--call-in-background-workspace "workspace" (ws fn))
@@ -1144,10 +1145,16 @@ panels — the extra-windows-on-first-switch bug."
       ;; user.  The resize after the split is the check that the frame
       ;; granted the lines the split asked for, and it runs BEFORE the
       ;; hardening that locks the height.
-      (let* ((target-height (agent-repl-window--input-height (window-frame win) ws))
-             (input-win (split-window win (- target-height) 'below))
+      ;; The split takes the floor; once the buffer is in the window, its
+      ;; text decides how far above the floor it grows
+      ;; (`agent-repl-window--input-target-height'), so a workspace shown
+      ;; with a long draft shows all of it.
+      (let* ((floor-height (agent-repl-window--input-height (window-frame win) ws))
+             (input-win (split-window win (- floor-height) 'below))
+             (target-height nil)
              (actual-height nil))
         (set-window-buffer input-win input-buf)
+        (setq target-height (agent-repl-window--input-target-height ws input-win))
         (setq actual-height (agent-repl-window--apply-height input-win target-height ws))
         (agent-repl-window--harden input-win
                                    :dedicate       t

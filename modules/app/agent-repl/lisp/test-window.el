@@ -605,6 +605,111 @@ repair is dispatched."
         (with-current-buffer popup (setq agent-repl-popup--stand-in nil))
         (kill-buffer popup)))))
 
+;; THE COMPOSER GROWS TO FIT ITS TEXT, between its normal height and
+;; `agent-repl-input-max-height-factor' times it.
+
+(defmacro agent-repl-window-test--with-composer (text &rest body)
+  "Run BODY with `win' showing a visual-line composer buffer holding TEXT.
+The window is split off the bottom of a fresh frame layout, owned by \"ws\"."
+  (declare (indent 1))
+  `(agent-repl-window-test--with-temp-frame
+     (let ((buf (generate-new-buffer " *elt-grow*")))
+       (unwind-protect
+           (let ((win (split-window nil -4 'below)))
+             (with-current-buffer buf
+               (visual-line-mode 1)
+               (insert ,text))
+             (set-window-buffer win buf)
+             ,@body)
+         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-window-test-input-content-lines-counts-wrapped-lines ()
+  "A long line counts every screen line it wraps to, plus the window's border rows."
+  (agent-repl-window-test--with-composer (make-string 300 ?a)
+    (let ((overhead (- (window-total-height win) (window-body-height win)))
+          (wrapped (ceiling 300 (1- (window-width win)))))
+      (should (= (+ overhead wrapped)
+                 (agent-repl-window--input-content-lines win 100))))))
+
+(ert-deftest agent-repl-window-test-input-content-lines-stops-at-the-bound ()
+  "Text taller than the bound answers the bound."
+  (agent-repl-window-test--with-composer (make-string 40 ?\n)
+    (should (= 6 (agent-repl-window--input-content-lines win 6)))))
+
+(ert-deftest agent-repl-window-test-input-content-lines-of-an-empty-composer-is-one-line ()
+  "An empty composer takes one line besides its border rows."
+  (agent-repl-window-test--with-composer ""
+    (should (= (1+ (- (window-total-height win) (window-body-height win)))
+               (agent-repl-window--input-content-lines win 100)))))
+
+(defun agent-repl-window-test--target-for (content-lines)
+  "The target height with a floor of 5, a factor of 3, and CONTENT-LINES of text.
+Returns (TARGET . BOUND), BOUND being the bound the text was measured to."
+  (let ((agent-repl-input-max-height-factor 3)
+        (bound nil))
+    (cl-letf (((symbol-function 'agent-repl-window--input-height) (lambda (&rest _) 5))
+              ((symbol-function 'agent-repl-window--input-content-lines)
+               (lambda (_win max) (setq bound max) (min max content-lines))))
+      (cons (agent-repl-window--input-target-height "ws" (selected-window)) bound))))
+
+(ert-deftest agent-repl-window-test-input-target-height-is-the-floor-for-short-text ()
+  "Text shorter than the normal height leaves the composer at it."
+  (should (= 5 (car (agent-repl-window-test--target-for 2)))))
+
+(ert-deftest agent-repl-window-test-input-target-height-follows-text-above-the-floor ()
+  "Text taller than the normal height grows the composer to the text."
+  (should (= 9 (car (agent-repl-window-test--target-for 9)))))
+
+(ert-deftest agent-repl-window-test-input-target-height-stops-at-the-factor ()
+  "Text taller than the factor times the floor stops at that ceiling."
+  (should (equal '(15 . 15) (agent-repl-window-test--target-for 40))))
+
+(ert-deftest agent-repl-window-test-ensure-layout-leaves-a-grown-composer-grown ()
+  "A reconcile sizes the composer to its text, never back down to the floor."
+  (let ((heights nil))
+    (cl-letf (((symbol-function 'agent-repl-window--input-content-lines)
+               (lambda (&rest _) 6)))
+      (agent-repl-window-test--run-ensure-layout
+       :show-view t :show-input t :input-lines 3
+       :after (lambda ()
+                (push (window-total-height (get-buffer-window " *elt-input*")) heights))))
+    (should (equal heights '(6)))))
+
+(ert-deftest agent-repl-window-test-fit-input-resizes-when-the-line-count-changes ()
+  "An edit that changes how many lines the text takes re-asserts the height."
+  (agent-repl-window-test--with-composer "one line"
+    (let ((ensured nil))
+      (cl-letf (((symbol-function 'agent-repl-window--ensure-input-height)
+                 (lambda (ws w) (push (list ws w) ensured) t)))
+        (should (agent-repl-window-fit-input "ws" win))
+        (should (equal ensured (list (list "ws" win))))))))
+
+(ert-deftest agent-repl-window-test-fit-input-skips-an-edit-that-keeps-the-line-count ()
+  "A second fit with the text on as many lines resizes nothing."
+  (agent-repl-window-test--with-composer "one line"
+    (let ((ensured 0))
+      (cl-letf (((symbol-function 'agent-repl-window--ensure-input-height)
+                 (lambda (&rest _) (setq ensured (1+ ensured)) t)))
+        (agent-repl-window-fit-input "ws" win)
+        (with-current-buffer (window-buffer win) (insert "x"))
+        (should-not (agent-repl-window-fit-input "ws" win))
+        (should (= 1 ensured))))))
+
+(ert-deftest agent-repl-window-test-apply-height-re-preserves-a-preserved-height ()
+  "A resize of a window whose height is preserved preserves the new height."
+  (agent-repl-window-test--with-temp-frame
+    (let ((win (split-window nil -4 'below)))
+      (window-preserve-size win nil t)
+      (agent-repl-window--apply-height win 6 "ws")
+      (should (= (window-body-height win t) (window-preserved-size win nil))))))
+
+(ert-deftest agent-repl-window-test-apply-height-leaves-an-unpreserved-height-unpreserved ()
+  "A resize of a window with no preserved height preserves none."
+  (agent-repl-window-test--with-temp-frame
+    (let ((win (split-window nil -4 'below)))
+      (agent-repl-window--apply-height win 6 "ws")
+      (should-not (window-preserved-size win nil)))))
+
 ;; THE SIDEBAR STANDS WITH THE PANELS (sidebar-view.el).
 
 (ert-deftest agent-repl-window-test-ensure-layout-shows-a-missing-sidebar-beside-the-panels ()
@@ -1569,11 +1674,13 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
     (should (null told))))
 
 (ert-deftest agent-repl-window-test-the-dock-height-is-the-live-input-windows-pixels ()
-  "A live input window's total pixel height is the height sent."
+  "A live input window at its normal height sends its total pixel height."
   (agent-repl-test--with-clean-state
     (let ((docks nil))
       (cl-letf (((symbol-function 'agent-repl-window--panel-window)
                  (lambda (_kind &optional _ws _frame) (selected-window)))
+                ((symbol-function 'agent-repl-window--input-height)
+                 (lambda (&rest _) (window-total-height (selected-window))))
                 ((symbol-function 'window-pixel-height) (lambda (&optional _w) 137))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock)
                  (lambda (_ws pixels) (push pixels docks) t)))
@@ -1615,6 +1722,17 @@ frame's line height: the gate neither overlaps the feed nor leaves a gap."
                     ;; Assert
                     (should (= live (* lines (frame-char-height)))))))
             (kill-buffer buffer)))))))
+
+(ert-deftest agent-repl-window-test-the-dock-of-a-grown-composer-is-its-normal-height ()
+  "A composer grown by its text docks the gate at its normal height."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-test--with-clean-state
+      (let ((win (split-window nil -7 'below)))
+        (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+                   (lambda (_kind &optional _ws _frame) win))
+                  ((symbol-function 'agent-repl-window--input-height) (lambda (&rest _) 4)))
+          (should (= (- (window-pixel-height win) (* 3 (frame-char-height)))
+                     (agent-repl-window--gate-dock-pixels "ws"))))))))
 
 (ert-deftest agent-repl-window-test-the-dock-height-with-no-host-is-recorded ()
   "No host to tell is recorded, never an error; the slot is kept for it."
