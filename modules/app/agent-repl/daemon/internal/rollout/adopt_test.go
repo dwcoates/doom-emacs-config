@@ -752,9 +752,7 @@ func TestAnAdoptionRecordsAnInertSurvivorItCouldNotStandDown(t *testing.T) {
 	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
-	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(dir, sessionlock.StateFree)
 	h.fleet.mu.Lock()
 	h.fleet.listening[ws] = true
 	h.fleet.inertErr[ws] = errFake
