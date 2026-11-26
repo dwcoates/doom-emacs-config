@@ -256,10 +256,11 @@ sidebar is decided here.  Nil only when no link stands."
 (defun agent-repl--webhost-refuse-kill ()
   "Keep the host buffer alive against every kill but this module's own.
 On `kill-buffer-query-functions' in the host buffer only: a perspective that
-kills its buffers would otherwise take every workspace's page with it."
+kills its buffers would otherwise take every workspace's page with it.
+The refusal is by design, so it is recorded at info, never warn."
   (or agent-repl--webhost-killing
       (progn
-        (agent-repl--warn agent-repl--webhost-central
+        (agent-repl--info agent-repl--webhost-central
                           "elisp.webhost.kill-refused command={command}" :command (prin1-to-string this-command))
         nil)))
 

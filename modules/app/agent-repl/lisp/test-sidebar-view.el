@@ -380,18 +380,21 @@ Binds `made' to that buffer; it is killed afterwards."
   "Only this module kills the sidebar buffer."
   (agent-repl-test-sv--with-created
     (agent-repl-sidebar-view-ensure)
-    (cl-letf (((symbol-function 'agent-repl--emit-warn) #'ignore))
+    (cl-letf (((symbol-function 'agent-repl--emit-info) #'ignore))
       (should-not (with-current-buffer made (agent-repl--sidebar-view-refuse-kill))))))
 
-(ert-deftest agent-repl-test-sv-a-refused-kill-is-recorded ()
-  "A refused kill is recorded at warn."
+(ert-deftest agent-repl-test-sv-a-refused-kill-is-recorded-at-info ()
+  "A refused kill is recorded at info, never warn: the refusal is by design."
   (agent-repl-test-sv--with-created
     (agent-repl-sidebar-view-ensure)
-    (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--emit-warn)
+    (let ((informed nil) (warned nil))
+      (cl-letf (((symbol-function 'agent-repl--emit-info)
+                 (agent-repl-test--record-into informed))
+                ((symbol-function 'agent-repl--emit-warn)
                  (agent-repl-test--record-into warned)))
         (with-current-buffer made (agent-repl--sidebar-view-refuse-kill)))
-      (should (string-search "kill-refused" (car warned))))))
+      (should (string-prefix-p "elisp.sidebar-view.kill-refused" (car informed)))
+      (should-not warned))))
 
 (ert-deftest agent-repl-test-sv-the-sidebar-buffer-allows-its-own-kill ()
   "This module's own kill passes the guard."

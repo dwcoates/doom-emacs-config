@@ -130,10 +130,12 @@ owns a workspace."
 
 (defun agent-repl--sidebar-view-refuse-kill ()
   "Keep the sidebar buffer alive against every kill but this module's own.
-On `kill-buffer-query-functions' in the sidebar buffer only."
+On `kill-buffer-query-functions' in the sidebar buffer only.  The refusal
+is by design, so it is recorded at info: at warn every `kill-current-buffer'
+in the sidebar read as a fault in each deploy check (2026-11-25)."
   (or agent-repl--sidebar-view-killing
       (progn
-        (agent-repl--warn agent-repl--sidebar-view-central
+        (agent-repl--info agent-repl--sidebar-view-central
                           "elisp.sidebar-view.kill-refused command={command}" :command (prin1-to-string this-command))
         nil)))
 
