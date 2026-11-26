@@ -484,7 +484,9 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 // the turn ended was registered against a prompt already delivered, and its
 // kill named the ended turn). An interjection is registered only when:
 //   - the turn it judged is still the running turn, since a turn that ended
-//     while the verdict was reached is what delivers the prompt;
+//     while the verdict was reached is what delivers the prompt (a running
+//     session act is the exception: it refuses the interjection itself, and
+//     stamps the prompt uninterruptible);
 //   - the verdict stands on a held prompt, since one retired while it was
 //     judged (delivered, dropped) has nothing left to deliver early.
 //
@@ -499,7 +501,7 @@ func (q *queue) settleInterject(ctx context.Context, sub Submission, running ids
 	if !state.lockFreshVerdict(sub.Turn, epoch, c, log) {
 		return
 	}
-	if !q.isRunning(sub.WS, running) {
+	if !q.isRunning(sub.WS, running) && !q.sessionActRuns(sub.WS) {
 		state.verdicts.Unlock()
 		log.Info(opInterject, "the turn the prompt would interrupt ended while the verdict was reached; the prompt is not interjected, and that turn's end delivers it", dlog.Context{
 			"turn": string(sub.Turn), "interrupted_turn": string(running),
@@ -518,6 +520,14 @@ func (q *queue) settleInterject(ctx context.Context, sub Submission, running ids
 		return
 	}
 	d.afterUnlock(func() { q.sendInterrupt(ctx, sub, running, log) })
+}
+
+// sessionActRuns reports whether a session act (a context cut) runs on WS.
+func (q *queue) sessionActRuns(ws ids.WorkspaceID) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	state, ok := q.states[ws]
+	return ok && state.cut != nil
 }
 
 // reportHeld tells the footer where a held prompt stands in the queue: its
