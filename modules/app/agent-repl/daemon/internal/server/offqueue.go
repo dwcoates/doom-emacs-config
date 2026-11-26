@@ -11,7 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
-	"agent-repld/internal/wsm"
 )
 
 // The merges off their queues (merge/offqueue.go): putting one back in line
@@ -56,15 +55,15 @@ func (s *server) RequeueMerge(
 
 // requeueOf reads the request into the orchestrator's requeue of WS.
 func requeueOf(ws ids.WorkspaceID, req *agentreplv1.RequeueMergeRequest) merge.Requeue {
-	out := merge.Requeue{Workspace: ws, Version: versionIncrement(req.GetVersion()), Model: req.GetModel().GetName()}
+	out := merge.Requeue{Workspace: ws, Model: req.GetModel().GetName()}
 	out.By, out.Asker = askerOf(req.GetRequester())
 	out.Front = req.GetPlacement().GetFront() != nil
 	out.PlaceBehind = placedBehind(req.GetPlacement())
 	return out
 }
 
-// DiscardMerge ends a request standing off its queue without landing it,
-// closing an async merge's merge workspace.
+// DiscardMerge ends a request standing off its queue without landing it: only
+// the request goes.
 func (s *server) DiscardMerge(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.DiscardMergeRequest],
@@ -80,26 +79,10 @@ func (s *server) DiscardMerge(
 	}
 	ws := subject.Record.ID
 	s.recordOffQueueAsk(rpc, ws, req.Msg.GetRequester())
-	// THE MERGE WORKSPACE CLOSES AS ANY CLOSE DOES (Verbs.Close), credited to
-	// whoever asked for the discard.
-	by := wsm.CloseByAgent
-	if asker, _ := askerOf(req.Msg.GetRequester()); asker == merge.RequestedByUser {
-		by = wsm.CloseByUser
-	}
-	discarded, err := s.deps.Merge.Discard(ctx, ws, func(ctx context.Context) error {
-		return s.deps.Verbs.Close(ctx, ws, by)
-	})
-	if err != nil {
+	if err := s.deps.Merge.Discard(ctx, ws); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	success := &agentreplv1.DiscardMergeSuccess{Discarded: &agentreplv1.DiscardMergeSuccess_OwnBranch{OwnBranch: &agentreplv1.DiscardMergeSuccessOwnBranch{}}}
-	if discarded.Async {
-		success.Discarded = &agentreplv1.DiscardMergeSuccess_AsyncMerge{AsyncMerge: &agentreplv1.DiscardMergeSuccessAsyncMerge{
-			CleanupWorktreeRemoved: discarded.CleanupWorktreeRemoved}}
-		// The verb closed a workspace; the host view is recomposed from it.
-		s.PublishHostWorkspace(ctx, ws)
-	}
-	resp.Result = &agentreplv1.DiscardMergeResponse_Success{Success: success}
+	resp.Result = &agentreplv1.DiscardMergeResponse_Success{Success: &agentreplv1.DiscardMergeSuccess{}}
 	return connect.NewResponse(resp), nil
 }
 
@@ -119,16 +102,10 @@ func (s *server) recordOffQueueAsk(rpc string, ws ids.WorkspaceID, requester *ag
 func offQueueStatusOf(members []merge.OffQueueMember) []*agentreplv1.MergeQueueStatusOffQueue {
 	out := make([]*agentreplv1.MergeQueueStatusOffQueue, 0, len(members))
 	for _, member := range members {
-		kind := &agentreplv1.MergeQueueStatusEntryKind{Kind: &agentreplv1.MergeQueueStatusEntryKind_OwnBranch{OwnBranch: &agentreplv1.MergeQueueStatusEntryKindOwnBranch{}}}
-		if member.Requester != "" {
-			kind.Kind = &agentreplv1.MergeQueueStatusEntryKind_AsyncMerge{AsyncMerge: &agentreplv1.MergeQueueStatusEntryKindAsyncMerge{
-				Requester: &workspacev1.WorkspaceRef{Id: string(member.Requester)}}}
-		}
 		out = append(out, &agentreplv1.MergeQueueStatusOffQueue{
 			Workspace: &workspacev1.WorkspaceRef{Id: string(member.Workspace)},
 			Name:      member.Name,
 			Branch:    member.Branch,
-			Kind:      kind,
 			Cause:     merge.OffQueueCause(member.Cause),
 			LeftAtMs:  member.LeftAt.UnixMilli(),
 		})

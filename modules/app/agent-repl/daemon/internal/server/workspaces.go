@@ -6,6 +6,7 @@ import (
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/subagentmaker"
 	"context"
 	"errors"
 	"fmt"
@@ -139,18 +140,18 @@ func (s *server) CreateWorkspace(
 	if refused, done := s.refuseMediatorCreate(ctx, rpc, resp, req.Msg.GetRequester()); done {
 		return answer(resp, refused)
 	}
-	if req.Msg.Placement != nil && req.Msg.GetAsyncMerge() != nil {
-		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmPlacementOnMergeWorkspace,
-			Reason: "a merge workspace is drawn nowhere until revealed, so it is never placed", Info: true})))
-	}
-	if async := req.Msg.GetAsyncMerge(); async != nil {
-		return s.createAsyncMerge(ctx, rpc, resp, repository, req.Msg)
-	}
 
 	spec := workspace.NewCreateSpec(originatorOf(req.Msg.GetOriginator()))
 	spec.RepoDir = repository.Dir
 	spec.Requester = requesterID(req.Msg.GetRequester())
 	spec.ForkFrom = forkSourceID(req.Msg.GetContextOrigin())
+	if sub := req.Msg.GetContextOrigin().GetSubagent(); sub != nil {
+		spawner, cerr, done := s.subagentSpawner(ctx, rpc, resp, repository, sub.GetAgentId())
+		if done {
+			return answer(resp, cerr)
+		}
+		spec.ForkFrom, spec.ForkSubagent = &spawner, strings.TrimSpace(sub.GetAgentId())
+	}
 	spec.SlackThread = req.Msg.GetSlackOrigin().GetThreadUrl()
 	spec.SlackSubscribe = slackSubscribeOf(req.Msg.GetSlackOrigin())
 	spec.Backlogged = req.Msg.GetBacklogged()
@@ -161,6 +162,7 @@ func (s *server) CreateWorkspace(
 		spec.DeployHooks = deployHooksOf(standard.GetDeployHooks())
 		spec.Parent = relationshipParent(standard.GetRelationship())
 		spec.Landing, spec.FromOrigin = landingChoice(standard.LandingTarget)
+		spec.SourceBranch = strings.TrimSpace(standard.GetSourceBranch().GetBranch())
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
@@ -169,6 +171,20 @@ func (s *server) CreateWorkspace(
 		spec.Name = oneShot.GetName()
 		spec.Parent = relationshipParent(oneShot.GetRelationship())
 		spec.Landing, spec.FromOrigin = landingChoice(oneShot.LandingTarget)
+		spec.SourceBranch = strings.TrimSpace(oneShot.GetSourceBranch().GetBranch())
+		spec.CleanupSourceWorktree = oneShot.GetCleanupSourceWorktree()
+		spec.DeployHooks = deployHooksOf(oneShot.GetDeployHooks())
+		effects := wsm.LandingEffects{CompactRequester: oneShot.GetCompactRequesterAfter(), ProfileGate: oneShot.GetProfileGate()}
+		if after := oneShot.GetCloseAfter(); after != nil {
+			closes, cerr, done := s.closeAfterOf(ctx, rpc, resp, repository, req.Msg.GetRequester(), after.GetWorkspace())
+			if done {
+				return answer(resp, cerr)
+			}
+			effects.CloseAfter = closes
+		}
+		if !effects.Zero() {
+			spec.Effects = &effects
+		}
 		if about := oneShot.GetContext(); about != nil {
 			// The context must be a registered workspace this daemon serves; a
 			// refusal names it on the create's own arm.
@@ -351,6 +367,58 @@ func requesterID(r *agentreplv1.WorkspaceRequester) *ids.WorkspaceID {
 	}
 	id := ids.WorkspaceID(asker.GetWorkspace().GetId())
 	return &id
+}
+
+// SubagentMakers answers which workspace spawned a subagent
+// (subagentmaker.Finder): the session a subagent fork reads the subagent's
+// own conversation from (agentrepl.v1.WorkspaceContextOriginSubagent).
+type SubagentMakers interface {
+	Find(ctx context.Context, repo wsm.RepoID, agentID string) (wsm.Workspace, error)
+}
+
+// subagentSpawner resolves the workspace whose session spawned the subagent
+// AGENTID, read from disk. A subagent no workspace's session of REPOSITORY
+// holds is refused (unknown_subagent). `done` reports that the caller must
+// answer at once.
+func (s *server) subagentSpawner(ctx context.Context, rpc string, resp *agentreplv1.CreateWorkspaceResponse, repository wsm.Repository, agentID string) (ids.WorkspaceID, *connect.Error, bool) {
+	agentID = strings.TrimSpace(agentID)
+	spawner, err := s.deps.SubagentMakers.Find(ctx, repository.ID, agentID)
+	if errors.Is(err, subagentmaker.ErrNotFound) {
+		return "", s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmUnknownSubagent, NotFound: true,
+			Reason: fmt.Sprintf("no workspace's session of the repository holds the subagent %s", agentID),
+			Fields: map[string]any{"agent_id": agentID}})), true
+	}
+	if err != nil {
+		// The finder recorded the cause at ERROR.
+		return "", fail(s.log, rpc, err), true
+	}
+	return spawner.ID, nil, false
+}
+
+// closeAfterOf resolves a one-shot's close-after workspace REF: it must be
+// open, of REPOSITORY, and not the requester (unknown_close_after). `done`
+// reports that the caller must answer at once.
+func (s *server) closeAfterOf(ctx context.Context, rpc string, resp *agentreplv1.CreateWorkspaceResponse, repository wsm.Repository, requester *agentreplv1.WorkspaceRequester, ref *workspacev1.WorkspaceRef) (ids.WorkspaceID, *connect.Error, bool) {
+	closes := ids.WorkspaceID(ref.GetId())
+	refuseIt := func(reason string) (ids.WorkspaceID, *connect.Error, bool) {
+		return "", s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmUnknownCloseAfter, NotFound: true,
+			Reason: reason, Fields: map[string]any{"workspace": ref}})), true
+	}
+	if asker := requesterID(requester); asker != nil && *asker == closes {
+		return refuseIt("a one-shot never closes the workspace that asked for it")
+	}
+	record, ended, err := s.registryWorkspace(ctx, closes)
+	switch {
+	case ended, errors.Is(err, wsm.ErrNotFound):
+		return refuseIt(fmt.Sprintf("no workspace %s is registered", closes))
+	case err != nil:
+		return "", failResolution(s.log, rpc, fmt.Errorf("read the close-after workspace %s: %w", closes, err)), true
+	case record.Closed:
+		return refuseIt(fmt.Sprintf("the workspace %s is closed", closes))
+	case record.Repo != repository.ID:
+		return refuseIt(fmt.Sprintf("the workspace %s is of another repository", closes))
+	}
+	return closes, nil, false
 }
 
 // forkSourceID is the workspace whose conversation is forked, nil for a fresh
@@ -1091,7 +1159,7 @@ func (s *server) FinishWorkspace(
 		if refused || cerr != nil {
 			return answer(resp, cerr)
 		}
-		if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg, placement)); err != nil {
+		if err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg, placement)); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
 		}
 	}
@@ -1417,17 +1485,6 @@ func (s *server) selectSubject(
 	reveal *frontendv1.FeedId,
 	resp proto.Message,
 ) (*agentreplv1.SelectWorkspaceSuccess, *connect.Error) {
-	// SELECTING A HIDDEN MERGE WORKSPACE REVEALS IT, before the selection, so
-	// the roster draws the workspace it names as current.
-	record, err := s.wholeRow(ctx, subject)
-	if err != nil {
-		return nil, failResolution(subject.Log, rpc, err)
-	}
-	if record.MergeHidden() {
-		if err := s.deps.Merge.RevealMergeWorkspace(ctx, subject.Record.ID, "the user selected it"); err != nil {
-			return nil, fail(subject.Log, rpc, err)
-		}
-	}
 	if err := s.deps.Verbs.Select(ctx, subject.Record.ID, sw); err != nil {
 		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces
 		// quickly cancels the select of the one they switched away from while

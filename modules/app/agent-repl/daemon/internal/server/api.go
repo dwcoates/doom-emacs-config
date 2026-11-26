@@ -103,8 +103,9 @@ type Deps struct {
 	Retarget retarget.Retargeter
 	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerMergeQueueOffer.
 	Merge merge.Orchestrator
-	// SubagentMakers answers the workspace that spawned a subagent, the maker
-	// of an async merge of its branch (CreateWorkspaceAsyncMergeMakerSubagent).
+	// SubagentMakers answers the workspace that spawned a subagent, whose
+	// session a subagent fork reads it from
+	// (agentrepl.v1.WorkspaceContextOriginSubagent).
 	SubagentMakers SubagentMakers
 	// Drain backs UpdateShutdownSchedule.
 	Drain drain.Controller

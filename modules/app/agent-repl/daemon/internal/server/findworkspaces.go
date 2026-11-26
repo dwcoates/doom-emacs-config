@@ -328,23 +328,12 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		return record.Ref()
 	}
 	shortSummary, longSummary := workspace.SummaryFields(f.Summary)
-	var merge *agentreplv1.FoundWorkspaceMerge
-	if ws.MergeOf != nil {
-		merge = &agentreplv1.FoundWorkspaceMerge{}
-		// A MERGE'S REQUESTER IS RECORDED BY ID ALONE (no foreign key), so a
-		// requester the listing no longer holds is a state the registry
-		// allows, answered as no requester.
-		if requester, ok := byID[ws.MergeOf.Requester]; ok {
-			merge.Requester = requester.Ref()
-		}
-	}
 	var lastTurnAtMs *int64
 	if f.LastTurnAt != nil {
 		ms := f.LastTurnAt.UnixMilli()
 		lastTurnAtMs = &ms
 	}
 	return &agentreplv1.FoundWorkspace{
-		Merge:          merge,
 		CreatedBy:      refOf(ws.RequestedBy),
 		Parent:         refOf(ws.Parent),
 		Workspace:      ws.Ref(),

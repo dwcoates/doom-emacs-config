@@ -174,11 +174,6 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 	members = append(append(members, status.Queue.Members...), outOfLine...)
 	awaiting := map[sidebar.QueueRepair]uint32{}
 	for _, member := range members {
-		kind := &agentreplv1.MergeQueueStatusEntryKind{Kind: &agentreplv1.MergeQueueStatusEntryKind_OwnBranch{OwnBranch: &agentreplv1.MergeQueueStatusEntryKindOwnBranch{}}}
-		if member.Requester != "" {
-			kind.Kind = &agentreplv1.MergeQueueStatusEntryKind_AsyncMerge{AsyncMerge: &agentreplv1.MergeQueueStatusEntryKindAsyncMerge{
-				Requester: &workspacev1.WorkspaceRef{Id: string(member.Requester)}}}
-		}
 		stage := &agentreplv1.MergeQueueStatusEntryStage{Stage: &agentreplv1.MergeQueueStatusEntryStage_Waiting{Waiting: &agentreplv1.MergeQueueStatusEntryStageWaiting{}}}
 		switch member.Repair {
 		case sidebar.RepairNone:
@@ -199,7 +194,6 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 			Workspace:     &workspacev1.WorkspaceRef{Id: string(member.Workspace)},
 			Name:          member.Name,
 			Branch:        member.Branch,
-			Kind:          kind,
 			Stage:         stage,
 			PlacedAtFront: member.Front,
 		})
