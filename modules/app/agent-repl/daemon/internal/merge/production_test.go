@@ -131,6 +131,27 @@ func TestAProductionPassTheDaemonsExitCutIsNoFailure(t *testing.T) {
 	}
 }
 
+func TestALandingWhoseRepositoriesCannotBeListedOwesNoSpan(t *testing.T) {
+	// Arrange
+	h := production(t)
+	h.db.reposErr = errors.New("database is closed")
+
+	// Act
+	err := h.o.oweProductionChecks(context.Background(), deployStarted)
+
+	// Assert
+	if err == nil || err.Error() != "database is closed" {
+		t.Fatalf("oweProductionChecks = %v, want the registry's failure", err)
+	}
+	rec, ok := h.recordFor("error", opProduction)
+	if !ok || rec.Message != "could not list the repositories a landing owes a production check in" || rec.Context["error"] != "database is closed" {
+		t.Fatalf("records = %v, want the unlisted repositories at ERROR with the cause", h.logs.Records())
+	}
+	if c, err := h.db.ProductionCheckOf(context.Background(), mediationKey(h)); err != nil || c != nil {
+		t.Fatalf("ProductionCheckOf = (%+v, %v), want no span owed", c, err)
+	}
+}
+
 func TestARepositoryWithoutProductionChecksOwesNoSpan(t *testing.T) {
 	// Arrange: the deploy checks alone are on.
 	h := checked(t)
