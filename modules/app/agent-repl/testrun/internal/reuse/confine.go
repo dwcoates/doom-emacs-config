@@ -79,6 +79,13 @@ var runScopedEnvNames = map[string]bool{
 	"AGENT_REPL_TEST_NICENESS":         true,
 	// The run's mark on its units, so a run nested in one is refused.
 	cores.NestedEnv: true,
+	// The unit's tag, which the runner sets as it starts the unit, after the
+	// confine line's --keep list was written from the unit's own variables.
+	// Every reader of a unit's CPU (the governor's units, the sampler's
+	// program split) finds the unit's processes by it, so a scrub that drops
+	// it leaves a keyed unit's whole tree unread (2026-11-25: every gate
+	// unit's CPU fell to "unsampled").
+	cores.UnitEnv: true,
 }
 
 // keyedEnv reports whether an inherited variable's value is part of the key.
