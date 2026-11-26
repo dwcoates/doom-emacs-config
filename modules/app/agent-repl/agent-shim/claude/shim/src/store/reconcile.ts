@@ -165,18 +165,7 @@ function recordedCreatedAgent(
   recorded: conversationv1.AgentSubagent,
   spawn: conversationv1.AgentActivityId,
 ): conversationv1.AgentId {
-  switch (recorded.result.case) {
-    case "start":
-    case "success":
-    case "failure": {
-      const created = recorded.result.value.createdAgentId;
-      if (created !== undefined && created.value !== "") return created;
-      break;
-    }
-    default:
-      break;
-  }
-  return subagentId(spawn.value);
+  return subagentId(statedCreatedAgent(recorded) ?? spawn.value);
 }
 
 export function closingSubagentTerminal(
@@ -446,12 +435,29 @@ interface ReconcilerOptions extends ReadRetryOptions {
  * A PLAIN SEARCH OVER PAGES the caller already has, deliberately: the reconciler
  * does not open a reading session of its own, because the engine is already
  * paging the book it is reconciling and a second walk would double the reads.
+ *
+ * THE UNIT'S OWN ROW, never a resumed run's: see {@link unitRows}.
  */
 export function findUnit(
   entries: readonly conversationv1.HistoryEntryAt[],
   unit: conversationv1.AgentActivityId,
 ): conversationv1.AgentActivity["item"] | undefined {
   return findUnitEntry(entries, unit)?.item;
+}
+
+/**
+ * Whether the pages read so far hold the unit's OWN row beyond doubt, so a
+ * reader looking for it may stop paging.
+ *
+ * A row that is a subagent arm and proves nothing about whose it is (a running
+ * beat, with no announcement of the handle in the pages) may be the run a SEND
+ * resumed, whose own call lies further back: the reader keeps paging for it.
+ */
+export function holdsUnitRow(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  unit: conversationv1.AgentActivityId,
+): boolean {
+  return unitRows(entries, unit).settled;
 }
 
 /** One unit's row in a book: its latest item, and the place the row first took. */
@@ -470,18 +476,86 @@ function findUnitEntry(
   entries: readonly conversationv1.HistoryEntryAt[],
   unit: conversationv1.AgentActivityId,
 ): UnitEntry | undefined {
+  return unitRows(entries, unit).own;
+}
+
+/** What a book's pages say about one unit's own row. */
+interface UnitRows {
+  /** The unit's own row, when the pages hold one that is not a resumed run's. */
+  readonly own: UnitEntry | undefined;
+  /** Whether `own` is the unit's beyond doubt, so no older page can change it. */
+  readonly settled: boolean;
+}
+
+/**
+ * THE UNIT'S OWN ROW, told apart from the row of the run a send resumed.
+ *
+ * TWO ROWS SHARE ONE ACTIVITY ID when a SEND resumes a subagent: the send's
+ * card is `activity:<send>`, and the run it woke is filed `resumed-run:<send>`
+ * (`resumedRunUpsertKey`) under the same activity id, as a SUBAGENT arm. Pages
+ * are served newest first and the run starts after the send, so the first row a
+ * search meets is the run's; taken as the unit's, it described a spawn that
+ * created an agent named by the SEND's id, and the daemon drew the resumed
+ * agent's bubble under an agent that does not exist (2026-11-25,
+ * daemon-integration-tier-reorg: `daemon.feed.announced_agent_conflict`).
+ *
+ * Only a subagent arm can be a run's row, so:
+ *
+ * - a row that is NOT a subagent arm is the unit's own, beyond doubt;
+ * - a subagent arm that names another agent than the unit (its start or
+ *   settle's created agent, or the handle's own announcement in the book) is a
+ *   run's row, and never the unit's;
+ * - a subagent arm that names the unit itself is the spawn's own, beyond doubt;
+ * - a subagent arm that names nothing is the unit's as far as these pages
+ *   show, and an older page may still hold the send it shares its id with.
+ */
+function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conversationv1.AgentActivityId): UnitRows {
+  let call: UnitEntry | undefined;
+  let subagent: UnitEntry | undefined;
+  let announced: string | undefined;
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
     const result = entry.value.result;
+    if (result.case === "detachedWork") {
+      const kind = result.value.kind?.kind;
+      if (announced === undefined && result.value.work?.value === unit.value && kind?.case === "subagent") {
+        announced = statedAgent(kind.value.agentId);
+      }
+      continue;
+    }
     if (result.case !== "update") continue;
     const update = result.value.update;
     if (update.case !== "activity") continue;
     if (update.value.activityId?.value !== unit.value) continue;
     const place = at.place.case === undefined ? undefined : at.place.value.atMs;
-    return { item: update.value.item, openedAtMs: place === undefined || place <= 0n ? undefined : place };
+    const found = { item: update.value.item, openedAtMs: place === undefined || place <= 0n ? undefined : place };
+    if (found.item.case === "subagent") subagent ??= found;
+    else call ??= found;
   }
-  return undefined;
+  if (call !== undefined) return { own: call, settled: true };
+  if (subagent === undefined || subagent.item.case !== "subagent") return { own: undefined, settled: false };
+  const spawned = subagentId(unit.value).value;
+  const named = [statedCreatedAgent(subagent.item.value), announced].filter((agent) => agent !== undefined);
+  if (named.some((agent) => agent !== spawned)) return { own: undefined, settled: false };
+  return { own: subagent, settled: named.length > 0 };
+}
+
+/** The created agent a recorded subagent arm states, when its arm states one. */
+function statedCreatedAgent(recorded: conversationv1.AgentSubagent): string | undefined {
+  switch (recorded.result.case) {
+    case "start":
+    case "success":
+    case "failure":
+      return statedAgent(recorded.result.value.createdAgentId);
+    default:
+      return undefined;
+  }
+}
+
+/** An agent id's value, when it states one: an empty id names no agent. */
+function statedAgent(agent: conversationv1.AgentId | undefined): string | undefined {
+  return agent === undefined || agent.value === "" ? undefined : agent.value;
 }
 
 /** What a revived shim does with one live item, decided by where it ran. */
