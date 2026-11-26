@@ -120,8 +120,12 @@ func TestANestedRowCarriesNoShare(t *testing.T) {
 	// Assert
 	session := sections(t, h)[0]
 	for _, label := range []string{"fresh input", "cache write", "thinking"} {
-		if row := rowByLabel(session, label); row.SharePermille != nil {
+		row := rowByLabel(session, label)
+		if row.SharePermille != nil {
 			t.Fatalf("%s carries a share; a partition of its headline must not", label)
+		}
+		if row.GetEmphasized() {
+			t.Fatalf("%s is emphasized; a partition of its headline must not be", label)
 		}
 	}
 }
@@ -134,14 +138,19 @@ func TestAHeadlineRowCarriesItsPrecomputedShare(t *testing.T) {
 	// Act: 1k uncached, 1k cache read, 2k output — a 4k basis.
 	h.r.OnActivity(testWS, nil, responseSettled("r1", usage(1_000, 1_000, 0, 2_000, 0)))
 
-	// Assert
+	// Assert: every headline row carries its share of the basis, emphasized.
 	session := sections(t, h)[0]
-	row := rowByLabel(session, "output")
-	if row.SharePermille == nil || *row.SharePermille != 500 {
-		t.Fatalf("output share = %+v, want 500 permille of the 4k basis", row.SharePermille)
-	}
-	if !row.GetEmphasized() {
-		t.Fatalf("output row = %+v, want emphasized", row)
+	for _, want := range []struct {
+		label string
+		share int32
+	}{{"uncached input", 250}, {"cache read", 250}, {"output", 500}} {
+		row := rowByLabel(session, want.label)
+		if row.SharePermille == nil || *row.SharePermille != want.share {
+			t.Fatalf("%s share = %+v, want %d permille of the 4k basis", want.label, row.SharePermille, want.share)
+		}
+		if !row.GetEmphasized() {
+			t.Fatalf("%s row = %+v, want emphasized", want.label, row)
+		}
 	}
 }
 

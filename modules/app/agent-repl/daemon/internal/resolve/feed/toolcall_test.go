@@ -104,25 +104,46 @@ func TestReadStartDrawsTheRunningCardWithThePathAsItsInput(t *testing.T) {
 }
 
 func TestAProgressBeatBecomesTheRunningCardsLastProgress(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.send(activityOf("unit-1", &conversationv1.AgentRead{
-		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
-			Path:      &conversationv1.ReadPath{Path: "a.go"},
-			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-		}},
-	}))
-
-	// Act.
-	h.send(activityOf("unit-1", &conversationv1.AgentRead{
-		Result: &conversationv1.AgentRead_Progress{
-			Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 4_200},
+	tests := []struct {
+		name     string
+		start    any
+		progress any
+	}{
+		{
+			name: "a read",
+			start: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+				Path:      &conversationv1.ReadPath{Path: "a.go"},
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}}},
+			progress: &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Progress{
+				Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 4_200},
+			}},
 		},
-	}))
+		{
+			name: "a foreground shell",
+			start: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: "sleep 5"},
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}}},
+			progress: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Progress{
+				Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 4_200},
+			}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.send(activityOf("unit-1", tc.start))
 
-	// Assert: the daemon relays the observed beat; the client ticks locally.
-	if got := h.card().GetRunning().GetLastProgress().GetAtMs(); got != 4_200 {
-		t.Fatalf("last_progress = %d, want 4200", got)
+			// Act.
+			h.send(activityOf("unit-1", tc.progress))
+
+			// Assert: the daemon relays the observed beat; the client ticks locally.
+			if got := h.card().GetRunning().GetLastProgress().GetAtMs(); got != 4_200 {
+				t.Fatalf("last_progress = %d, want 4200", got)
+			}
+		})
 	}
 }
 
@@ -165,9 +186,13 @@ func TestAHeadReadStatesTheCut(t *testing.T) {
 		}},
 	}))
 
-	// Assert.
-	if got := h.card().GetReturned().GetCode().GetOmitted().GetText(); got != "showing 2 of 4,312 lines" {
+	// Assert: the cut is stated, and the head it drew is still painted.
+	code := h.card().GetReturned().GetCode()
+	if got := code.GetOmitted().GetText(); got != "showing 2 of 4,312 lines" {
 		t.Fatalf("omitted = %q", got)
+	}
+	if len(code.GetSpans()) != 1 || code.GetSpans()[0].GetPaintClass() != "keyword" {
+		t.Fatalf("spans = %+v, want the painter's spans for the head", code.GetSpans())
 	}
 }
 
@@ -338,6 +363,28 @@ func TestAWriteDrawsTheBarePathAsItsInputLine(t *testing.T) {
 	}
 }
 
+func TestAWriteDrawsItsCreatedFileAsDiffLines(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
+		Result: &conversationv1.AgentWrite_Success{Success: &conversationv1.AgentWriteSuccess{
+			Path:    &conversationv1.ReadPath{Path: "new.go"},
+			Outcome: &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}},
+			Patch:   []*conversationv1.FilePatchHunk{{Lines: []string{"+package main"}}},
+		}},
+	}))
+
+	// Assert: the created file's hunk is the card's diff output.
+	var texts []string
+	for _, line := range h.card().GetReturned().GetDiff().GetLines() {
+		texts = append(texts, line.GetText())
+		if line.GetAdded() != nil && line.GetText() == "package main" {
+			return
+		}
+	}
+	t.Fatalf("diff lines = %q, want the created hunk's added line \"package main\"", texts)
+}
+
 func TestDiffLinesCarryTheirKindAsTheArmAndNotAsAPrefix(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
@@ -442,6 +489,43 @@ func TestDiagnosticsBeforeItsCardAreRecordedAtDebug(t *testing.T) {
 	}
 	if h.hasRecord("warn", "daemon.feed.diagnostics_without_card") {
 		t.Fatalf("records = %+v, want no WARN daemon.feed.diagnostics_without_card", h.records())
+	}
+}
+
+func TestDiagnosticsBeforeAWriteWithNoStartAreRetainedForItsCard(t *testing.T) {
+	// Arrange: the transcript-plane report arrives before the stream-plane card.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
+		Result: &conversationv1.AgentWrite_Diagnostics{Diagnostics: &conversationv1.AgentDiagnosticsReport{
+			Files: []*conversationv1.AgentDiagnosticsFile{{
+				Path: "new.go",
+				Diagnostics: []*conversationv1.AgentDiagnostic{{
+					Severity:  conversationv1.AgentDiagnosticSeverity_AGENT_DIAGNOSTIC_SEVERITY_WARNING,
+					Message:   "unused result",
+					StartLine: 6,
+				}},
+			}},
+		}},
+	}))
+
+	// Act: the write settles, with no start ever drawn.
+	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
+		Result: &conversationv1.AgentWrite_Success{Success: &conversationv1.AgentWriteSuccess{
+			Path:    &conversationv1.ReadPath{Path: "new.go"},
+			Outcome: &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}},
+			Patch:   []*conversationv1.FilePatchHunk{{Lines: []string{"package main"}}},
+		}},
+	}))
+
+	// Assert: the card carries the retained attachment, and nothing warned.
+	lines := h.card().GetReturned().GetDiagnostics().GetLines()
+	if len(lines) != 1 || lines[0] != "new.go:7 · warning · unused result" {
+		t.Fatalf("diagnostics = %v, want the retained attachment", lines)
+	}
+	for _, record := range h.records() {
+		if record.Level == "warn" || record.Level == "error" {
+			t.Fatalf("record = %+v, want no WARN or ERROR for out-of-order diagnostics", record)
+		}
 	}
 }
 
@@ -556,6 +640,27 @@ func TestGrepCountDrawsTheFigureAsText(t *testing.T) {
 	// Assert.
 	if got := h.card().GetReturned().GetText().GetText(); got != "1,204 matches" {
 		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestAGlobOfAllItsMatchesDrawsEachPathAsALine(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGlob{
+		Result: &conversationv1.AgentGlob_Success{Success: &conversationv1.AgentGlobSuccess{
+			Query:  &conversationv1.AgentGlobQuery{Pattern: "*.go"},
+			Paths:  []string{"a.go", "b.go"},
+			Extent: &conversationv1.AgentGlobSuccess_All{All: &conversationv1.AgentGlobAll{FilesReturned: 2}},
+		}},
+	}))
+
+	// Assert: one line per matched path, and nothing omitted.
+	lines := h.card().GetReturned().GetLines()
+	if got := lines.GetLines(); len(got) != 2 || got[0] != "a.go" || got[1] != "b.go" {
+		t.Fatalf("lines = %v, want the two matched paths", got)
+	}
+	if lines.GetOmitted() != nil {
+		t.Fatalf("omitted = %+v, want unset when every match was returned", lines.GetOmitted())
 	}
 }
 
@@ -1251,6 +1356,37 @@ func TestACommandWhoseWorkMovedToTheBackgroundRetiresTheRunningCard(t *testing.T
 	}
 	if got := h.shellHead().GetCommand().GetText(); got != "sleep 600" {
 		t.Fatalf("head command = %q, want the command carried onto the bubble", got)
+	}
+}
+
+func TestAMovedCommandsRetirementAndHeadReachAnOpenTail(t *testing.T) {
+	// Arrange: a foreground shell, drawn running, and a reader following the
+	// root feed.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+	rows := h.follow(rootFeed(), "reader-1")
+
+	// Act: the work leaves for the background.
+	h.detachWork("unit-1", "unit-1", kinds.Bash())
+	pushed := pushedRowsBefore(t, rows, h.sendSentinel())
+
+	// Assert: the running card's removal is published, so an open feed drops
+	// it live, and the live shell head carrying the command is published in
+	// its place.
+	removed, head := false, false
+	for _, row := range pushed {
+		if row.GetRemoved() != nil && row.GetId().GetValue() == activityRowID(rootFeed(), "unit-1") {
+			removed = true
+		}
+		if shell := row.GetShellHead(); shell != nil && shell.GetLive() != nil && shell.GetCommand().GetText() == "sleep 600" {
+			head = true
+		}
+	}
+	if !removed {
+		t.Fatalf("pushed = %v, want the running card's removal", rowIDs(pushed))
+	}
+	if !head {
+		t.Fatalf("pushed = %v, want the live shell head carrying the moved command", rowIDs(pushed))
 	}
 }
 

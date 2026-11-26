@@ -380,22 +380,36 @@ func TestAnUnregisteredDirectoryIsIngestedOnceItIsRegistered(t *testing.T) {
 }
 
 func TestAMalformedEntryIsQuarantinedWithAWarning(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.writeRaw("held_20260928T120001_a.json", `{"version":1`)
-
-	// Act
-	w.sweep(w.ingress())
-
-	// Assert
-	if left := len(w.entries()); left != 0 {
-		t.Fatalf("entries left = %d, want the malformed one moved aside", left)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unparseable json", body: `{"version":1`},
+		{name: "a version this daemon does not read", body: `{"version":7}`},
 	}
-	if _, err := os.Stat(filepath.Join(w.dir, "quarantine", "held_20260928T120001_a.json")); err != nil {
-		t.Fatalf("quarantined file: %v, want it readable in quarantine/", err)
-	}
-	if got := len(w.records("warn", opQuarantine)); got != 1 {
-		t.Fatalf("WARN %s records = %d, want 1", opQuarantine, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.writeRaw("held_20260928T120001_a.json", tt.body)
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			if left := len(w.entries()); left != 0 {
+				t.Fatalf("entries left = %d, want the malformed one moved aside", left)
+			}
+			if _, err := os.Stat(filepath.Join(w.dir, "quarantine", "held_20260928T120001_a.json")); err != nil {
+				t.Fatalf("quarantined file: %v, want it readable in quarantine/", err)
+			}
+			if got := len(w.records("warn", opQuarantine)); got != 1 {
+				t.Fatalf("WARN %s records = %d, want 1", opQuarantine, got)
+			}
+			if len(w.handler.calls) != 0 {
+				t.Fatalf("submissions = %v, want none for a quarantined entry", w.handler.calls)
+			}
+		})
 	}
 }
 

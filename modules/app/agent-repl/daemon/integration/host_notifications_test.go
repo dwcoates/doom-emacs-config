@@ -122,68 +122,6 @@ func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 	}
 }
 
-// TestAFailedTurnRaisesTheErroredBanner pins that a failed turn raises
-// "❌ <name>" over the errored ending's line.
-func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
-	f.submit("go", "k-turn-failed-banner", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
-	}))
-
-	// Assert
-	if argvs := awaitBannerSettled(t, f, "the errored-turn banner"); !bannerCarrying(argvs, "❌") {
-		t.Fatalf("banners %q, want the errored title", argvs)
-	}
-}
-
-// awaitChimePlayed waits for the daemon's record that f's workspace's chime
-// finished, and answers every chime its workspace played so far.
-func awaitChimePlayed(t *testing.T, f *fixture, what string) []harness.LogRecord {
-	t.Helper()
-	played := func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.desktopnotify.chime" && r.Message == "the chime played"
-	}
-	f.d.AwaitOwnRunLogRecord(what, played)
-	// THE CHIME PROGRAM NAMES NO WORKSPACE, so the case's chimes are counted
-	// from its own workspace's records, never from the shared stub's runs.
-	var plays []harness.LogRecord
-	for _, r := range f.d.OwnRunLog() {
-		if r.Operation == "daemon.desktopnotify.chime" && r.Message == "playing the chime" {
-			plays = append(plays, r)
-		}
-	}
-	return plays
-}
-
-// TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn pins that an unfocused
-// Emacs hears a turn end once: its banner is made silent, and the chime rings
-// as it is made.
-func TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newInGroup(t, groupDesktopBanner)
-	f.submit("go", "k-chime-unfocused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Act
-	pushConcludedTurn(f.shim, mainAgent, "answer-1")
-
-	// Assert
-	if plays := awaitChimePlayed(t, f, "the turn banner's chime"); len(plays) != 1 {
-		t.Fatalf("chimes played %v, want exactly one", plays)
-	}
-	argvs := awaitBannerSettled(t, f, "the silent turn banner")
-	if !bannerCarrying(argvs, "✅") || slices.ContainsFunc(argvs, func(argv []string) bool {
-		return slices.Contains(argv, "-sound") || slices.ContainsFunc(argv, func(arg string) bool { return strings.HasPrefix(arg, "--sound") })
-	}) {
-		t.Fatalf("banners %q, want the turn's banner with no sound flag", argvs)
-	}
-}
-
 // TestReportEditorFocusMovesTheBannerDecision pins that a report moves the
 // focus the next banner is decided on.
 func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {

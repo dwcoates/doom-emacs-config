@@ -2469,6 +2469,46 @@ func TestSelectIsAtomicWithItsAttentionClear(t *testing.T) {
 	}
 }
 
+func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionSet(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	w := newSelectionFoldWorld(t, s)
+	if err := s.SetAttention(context.Background(), w.root.ID, true); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+	if err := s.SetAttention(context.Background(), w.other.ID, true); err != nil {
+		t.Fatalf("SetAttention: %v", err)
+	}
+
+	// Act
+	if _, err := s.Select(context.Background(), w.other.ID, SelectRecording, instant); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert
+	first, err := s.Workspace(context.Background(), w.root.ID)
+	if err != nil {
+		t.Fatalf("Workspace(root): %v", err)
+	}
+	if !first.Attention {
+		t.Fatal("selecting another workspace cleared the first's attention marker")
+	}
+	selected, err := s.Workspace(context.Background(), w.other.ID)
+	if err != nil {
+		t.Fatalf("Workspace(other): %v", err)
+	}
+	if selected.Attention {
+		t.Fatal("the selected workspace kept its attention marker")
+	}
+	current, err := s.Current(context.Background())
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if current == nil || *current != w.other.ID {
+		t.Fatalf("current = %v, want %q", current, w.other.ID)
+	}
+}
+
 func TestSelectionWriteNamesEachValue(t *testing.T) {
 	tests := []struct {
 		write SelectionWrite

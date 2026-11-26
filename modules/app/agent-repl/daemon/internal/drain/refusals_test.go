@@ -98,3 +98,34 @@ func TestASuppressedRefusalStillCountsTowardTheTotal(t *testing.T) {
 		t.Fatalf("suppressed record = %+v, want a debug carrying total 2", last)
 	}
 }
+
+func TestEachRefusalInOneWindowCarriesItsRunningCounts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.bare(t)
+	want := []struct {
+		level             string
+		suppressed, total int
+	}{
+		{level: "warn", suppressed: 0, total: 1},
+		{level: "debug", suppressed: 1, total: 2},
+		{level: "debug", suppressed: 2, total: 3},
+	}
+
+	// Act
+	for range want {
+		h.c.NoteRefusal(ws)
+	}
+
+	// Assert
+	got := records(h.log, opRefusal)
+	if len(got) != len(want) {
+		t.Fatalf("refusal records = %+v, want %d", got, len(want))
+	}
+	for i, w := range want {
+		if got[i].Level != w.level || got[i].Context["suppressed"] != w.suppressed || got[i].Context["total"] != w.total {
+			t.Fatalf("record %d = %s suppressed %v total %v, want %s suppressed %d total %d",
+				i, got[i].Level, got[i].Context["suppressed"], got[i].Context["total"], w.level, w.suppressed, w.total)
+		}
+	}
+}

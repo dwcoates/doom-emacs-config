@@ -354,6 +354,81 @@ func TestValidateUpdateAgentRequest(t *testing.T) {
 	}
 }
 
+// questionAnswerUpdate is an UpdateAgent carrying ANSWER as its question answer.
+func questionAnswerUpdate(answer *conversationv1.AgentQuestionAnswer) *shimv1.UpdateAgentRequest {
+	return &shimv1.UpdateAgentRequest{Input: &conversationv1.AgentInput{
+		Input: &conversationv1.AgentInput_Answer{Answer: &conversationv1.AgentAnswer{
+			Answer: &conversationv1.AgentAnswer_QuestionAnswer{QuestionAnswer: answer},
+		}},
+	}}
+}
+
+// TestValidateUpdateAgentRequestRefusesAnIllegalQuestionAnswer covers each way
+// a question answer can be illegal.
+func TestValidateUpdateAgentRequestRefusesAnIllegalQuestionAnswer(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *conversationv1.AgentQuestionAnswer
+		field  string
+	}{
+		{
+			name:   "a missing ask",
+			answer: &conversationv1.AgentQuestionAnswer{Answers: &conversationv1.AgentQuestionAnswers{}},
+			field:  "UpdateAgentRequest.input.answer.question_answer.ask",
+		},
+		{
+			name: "an empty ask value",
+			answer: &conversationv1.AgentQuestionAnswer{
+				Ask:     &conversationv1.AgentQuestionId{},
+				Answers: &conversationv1.AgentQuestionAnswers{},
+			},
+			field: "UpdateAgentRequest.input.answer.question_answer.ask",
+		},
+		{
+			name:   "nil answers",
+			answer: &conversationv1.AgentQuestionAnswer{Ask: &conversationv1.AgentQuestionId{Value: "ask-1"}},
+			field:  "UpdateAgentRequest.input.answer.question_answer.answers",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateUpdateAgentRequest(questionAnswerUpdate(tc.answer))
+
+			// Assert.
+			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
+// TestValidateUpdateAgentRequestAcceptsAQuestionAnswer pins the legal shape:
+// a named ask and its (possibly empty) answers.
+func TestValidateUpdateAgentRequestAcceptsAQuestionAnswer(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *conversationv1.AgentQuestionAnswer
+	}{
+		{
+			name: "a named ask with its answers",
+			answer: &conversationv1.AgentQuestionAnswer{
+				Ask:     &conversationv1.AgentQuestionId{Value: "ask-1"},
+				Answers: &conversationv1.AgentQuestionAnswers{},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			err := validateUpdateAgentRequest(questionAnswerUpdate(tc.answer))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateUpdateAgentRequest = %v, want nil", err)
+			}
+		})
+	}
+}
+
 // TestValidateResolvePeerDeliveryRequest covers the delivery lookup's illegal
 // shapes.
 func TestValidateResolvePeerDeliveryRequest(t *testing.T) {

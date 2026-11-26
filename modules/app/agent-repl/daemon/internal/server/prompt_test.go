@@ -484,6 +484,45 @@ func TestBubbleRefusedFoldsAgentBusy(t *testing.T) {
 	}
 }
 
+// TestSubmitPromptAnswersABubbleRefusalWithTheShimsWords pins the whole
+// relay: the queue's refusal of a bubble submit reaches SubmitPromptError as
+// bubble_refused under its kind, carrying the shim's own words as its detail.
+func TestSubmitPromptAnswersABubbleRefusalWithTheShimsWords(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		got  func(*agentreplv1.SubmitPromptBubbleRefused) bool
+	}{
+		{name: "agent busy", arm: "agent_busy",
+			got: func(r *agentreplv1.SubmitPromptBubbleRefused) bool { return r.GetAgentBusy() != nil }},
+		{name: "not deliverable", arm: "not_deliverable",
+			got: func(r *agentreplv1.SubmitPromptBubbleRefused) bool { return r.GetNotDeliverable() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			const words = "the shim's own account of the refusal"
+			h.Prompts.err = &workspace.Refusal{Arm: tt.arm, Reason: words}
+
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt = transport error %v, want the in-band arm", err)
+			}
+			refused := resp.Msg.GetError().GetBubbleRefused()
+			if !tt.got(refused) {
+				t.Fatalf("result = %v, want bubble_refused{kind: %s}", resp.Msg.GetResult(), tt.arm)
+			}
+			if refused.GetDetail() != words {
+				t.Fatalf("bubble_refused.detail = %q, want the shim's words %q", refused.GetDetail(), words)
+			}
+		})
+	}
+}
+
 // TestBubbleRefusedPassesOtherRefusalsThrough pins that no other refusal is
 // reinterpreted as a bubble refusal.
 func TestBubbleRefusedPassesOtherRefusalsThrough(t *testing.T) {
@@ -890,5 +929,40 @@ func TestSubmitPromptWhoseTakeBackFailsDeliversNothing(t *testing.T) {
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInternal || h.Prompts.submits != 0 {
 		t.Fatalf("SubmitPrompt = %v with %d submissions, want an internal error and none", err, h.Prompts.submits)
+	}
+}
+
+func TestSubmitPromptWhoseVerbFailsCodedKeepsTheCode(t *testing.T) {
+	cases := []struct {
+		name string
+		code connect.Code
+	}{
+		{name: "the shutdown's unavailable", code: connect.CodeUnavailable},
+		{name: "a deadline the verb named", code: connect.CodeDeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Prompts.err = connect.NewError(tc.code, errors.New("the daemon is going away"))
+
+			// Act.
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if got := connect.CodeOf(err); got != tc.code {
+				t.Fatalf("SubmitPrompt code = %v (%v), want %v", got, err, tc.code)
+			}
+			var seen bool
+			for _, rec := range log.at("ERROR") {
+				if rec.Operation == "SubmitPrompt" && rec.Message == "the rpc failed" && rec.Context["code"] == tc.code.String() {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Fatalf("SubmitPrompt recorded %+v, want an ERROR naming code %s", log.records(), tc.code)
+			}
+		})
 	}
 }

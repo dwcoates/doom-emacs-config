@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/resolve/feed"
 )
 
@@ -156,6 +157,51 @@ func TestGetFeedPageOlderThanAsksAboveTheNamedRow(t *testing.T) {
 	}
 	if len(h.Feed.olderKeys) != 1 || h.Feed.olderKeys[0] != "k-7" || h.Feed.openCalls != 0 {
 		t.Fatalf("older asked above %v after %d openings, want exactly k-7 and no opening", h.Feed.olderKeys, h.Feed.openCalls)
+	}
+}
+
+// TestGetFeedPageOnASubagentBubbleWalksItsSubFeed pins that a subagent
+// bubble's own row id, handed as GetFeedPage's feed, reaches the resolver as
+// that subagent's sub-feed on every page of the walk, never as the root.
+func TestGetFeedPageOnASubagentBubbleWalksItsSubFeed(t *testing.T) {
+	bubble := feedid.Encode(feedid.Ref{
+		WS:   testWorkspaceID,
+		Feed: feedid.Feed{Root: true},
+		Row:  feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-unit-1", Sub: "created-agent"},
+	})
+	tests := []struct {
+		name string
+		req  *agentreplv1.GetFeedPageRequest
+	}{
+		{name: "first", req: &agentreplv1.GetFeedPageRequest{
+			Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+		}},
+		{name: "older than", req: &agentreplv1.GetFeedPageRequest{
+			Page: &agentreplv1.GetFeedPageRequest_OlderThan{OlderThan: &agentreplv1.GetFeedPageOlderThan{
+				OldestHeld: &frontendv1.FeedRowOrder{Key: "k-7"},
+			}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.page = page()
+			h.Feed.olderPage = page()
+			tt.req.Workspace = ref()
+			tt.req.Feed = bubble
+
+			// Act.
+			resp, err := h.Client.GetFeedPage(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("GetFeedPage = %v, %v; want a page", resp, err)
+			}
+			if h.Feed.lastFeed.Root || h.Feed.lastFeed.Agent.GetValue() != "created-agent" {
+				t.Fatalf("the resolver walked %+v, want the sub-feed of created-agent", h.Feed.lastFeed)
+			}
+		})
 	}
 }
 

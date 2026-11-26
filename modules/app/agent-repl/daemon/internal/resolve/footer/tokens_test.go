@@ -220,6 +220,39 @@ func TestTwoResponseUnitsOfOneApiResponseShareItsSingleUsageStamp(t *testing.T) 
 	}
 }
 
+func TestAnUnstampedSecondUnitAddsNoChargeThroughTheTurnsEnd(t *testing.T) {
+	// Arrange: one API response whose usage rides its first unit only.
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "start", usage(0, 0, 1_000, 0, 0)))
+	if got := panelInput(t, h); got != "1k" {
+		t.Fatalf("panel input = %q after the carrying unit, want 1k", got)
+	}
+
+	// Act: the same response's tool call carries no usage, then the turn ends.
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-2"},
+		Item: &conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{
+			Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{Path: &conversationv1.ReadPath{Path: "a.go"}}},
+		}},
+	})
+	afterSecond := panelInput(t, h)
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert: no second charge, before or after the turn's end.
+	if afterSecond != "1k" {
+		t.Fatalf("panel input = %q after the unstamped second unit, want it unchanged at 1k", afterSecond)
+	}
+	if got := panelInput(t, h); got != "1k" {
+		t.Fatalf("panel input = %q after the turn ended, want it unchanged at 1k", got)
+	}
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetDone() == nil {
+		t.Fatalf("status = %v, want idle·done once the turn ended", h.view(t).GetStrip().GetStatus())
+	}
+}
+
 func TestUsageArrivingAfterTheTurnSettledCorrectsTheVerdict(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

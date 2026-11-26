@@ -253,6 +253,35 @@ func TestSenderStartTurnMarksAShimThisDaemonStoodDownUnderTheCallForTheQueue(t *
 	}
 }
 
+// TestSenderStartTurnReturnsAnyOtherShimErrorAsTheShimSaidIt covers a call
+// failure that is neither a died nor a stood-down shim: it reaches the caller
+// as the shim client's own error, unmarked for the queue.
+func TestSenderStartTurnReturnsAnyOtherShimErrorAsTheShimSaidIt(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a deadline the call ran out", err: errors.New("deadline_exceeded: the shim did not answer StartTurn")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := newTestSender(&fakeSenderClient{startTurnErr: tt.err})
+
+			// Act
+			_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+			// Assert
+			if !errors.Is(err, tt.err) || err.Error() != tt.err.Error() {
+				t.Fatalf("StartTurn = %v, want the shim client's error %v in its own words", err, tt.err)
+			}
+			if errors.Is(err, promptqueue.ErrShimDied) || errors.Is(err, promptqueue.ErrShimStoodDown) {
+				t.Fatalf("StartTurn = %v, want it unmarked for the queue", err)
+			}
+		})
+	}
+}
+
 // TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers a
 // turn_already_open, which is always the daemon's own bug: it is carried up as
 // its typed arm rather than retried.
@@ -312,6 +341,43 @@ func TestSenderPromptAgentAddressesTheAgent(t *testing.T) {
 	// Assert
 	if got := client.updateAgentReq.GetTarget().GetValue(); got != "sub-1" {
 		t.Fatalf("UpdateAgent target = %q, want sub-1", got)
+	}
+}
+
+// TestSenderPromptAgentCarriesTheShimsRefusal covers a bubble prompt the shim
+// refused: the caller gets the shim's arm and its own words.
+func TestSenderPromptAgentCarriesTheShimsRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure *shimv1.UpdateAgentFailure
+		arm     string
+	}{
+		{
+			name: "a subagent already running its turn",
+			failure: &shimv1.UpdateAgentFailure{Detail: "agent sub-1 is mid-turn",
+				Kind: &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}}},
+			arm: ArmShimAgentBusy,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := newTestSender(&fakeSenderClient{updateAgent: &shimv1.UpdateAgentResponse{
+				Result: &shimv1.UpdateAgentResponse_Failure{Failure: tt.failure},
+			}})
+
+			// Act
+			err := s.PromptAgent(context.Background(), &conversationv1.AgentId{Value: "sub-1"}, nil)
+
+			// Assert
+			refusal, ok := AsShimRefusal(err)
+			if !ok {
+				t.Fatalf("PromptAgent = %v, want a typed shim refusal", err)
+			}
+			if refusal.Verb != "UpdateAgent" || refusal.Arm != tt.arm || refusal.Detail != tt.failure.GetDetail() {
+				t.Fatalf("refusal = %+v, want UpdateAgent's %s with the shim's detail %q", refusal, tt.arm, tt.failure.GetDetail())
+			}
+		})
 	}
 }
 

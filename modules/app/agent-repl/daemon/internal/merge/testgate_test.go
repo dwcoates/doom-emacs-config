@@ -1,12 +1,15 @@
 package merge
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/paint"
 )
 
 // reusedLine is the runner's line for a suite an earlier run's pass covers,
@@ -502,5 +505,86 @@ func TestReuseLinesAreAttributedToTheSuiteTheyName(t *testing.T) {
 	}
 	if strings.Contains(sections["daemon"], "reuse: 4 units") {
 		t.Errorf("the run's own tally belongs to the suite settling next, as any unbracketed line: %q", sections["daemon"])
+	}
+}
+
+// scriptedPainter answers every ANSI parse with its spans or its error, and
+// records the text it was handed. What it does with an escape is the paint
+// package's subject; the gate's is that the painter's spans reach the tab.
+type scriptedPainter struct {
+	spans  paint.Spans
+	err    error
+	parsed *[]string
+}
+
+func (p scriptedPainter) ParseANSI(text string) (paint.Spans, error) {
+	*p.parsed = append(*p.parsed, text)
+	return p.spans, p.err
+}
+
+func (p scriptedPainter) Highlight(_, code string) (paint.Spans, error) {
+	return paint.Spans{{Text: code}}, nil
+}
+
+// TestASuitesOutputIsDrawnAsThePaintersSpans covers the hand-off to the tab:
+// a suite's output section is parsed once by the painter, and each span it
+// answers is drawn with its text and its paint class, the client never
+// handed a raw escape.
+func TestASuitesOutputIsDrawnAsThePaintersSpans(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var parsed []string
+	h.o.deps.Painter = scriptedPainter{spans: paint.Spans{{Text: "all green", Class: "ansi-fg-green"}, {Text: "\n"}}, parsed: &parsed}
+
+	// Act.
+	rows, err := h.o.paintSuites([]string{"daemon"}, "\x1b[32mall green\x1b[0m\n[agent-repl-tests] daemon: passed in 1s\n")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("painting: %v", err)
+	}
+	if len(parsed) != 1 || !strings.Contains(parsed[0], "\x1b[32mall green") {
+		t.Fatalf("the painter parsed %q, want the suite's own section once", parsed)
+	}
+	if len(rows) != 1 || len(rows[0].GetOutput()) != 2 {
+		t.Fatalf("rows = %v, want the daemon row carrying the painter's two spans", rows)
+	}
+	if span := rows[0].GetOutput()[0]; span.GetText() != "all green" || span.GetPaintClass() != "ansi-fg-green" {
+		t.Fatalf("first span = %v, want all green painted ansi-fg-green", span)
+	}
+}
+
+// TestAnEmptySectionIsNeverPainted covers a suite whose run printed nothing:
+// it is drawn with no spans, and the painter is not asked.
+func TestAnEmptySectionIsNeverPainted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var parsed []string
+	h.o.deps.Painter = scriptedPainter{parsed: &parsed}
+
+	// Act.
+	spans, err := h.o.paintSpans("")
+
+	// Assert.
+	if err != nil || len(spans) != 0 || len(parsed) != 0 {
+		t.Fatalf("paintSpans(\"\") = %v, %v after %d parses; want nothing", spans, err, len(parsed))
+	}
+}
+
+// TestAPainterFailureFailsThePaintingNamingIt covers the painter refusing the
+// output: the failure is returned, wrapped to say what was being painted.
+func TestAPainterFailureFailsThePaintingNamingIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var parsed []string
+	cause := errors.New("an escape the inventory does not know")
+	h.o.deps.Painter = scriptedPainter{err: cause, parsed: &parsed}
+
+	// Act.
+	_, err := h.o.paintSpans("\x1b[32mall green\x1b[0m")
+
+	// Assert.
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "painting the gate's output") {
+		t.Fatalf("paintSpans = %v, want the painter's failure wrapped naming the gate's output", err)
 	}
 }

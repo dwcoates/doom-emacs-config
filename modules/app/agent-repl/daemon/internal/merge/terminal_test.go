@@ -412,6 +412,19 @@ func TestDisplacedTurnIsResubmittedExactlyOnce(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("the displaced turn was resubmitted %d times, want exactly once", n)
 	}
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	for _, sub := range h.queue.submissions {
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME {
+			continue
+		}
+		if got := sub.Said.GetContent().GetBlocks()[0].GetText().GetText(); got != "carry on with the refactor" {
+			t.Fatalf("the resubmitted text = %q, want the displaced turn's own", got)
+		}
+		if sub.Turn == "" || sub.Turn == h.displaced.Turn {
+			t.Fatalf("the resubmission's turn = %q, want a fresh one, not the displaced %q", sub.Turn, h.displaced.Turn)
+		}
+	}
 }
 
 // TestTheDisplacedTurnGoesBackBeforeTheMergeLeavesItsLine pins the order the
@@ -910,6 +923,37 @@ func TestLedgerRecordsTheQueueInterval(t *testing.T) {
 	}
 	if closed.EndedAt.Before(closed.StartedAt) {
 		t.Fatalf("the queue interval = %+v, want a well-formed [started, ended] interval", closed)
+	}
+}
+
+// TestALandedMergesLedgerClosesEachStepsIntervalSucceeded covers the ledger a
+// landing leaves: each step it ran, the queue included, holds a closed
+// interval that ended succeeded.
+func TestALandedMergesLedgerClosesEachStepsIntervalSucceeded(t *testing.T) {
+	for _, kind := range []string{TabQueue, TabRebasing, TabTests, TabCommitting} {
+		t.Run(kind, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			landing(h, 1)
+			enqueue(t, h)
+
+			// Act.
+			if err := h.admit(context.Background()); err != nil {
+				t.Fatalf("the merge failed: %v", err)
+			}
+
+			// Assert.
+			entries, err := h.db.MergeLedger(context.Background(), theWorkspace)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("the ledger holds %d entries, want one per lease: %v", len(entries), err)
+			}
+			for _, interval := range entries[0].Intervals {
+				if interval.Kind == kind && interval.EndedAt != nil && interval.Outcome == "succeeded" {
+					return
+				}
+			}
+			t.Fatalf("intervals = %+v, want a closed %s interval that succeeded", entries[0].Intervals, kind)
+		})
 	}
 }
 
@@ -2004,6 +2048,31 @@ func TestAnAsyncCleanupRemovesItsRecordedWorktreeOnceItLands(t *testing.T) {
 	// Assert.
 	if len(h.git.cleanedWorktrees) != 1 || h.git.cleanedWorktrees[0] != "/wt/agent-fix" {
 		t.Fatalf("cleaned worktrees = %v, want the branch's /wt/agent-fix", h.git.cleanedWorktrees)
+	}
+}
+
+func TestAnAsyncLandingWithNoCleanupKeepsTheBranchsWorktree(t *testing.T) {
+	// Arrange: the branch is checked out in a worktree of its own, and the
+	// request asked for no cleanup.
+	h := newHarness(t)
+	h.git.mu.Lock()
+	h.git.worktrees = append(h.git.worktrees, gitclient.Worktree{Dir: "/wt/agent-fix", Branch: asyncBranch})
+	h.git.clean = true
+	h.git.mu.Unlock()
+
+	// Act.
+	landAsync(t, h, &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"})
+
+	// Assert: landed, the branch's worktree kept, the requester left open.
+	if len(h.git.cleanedWorktrees) != 0 || slices.Contains(h.git.removedWorktrees, "/wt/agent-fix") {
+		t.Fatalf("cleaned %v, removed %v; want the branch's worktree kept", h.git.cleanedWorktrees, h.git.removedWorktrees)
+	}
+	if h.db.closed[theWorkspace] {
+		t.Fatal("the requester was closed by its own async merge")
+	}
+	sent := h.detached.sent()
+	if len(sent) != 1 || sent[0].outcome.Kind != DetachedLanded {
+		t.Fatalf("handbacks = %+v, want the landing handed back", sent)
 	}
 }
 

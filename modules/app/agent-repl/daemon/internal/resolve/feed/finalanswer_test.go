@@ -275,6 +275,30 @@ func TestALandedAnswerStillGreensOnReplay(t *testing.T) {
 // TestATurnThatDidNotLandItsAnswerRaisesTheFault covers both NOT LANDED cases:
 // a terminal naming no answer over drawn prose, and a terminal naming an answer
 // no drawn row resolves.
+func TestAVendorStartedTurnsEndMarksAndNamesItsAnsweringResponse(t *testing.T) {
+	// Arrange: a turn the vendor started on its own, and its answer.
+	h := newHarness(t)
+	h.promptWith("turn-vendor", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+	h.send(responseSuccessActivity("unit-answer", "the hand-back is in"))
+
+	// Act: its terminal names that answer.
+	turn := ids.TurnID("turn-vendor")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-answer"), nil, nil)
+
+	// Assert: the response is the final answer, and the turn's own concluded
+	// terminal names it.
+	if !h.rowByID(rootFeed(), h.responseRowID("unit-answer")).GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("the vendor turn's answering response is not marked the final answer")
+	}
+	terminal := h.rowByID(rootFeed(), h.turnEndedRowID("turn-vendor"))
+	if got := terminal.GetTurn().GetValue(); got != "turn-vendor" {
+		t.Fatalf("terminal turn = %q, want turn-vendor", got)
+	}
+	if got := terminal.GetTurnEnded().GetConcluded().GetAnswer().GetValue(); got != h.responseRowID("unit-answer") {
+		t.Fatalf("concluded answer = %q, want the answering response %q", got, h.responseRowID("unit-answer"))
+	}
+}
+
 func TestATurnThatDidNotLandItsAnswerRaisesTheFault(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -368,6 +392,37 @@ func TestATurnThatDrewNoProseAndNamedNoAnswerRaisesNothing(t *testing.T) {
 	// Assert.
 	if fault := h.standingAnswerFault(); fault != nil {
 		t.Fatalf("a turn that drew no prose raised a fault: %v", fault.Evidence)
+	}
+}
+
+// TestTurnDrewProseSkipsFoldsThatAreNotThisTurnsAnswerProse pins the fold
+// filter: a fold of another turn, a fold with no markdown yet, and a
+// directive's fold are not prose this turn drew.
+func TestTurnDrewProseSkipsFoldsThatAreNotThisTurnsAnswerProse(t *testing.T) {
+	tests := []struct {
+		name       string
+		fold       proseState
+		directives map[string]bool
+	}{
+		{name: "a fold of another turn", fold: proseState{turn: "turn-2", markdown: "the other answer"}},
+		{name: "an empty fold", fold: proseState{turn: "turn-1"}},
+		{name: "a directive unit's fold", fold: proseState{turn: "turn-1", markdown: "compacted"}, directives: map[string]bool{"unit-1": true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			fold := tt.fold
+			s := &wsState{id: testWorkspace, responses: map[string]*proseState{"unit-1": &fold}, directiveUnits: tt.directives}
+
+			// Act.
+			unit, drew := h.resolver.turnDrewProse(s, "turn-1")
+
+			// Assert.
+			if drew || unit != "" {
+				t.Fatalf("turnDrewProse = (%q, %v), want (\"\", false)", unit, drew)
+			}
+		})
 	}
 }
 

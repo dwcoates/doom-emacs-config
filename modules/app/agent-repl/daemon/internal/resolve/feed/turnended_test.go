@@ -441,6 +441,9 @@ func TestTheVendorsErrorTaxonomyIsRespelledArmForArm(t *testing.T) {
 			if got := erroredArmWord(errored); got != tc.want {
 				t.Fatalf("arm = %q, want %q", got, tc.want)
 			}
+			if errored.GetHeadline().GetText() == "" {
+				t.Fatalf("errored = %v, want a daemon-composed headline on the %s arm", errored, tc.want)
+			}
 		})
 	}
 }
@@ -1157,8 +1160,12 @@ func TestAnUnexpectedEofDrawsTheUnexpectedEofCause(t *testing.T) {
 	})
 
 	// Assert.
-	if h.terminalRow("turn-1").GetErrored().GetQueryDied().GetUnexpectedEof() == nil {
-		t.Fatalf("cause = %v, want unexpected_eof", h.terminalRow("turn-1").GetErrored().GetQueryDied())
+	errored := h.terminalRow("turn-1").GetErrored()
+	if errored.GetQueryDied().GetUnexpectedEof() == nil {
+		t.Fatalf("cause = %v, want unexpected_eof", errored.GetQueryDied())
+	}
+	if errored.GetHeadline().GetText() == "" {
+		t.Fatalf("errored = %v, want a daemon-composed headline", errored)
 	}
 }
 
@@ -1320,17 +1327,65 @@ func TestATerminalWithNeitherSuccessNorFailureIsAnInvariantViolation(t *testing.
 }
 
 func TestTheTerminalRowIsStampedWithItsTurn(t *testing.T) {
-	// Arrange, Act.
+	// Arrange: two turns the feed has drawn prompts for.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "hello")
+	h.deliverPrompt("turn-2", "and then")
+
+	// Act: a terminal naming the first.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
 	}, nil)
 
-	// Assert.
+	// Assert: one terminal row, the named turn's own concluded end; the other
+	// turn is not ended.
+	var ended []*frontendv1.FeedRow
 	for _, row := range h.rows(rootFeed()) {
-		if row.GetTurnEnded() != nil && row.GetTurn().GetValue() != "turn-1" {
-			t.Fatalf("turn stamp = %q, want turn-1", row.GetTurn().GetValue())
+		if row.GetTurnEnded() != nil {
+			ended = append(ended, row)
+		}
+	}
+	if len(ended) != 1 {
+		t.Fatalf("terminal rows = %v, want exactly the named turn's", rowIDs(ended))
+	}
+	if got := ended[0].GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("turn stamp = %q, want turn-1", got)
+	}
+	if ended[0].GetTurnEnded().GetConcluded() == nil {
+		t.Fatalf("outcome = %T, want concluded", ended[0].GetTurnEnded().GetOutcome())
+	}
+	if h.hasTerminalRow("turn-2") {
+		t.Fatal("the turn the terminal did not name was ended")
+	}
+}
+
+func TestAVendorStartedTurnAndTheTurnItRacedEachConcludeOnTheirOwnTerminal(t *testing.T) {
+	// Arrange: a sent turn running, and the vendor's own turn announced
+	// behind it.
+	h := newHarness(t)
+	h.deliverPrompt("turn-racing", "the racing prompt")
+	h.promptWith("turn-vendor", conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED)
+	completed := &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}
+
+	// Act: the vendor turn ends, then the racing one.
+	h.terminal("turn-vendor", completed, nil)
+	vendorEndedAlone := !h.hasTerminalRow("turn-racing")
+	h.terminal("turn-racing", completed, nil)
+
+	// Assert: each turn's terminal row is its own, concluded, and the vendor's
+	// end did not end the racing turn.
+	if !vendorEndedAlone {
+		t.Fatal("the vendor turn's terminal ended the racing turn too")
+	}
+	for _, turn := range []string{"turn-vendor", "turn-racing"} {
+		row := h.rowByID(rootFeed(), h.turnEndedRowID(turn))
+		if got := row.GetTurn().GetValue(); got != turn {
+			t.Fatalf("terminal row %s turn = %q, want %q", row.GetId().GetValue(), got, turn)
+		}
+		if row.GetTurnEnded().GetConcluded() == nil {
+			t.Fatalf("%s outcome = %T, want concluded by its own terminal", turn, row.GetTurnEnded().GetOutcome())
 		}
 	}
 }

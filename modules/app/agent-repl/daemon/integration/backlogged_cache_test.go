@@ -7,9 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
-
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -77,60 +74,7 @@ func TestABackloggedWorkspaceIsStoodDownAndStruckThroughWhenItsGatedCacheLapses(
 	})
 }
 
-// sendBackloggedKeepalives asks the daemon for SPC j R's keep-alives and answers
-// its response, failing the test on a transport error.
-func sendBackloggedKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendBackloggedKeepalivesResponse {
-	t.Helper()
-	resp, err := d.Client().SendBackloggedKeepalives(d.Ctx(), connect.NewRequest(&agentreplv1.SendBackloggedKeepalivesRequest{}))
-	if err != nil {
-		t.Fatalf("SendBackloggedKeepalives = error %v", err)
-	}
-	return resp.Msg
-}
-
-func TestTheKeepalivesAnswerMovesTheBackloggedRowsCountdown(t *testing.T) {
-	t.Parallel()
-	// Arrange: a lapse projected, then the keep-alive sent.
-	f := backloggedAndHeld(t)
-	roster := f.d.WatchRoster()
-	shim := f.d.OpenedShim(f.ws)
-	shim.PushSessionUpdate(cacheLapse(time.Now().Add(10*time.Minute), 0))
-	sendBackloggedKeepalives(t, f.d)
-	later := time.Now().Add(time.Hour)
-
-	// Act: the held shim restates its lapse once the keep-alive's answer re-anchors.
-	shim.PushSessionUpdate(cacheLapse(later, 0))
-
-	// Assert
-	awaitRoster(t, f.d, roster, "the backlogged row counting down to the later lapse", func(r *frontendv1.RosterPush) bool {
-		return backlogRow(r, f.ws.GetId()).GetWhen().GetBacklogged().GetCache().GetLapsesAtMs() == later.UnixMilli()
-	})
-}
-
 // A CLOSED WORKSPACE GETS ONE LAST KEEP-ALIVE ROUND, THEN THE COLD GATE (owner
 // request, 2026-10-17): closing leaves the session up, the daemon sends the
 // one beat still owed, and the session is stood down when the lapse the shim
 // projects comes, so reopening it meets the cold gate.
-
-// closedAndLastRound opens a workspace and closes it. The close is recorded
-// before its call answers.
-func closedAndLastRound(t *testing.T) *fixture {
-	t.Helper()
-	f := newInGroup(t, groupBackloggedKeepalives)
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
-		t.Fatalf("CloseWorkspace = error %v", err)
-	}
-	return f
-}
-
-func TestClosingAWorkspaceStandsNothingDown(t *testing.T) {
-	t.Parallel()
-	// Arrange, Act
-	f := closedAndLastRound(t)
-
-	// Assert
-	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
-		t.Fatalf("the closed workspace was asked to hibernate %d times at the close, want none", n)
-	}
-}

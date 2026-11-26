@@ -49,6 +49,28 @@ func TestAPushNotificationStandsAsASalientLine(t *testing.T) {
 	}
 }
 
+func TestAPushNotificationStandsOverALiveTransient(t *testing.T) {
+	// Arrange: a hook's transient line is up.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, hookFrame("a-hook", true))
+	if transientOf(t, h).GetHook() == nil {
+		t.Fatalf("activity = %+v, want the hook's transient before the notification", lineNow(t, h))
+	}
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, notificationFrame("the branch is ready for review"))
+
+	// Assert: the salient line outranks the live transient, carrying its text
+	// on the idle status.
+	if got, want := lineNow(t, h), (activityLine{tier: "salient", kind: "notification", text: "the branch is ready for review"}); got != want {
+		t.Fatalf("activity = %+v, want %+v", got, want)
+	}
+	if got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetSalient().GetNotification().GetText(); got != "the branch is ready for review" {
+		t.Fatalf("idle salient notification = %q, want the agent's message", got)
+	}
+}
+
 func TestAPushTheVendorDidNotSendStillStandsAsASalientLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

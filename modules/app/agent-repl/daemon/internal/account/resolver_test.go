@@ -539,6 +539,40 @@ func TestIsMultiRepo(t *testing.T) {
 	}
 }
 
+func TestIsMultiRepoMatchesTheRealMultiRepoRootByInode(t *testing.T) {
+	tests := []struct {
+		name     string
+		spelling func(root string) string
+	}{
+		{
+			name:     "a differently-cased spelling of the real multi-repo root",
+			spelling: func(root string) string { return filepath.Join(filepath.Dir(root), "multi-repo") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: both dirs exist, so identity is the inode, not the bytes.
+			base := t.TempDir()
+			if !volumeIsCaseInsensitive(t, base) {
+				t.Skip("volume is case-sensitive; a differently-cased spelling names another directory")
+			}
+			root := filepath.Join(base, "Multi-Repo")
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatalf("MkdirAll() = %v", err)
+			}
+			r := newResolver(t, account.Roots{Default: filepath.Join(base, "default"), MultiRepo: root})
+
+			// Act.
+			got := r.IsMultiRepo(tc.spelling(root))
+
+			// Assert.
+			if !got {
+				t.Fatalf("IsMultiRepo(%q) = false, want true (the same directory as %q)", tc.spelling(root), root)
+			}
+		})
+	}
+}
+
 func TestRootsAreTheKnownRootsDefaultFirstAndDeduplicated(t *testing.T) {
 	tests := []struct {
 		name  string

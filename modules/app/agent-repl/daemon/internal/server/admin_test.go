@@ -665,6 +665,89 @@ func TestDaemonHealthRendersItsReportsErrorByItsCause(t *testing.T) {
 	}
 }
 
+// TestSessionHealthOfAnUnknownWorkspaceIsTheTypedArm pins that a session
+// health ask naming no registered workspace is answered in band as
+// unknown_workspace, asks no report, and warns about nothing.
+func TestSessionHealthOfAnUnknownWorkspaceIsTheTypedArm(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+	// Act.
+	resp, err := h.Client.SessionHealth(context.Background(), connect.NewRequest(&agentreplv1.SessionHealthRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: "/tmp/no-such-workspace"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SessionHealth = transport error %v, want the in-band arm", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if h.Health.sessionAsks != 0 {
+		t.Fatalf("session reports asked = %d, want none", h.Health.sessionAsks)
+	}
+	for _, level := range []string{dlog.LevelWarn, dlog.LevelError} {
+		if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: level}); ok {
+			t.Fatalf("record %+v, want no warning or error", rec)
+		}
+	}
+}
+
+// TestClientLogKeepsTheClientsLevel pins that each level arm the client sent
+// is the level the record is filed at.
+func TestClientLogKeepsTheClientsLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		level func(*agentreplv1.ClientLogRecord)
+		want  string
+	}{
+		{name: "debug", level: func(r *agentreplv1.ClientLogRecord) {
+			r.Level = &agentreplv1.ClientLogRecord_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}}
+		}, want: dlog.LevelDebug},
+		{name: "info", level: func(r *agentreplv1.ClientLogRecord) {
+			r.Level = &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}}
+		}, want: dlog.LevelInfo},
+		{name: "warn", level: func(r *agentreplv1.ClientLogRecord) {
+			r.Level = &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}}
+		}, want: dlog.LevelWarn},
+		{name: "error", level: func(r *agentreplv1.ClientLogRecord) {
+			r.Level = &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}}
+		}, want: dlog.LevelError},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			record := &agentreplv1.ClientLogRecord{
+				Site: "0123456789ab", Template: "a test record",
+				Operation: "webapp.render.slow",
+				Message:   "a render took too long",
+			}
+			tc.level(record)
+
+			// Act.
+			resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+				Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()},
+				Record: record,
+			}))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("ClientLog = %v, %v; want a success", resp, err)
+			}
+			if len(h.Surfaces.clientRecords) != 1 {
+				t.Fatalf("persisted %d records, want 1", len(h.Surfaces.clientRecords))
+			}
+			got := h.Surfaces.clientRecords[0]
+			if got.Level != tc.want || got.Operation != "webapp.render.slow" || got.ClientKind != dlog.RuntimeWebapp {
+				t.Fatalf("record = %+v, want a webapp record of webapp.render.slow at %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClientLogRoutesEachRuntimeToItsOwningSink pins all three routing arms,
 // including the historical webapp route for a sender that predates the oneof.
 func TestClientLogRoutesEachRuntimeToItsOwningSink(t *testing.T) {

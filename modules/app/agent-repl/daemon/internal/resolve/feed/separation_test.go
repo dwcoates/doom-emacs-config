@@ -474,8 +474,20 @@ func TestAWorktreeEnteredWithNoBranchNamedCarriesNone(t *testing.T) {
 }
 
 func TestAKeptTreeIsSomewhereToGo(t *testing.T) {
-	// Arrange, Act.
+	// Arrange: the exit call starts.
 	h := newHarness(t)
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{
+			State: &conversationv1.AgentWorktree_Start{Start: &conversationv1.AgentWorktreeStart{
+				Act: &conversationv1.AgentWorktreeStart_Exit{Exit: &conversationv1.AgentWorktreeExit{
+					Action: &conversationv1.AgentWorktreeExit_Keep{Keep: &conversationv1.AgentWorktreeExitKeep{}},
+				}},
+			}},
+		}},
+	})
+
+	// Act: it settles, keeping the tree.
 	h.send(&conversationv1.AgentActivity{
 		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
 		Item: &conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{
@@ -488,10 +500,15 @@ func TestAKeptTreeIsSomewhereToGo(t *testing.T) {
 		}},
 	})
 
-	// Assert.
-	left := h.separationRow().GetSeparation().GetWorktreeLeft()
+	// Assert: the kept path is drawn, and no context changed, so no token
+	// figure rides the divider.
+	separation := h.separationRow().GetSeparation()
+	left := separation.GetWorktreeLeft()
 	if left.GetKept().GetPath().GetText() != "/tmp/wt" {
 		t.Fatalf("kept path = %q", left.GetKept().GetPath().GetText())
+	}
+	if separation.GetTokens() != nil {
+		t.Fatalf("tokens = %+v, want unset on a worktree arm", separation.GetTokens())
 	}
 }
 

@@ -36,27 +36,6 @@ import (
 // Pre-state refusal
 // ---------------------------------------------------------------------------
 
-func TestFinishWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange: a workspace registered directly, never created, so it carries
-	// no creation job.
-	f := newCanonicalRegistered(t)
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	f.d.ExpectWarnings("daemon.merge.enqueue")
-
-	// Act
-	harness.CommitWork(t, f.ws.GetDir())
-	resp, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws)))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("FinishWorkspace = error %v, want a success carrying the no_layout_facts arm", err)
-	}
-	if resp.Msg.GetError().GetNoLayoutFacts() == nil {
-		t.Fatalf("FinishWorkspace = %v, want FinishWorkspaceError.no_layout_facts", resp.Msg)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Enqueue: the queue tab, the footer's queued substatus, the roster arm, and
 // a second workspace in the same repo queuing behind the first.

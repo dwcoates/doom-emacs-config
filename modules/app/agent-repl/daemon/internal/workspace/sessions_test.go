@@ -2761,6 +2761,60 @@ func TestStartStampsNothingBeforeTheIdentityIsDecided(t *testing.T) {
 	}
 }
 
+// TestStartResumesAStoodDownSessionsConversation pins that a session record
+// whose session was parked, or killed, is brought back by resuming its
+// recorded vendor conversation, never by a fresh start.
+func TestStartResumesAStoodDownSessionsConversation(t *testing.T) {
+	tests := []struct {
+		name     string
+		terminal string
+	}{
+		{name: "a parked session", terminal: wsm.TerminalParked},
+		{name: "a killed session", terminal: "killed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
+				Terminal: &wsm.SessionTerminal{Kind: tt.terminal}}
+
+			// Act.
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert.
+			if got := f.client.requests[0].GetResume().GetVendorSessionId(); got != "vendor-1" {
+				t.Fatalf("StartSession = %v, want a resume of vendor-1", f.client.requests[0])
+			}
+		})
+	}
+}
+
+// TestStartRefusesADeletedSessionBeforeAnySpawn pins that a session the
+// record says was deleted is refused naming the deletion and its detail, and
+// that nothing is spawned to be refused by.
+func TestStartRefusesADeletedSessionBeforeAnySpawn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1",
+		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "forget"}}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "deleted") || !strings.Contains(err.Error(), "forget") {
+		t.Fatalf("Start() = %v, want the deletion and its detail named", err)
+	}
+	if f.supervisor.spawnAttempts != 0 || len(f.supervisor.spawns) != 0 {
+		t.Fatalf("spawn attempts = %d, spawns = %d; want none", f.supervisor.spawnAttempts, len(f.supervisor.spawns))
+	}
+}
+
 func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
 	// Arrange: a fresh start after a stop mints a new identity, and the
 	// records of the second start must carry only that one.
@@ -5461,6 +5515,67 @@ func TestRecordEndedUnlessHeldRecordsOnlyForAWorkspaceTheFleetDoesNotHold(t *tes
 			}
 			if _, recorded := f.db.terminals[ws.ID]; recorded == tc.held {
 				t.Fatalf("recorded = %v, want it recorded only when no session holds the workspace", recorded)
+			}
+		})
+	}
+}
+
+// fakeUpdateAgentTransport answers UpdateAgent with a scripted response.
+type fakeUpdateAgentTransport struct {
+	shimclient.Client
+	resp *shimv1.UpdateAgentResponse
+}
+
+func (c *fakeUpdateAgentTransport) UpdateAgent(context.Context, *shimv1.UpdateAgentRequest) (*shimv1.UpdateAgentResponse, error) {
+	return c.resp, nil
+}
+
+// TestShimAdapterUpdateAgentCarriesTheShimsRefusal covers every verb the
+// adapter sends through UpdateAgent: a refusal reaches the caller as the
+// shim's arm in the shim's words.
+func TestShimAdapterUpdateAgentCarriesTheShimsRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		send    func(a *shimAdapter) error
+		failure *shimv1.UpdateAgentFailure
+		arm     string
+	}{
+		{
+			name: "an answer with no open ask",
+			send: func(a *shimAdapter) error {
+				return a.Answer(context.Background(), &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentAnswer{})
+			},
+			failure: &shimv1.UpdateAgentFailure{Detail: "the agent has no open ask",
+				Kind: &shimv1.UpdateAgentFailure_NoOpenAsk{NoOpenAsk: &shimv1.UpdateAgentNoOpenAsk{}}},
+			arm: ArmShimNoOpenAsk,
+		},
+		{
+			name: "a stop with nothing running",
+			send: func(a *shimAdapter) error {
+				return a.StopAgent(context.Background(), &conversationv1.AgentId{Value: "sub-1"})
+			},
+			failure: &shimv1.UpdateAgentFailure{Detail: "agent sub-1 is not running",
+				Kind: &shimv1.UpdateAgentFailure_NothingRunning{NothingRunning: &shimv1.UpdateAgentNothingRunning{}}},
+			arm: ArmShimNothingRunning,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			adapter := &shimAdapter{client: &fakeUpdateAgentTransport{resp: &shimv1.UpdateAgentResponse{
+				Result: &shimv1.UpdateAgentResponse_Failure{Failure: tt.failure},
+			}}}
+
+			// Act.
+			err := tt.send(adapter)
+
+			// Assert.
+			refusal, ok := AsShimRefusal(err)
+			if !ok {
+				t.Fatalf("send = %v, want a typed shim refusal", err)
+			}
+			if refusal.Verb != "UpdateAgent" || refusal.Arm != tt.arm || refusal.Detail != tt.failure.GetDetail() {
+				t.Fatalf("refusal = %+v, want UpdateAgent's %s with the shim's detail %q", refusal, tt.arm, tt.failure.GetDetail())
 			}
 		})
 	}

@@ -190,6 +190,45 @@ func TestCloseWorkspaceMapsTheBlockedArm(t *testing.T) {
 	}
 }
 
+// TestCloseWorkspaceAnswersAnUnresolvableRefInBand pins that a close naming
+// no registered workspace, or naming one by a dir the registry disagrees
+// with, is answered on CloseWorkspaceError's own arm and closes nothing.
+func TestCloseWorkspaceAnswersAnUnresolvableRefInBand(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *workspacev1.WorkspaceRef
+		got  func(*agentreplv1.CloseWorkspaceError) bool
+	}{
+		{name: "an unknown workspace", ref: &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/tmp/ws-nope"},
+			got: func(e *agentreplv1.CloseWorkspaceError) bool { return e.GetUnknownWorkspace() != nil }},
+		{name: "a ref whose dir disagrees", ref: &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: "/elsewhere"},
+			got: func(e *agentreplv1.CloseWorkspaceError) bool {
+				return e.GetWorkspaceRefMismatch().GetRegistryDir() == testWorkspaceDir
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.CloseWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: tt.ref, Requester: userRequester()}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("CloseWorkspace = transport error %v, want the in-band arm", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.name)
+			}
+			if len(h.Verbs.closedBy) != 0 {
+				t.Fatalf("close causes = %v, want nothing closed", h.Verbs.closedBy)
+			}
+		})
+	}
+}
+
 // TestCloseWorkspaceIsTheUsersClose pins that the rpc closes on the user's
 // behalf, which the close record keeps.
 func TestCloseWorkspaceIsTheUsersClose(t *testing.T) {
@@ -1223,6 +1262,99 @@ func TestRegisterRepositoryRefusesABlankPathAsMalformed(t *testing.T) {
 	}
 }
 
+// TestRegisterRepositoryAnswersTheRegisteredRepositoryAndWorkspace pins the
+// success arm's projection: the repository's ref and whether it was known,
+// and the main worktree's workspace ref and whether it was known.
+func TestRegisterRepositoryAnswersTheRegisteredRepositoryAndWorkspace(t *testing.T) {
+	tests := []struct {
+		name       string
+		registered workspace.RegisteredRepository
+	}{
+		{name: "a freshly minted repository and workspace", registered: workspace.RegisteredRepository{
+			Repository: wsm.Repository{ID: "repo-1", Dir: "/repos/one"},
+			Workspace:  wsm.Workspace{ID: "ws-main", Dir: "/repos/one"},
+		}},
+		{name: "a repository and workspace already known", registered: workspace.RegisteredRepository{
+			Repository:             wsm.Repository{ID: "repo-1", Dir: "/repos/one"},
+			RepositoryAlreadyKnown: true,
+			Workspace:              wsm.Workspace{ID: "ws-main", Dir: "/repos/one"},
+			WorkspaceAlreadyKnown:  true,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.registerRepositoryAnswer = tt.registered
+
+			// Act.
+			resp, err := h.Client.RegisterRepository(context.Background(),
+				connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{Path: "/repos/one/README.md"}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RegisterRepository: %v", err)
+			}
+			success := resp.Msg.GetSuccess()
+			if got := success.GetRepository(); got.GetId() != "repo-1" || got.GetDir() != "/repos/one" {
+				t.Fatalf("repository = %v, want repo-1 at /repos/one", got)
+			}
+			if success.GetAlreadyKnown() != tt.registered.RepositoryAlreadyKnown {
+				t.Fatalf("already_known = %v, want %v", success.GetAlreadyKnown(), tt.registered.RepositoryAlreadyKnown)
+			}
+			if !proto.Equal(success.GetWorkspace(), tt.registered.Workspace.Ref()) {
+				t.Fatalf("workspace = %v, want %v", success.GetWorkspace(), tt.registered.Workspace.Ref())
+			}
+			if success.GetWorkspaceAlreadyKnown() != tt.registered.WorkspaceAlreadyKnown {
+				t.Fatalf("workspace_already_known = %v, want %v", success.GetWorkspaceAlreadyKnown(), tt.registered.WorkspaceAlreadyKnown)
+			}
+		})
+	}
+}
+
+// TestRegisterRepositoryAnswersTheVerbsRefusalsOnTheirArms pins each refusal
+// the verb raises reaching RegisterRepositoryError by name, with its fields.
+func TestRegisterRepositoryAnswersTheVerbsRefusalsOnTheirArms(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		got     func(*agentreplv1.RegisterRepositoryError) bool
+	}{
+		{name: "not in a repository",
+			refusal: &workspace.Refusal{Rpc: "RegisterRepository", Arm: workspace.ArmNotInARepository, Reason: "no repository"},
+			got:     func(e *agentreplv1.RegisterRepositoryError) bool { return e.GetNotInARepository() != nil }},
+		{name: "an unreadable path",
+			refusal: &workspace.Refusal{Rpc: "RegisterRepository", Arm: workspace.ArmUnreadablePath, Reason: "no such file"},
+			got:     func(e *agentreplv1.RegisterRepositoryError) bool { return e.GetUnreadablePath() != nil }},
+		{name: "inside a temporary directory",
+			refusal: &workspace.Refusal{Rpc: "RegisterRepository", Arm: workspace.ArmInsideTemporaryDirectory, Reason: "scratch",
+				Fields: map[string]any{"dir": "/tmp/scratch/cwd", "temporary_root": "/tmp"}},
+			got: func(e *agentreplv1.RegisterRepositoryError) bool {
+				arm := e.GetInsideTemporaryDirectory()
+				return arm.GetDir() == "/tmp/scratch/cwd" && arm.GetTemporaryRoot() == "/tmp"
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.registerRepositoryErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.RegisterRepository(context.Background(),
+				connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{Path: "/somewhere"}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RegisterRepository = transport error %v, want the in-band arm", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.refusal.Arm)
+			}
+		})
+	}
+}
+
 // ---- SetWorkspaceParent ----------------------------------------------------
 
 // parentWorkspaceID is the registered workspace a retarget names as the new
@@ -1688,6 +1820,8 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 				return r.GetWorktree() == "/w/a" && slices.Equal(r.GetSuites(), []string{"repo-scans", "shellcheck"}) &&
 					r.GetFailingTests() == "- TestX" && r.GetLog() == "/s/rule_check-1-0.log"
 			}},
+		{name: "a workspace with no layout facts", refusal: &merge.RefusalError{Arm: merge.ArmNoLayoutFacts, Reason: "no recorded geometry"},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetNoLayoutFacts() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3678,6 +3812,47 @@ func TestRegisterWorkspaceRefusesAHandedAwayWorkspaceWithItsSuccessor(t *testing
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "RegisterWorkspace"}); !ok {
 		t.Fatalf("records = %+v, want the typed refusal recorded", log.Records())
+	}
+}
+
+// TestRegisterWorkspaceAnswersTheVerbsRefusalsOnTheirArms pins a lone
+// registration's typed refusals reaching RegisterWorkspaceError by name, with
+// their fields.
+func TestRegisterWorkspaceAnswersTheVerbsRefusalsOnTheirArms(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		got     func(*agentreplv1.RegisterWorkspaceError) bool
+	}{
+		{name: "not a worktree",
+			refusal: &workspace.Refusal{Rpc: "RegisterWorkspace", Arm: workspace.ArmNotAWorktree, Reason: "not a worktree"},
+			got:     func(e *agentreplv1.RegisterWorkspaceError) bool { return e.GetNotAWorktree() != nil }},
+		{name: "inside a temporary directory",
+			refusal: &workspace.Refusal{Rpc: "RegisterWorkspace", Arm: workspace.ArmInsideTemporaryDirectory, Reason: "scratch",
+				Fields: map[string]any{"dir": "/tmp/scratch/cwd", "temporary_root": "/tmp"}},
+			got: func(e *agentreplv1.RegisterWorkspaceError) bool {
+				arm := e.GetInsideTemporaryDirectory()
+				return arm.GetDir() == "/tmp/scratch/cwd" && arm.GetTemporaryRoot() == "/tmp"
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.registerErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.RegisterWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/w/a"}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RegisterWorkspace = transport error %v, want the in-band arm", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.refusal.Arm)
+			}
+		})
 	}
 }
 

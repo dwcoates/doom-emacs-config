@@ -586,6 +586,37 @@ func TestOnTurnEndedWhileAnotherTurnRunsStillClosesItsRow(t *testing.T) {
 	}
 }
 
+// TestAPromptRacingAVendorStartedTurnStartsTheHeldPromptOnlyAtItsOwnEnd covers
+// the race (ruled 2026-09-28): a delivered prompt's turn runs behind a turn
+// the vendor started, the vendor turn's end pops nothing into it, and the
+// prompt held behind both starts once the racing turn ends on its own terminal.
+func TestAPromptRacingAVendorStartedTurnStartsTheHeldPromptOnlyAtItsOwnEnd(t *testing.T) {
+	// Arrange: the racing prompt runs, the vendor's turn is adopted, a prompt is held.
+	h := newHarness(t)
+	running(t, h, "racing-turn", "the racing prompt")
+	h.q.OnTurnAdopted(theWorkspace, vendorStartedTurn)
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	h.q.OnTurnEnded(theWorkspace, "vendor-turn", wsm.CloseCompleted)
+	startedAfterVendorEnd := h.sender.started()
+	rec, recorded := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opTurnEnded,
+		Message: "the turn ended while another turn already runs; what is held waits for that one"})
+
+	// Act: the racing turn ends on its own terminal.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "racing-turn", wsm.CloseCompleted)
+
+	// Assert
+	if len(startedAfterVendorEnd) != 0 {
+		t.Fatalf("started after the vendor turn ended = %v, want nothing popped into the racing turn", startedAfterVendorEnd)
+	}
+	if !recorded || rec.Context["turn_in_flight"] != "racing-turn" {
+		t.Fatalf("record = %+v (found %v), want the INFO naming the racing turn in flight", rec, recorded)
+	}
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{"t1"}) {
+		t.Fatalf("started = %v, want the held prompt exactly once, after the racing turn's end", started)
+	}
+}
+
 // THE TURN'S BANNER: every live turn end raises it, after the door has drawn
 // the ending it is composed from.
 

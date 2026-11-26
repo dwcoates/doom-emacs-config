@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -587,6 +588,60 @@ func TestTheFreenessEdgeReachesTheStandingCloses(t *testing.T) {
 	// Assert
 	if !slices.Equal(closes.freed, []ids.WorkspaceID{"ws-1"}) {
 		t.Fatalf("standing closes told %v, want [ws-1]", closes.freed)
+	}
+}
+
+// noticingVerbs records the host notifications and ask settles the lifecycle
+// sink hands the workspace verbs.
+type noticingVerbs struct {
+	workspace.Verbs
+	notified []ids.WorkspaceID
+	notes    []sessionwatcher.HostNotification
+	settled  []ids.WorkspaceID
+}
+
+func (v *noticingVerbs) Notify(_ context.Context, ws ids.WorkspaceID, note sessionwatcher.HostNotification) error {
+	v.notified = append(v.notified, ws)
+	v.notes = append(v.notes, note)
+	return nil
+}
+
+func (v *noticingVerbs) AsksSettled(_ context.Context, ws ids.WorkspaceID) error {
+	v.settled = append(v.settled, ws)
+	return nil
+}
+
+func TestAHostNotificationIsRaisedThroughTheWorkspaceVerbs(t *testing.T) {
+	// Arrange: a permission ask's notification, the edge that sets the
+	// roster's attention marker.
+	verbs := &noticingVerbs{}
+	forwarder := &verbsForwarder{}
+	forwarder.bind(verbs)
+	sink := &lifecycleSink{verbs: forwarder, log: dlog.NewTestLogger()}
+	note := sessionwatcher.HostNotification{Kind: sessionwatcher.NotificationPermissionRequested}
+
+	// Act.
+	sink.OnNotification("ws-1", note)
+
+	// Assert.
+	if len(verbs.notified) != 1 || verbs.notified[0] != "ws-1" || verbs.notes[0].Kind != note.Kind {
+		t.Fatalf("notified %v with %+v, want ws-1's permission notification", verbs.notified, verbs.notes)
+	}
+}
+
+func TestSettledAsksClearTheAttentionMarkerThroughTheWorkspaceVerbs(t *testing.T) {
+	// Arrange.
+	verbs := &noticingVerbs{}
+	forwarder := &verbsForwarder{}
+	forwarder.bind(verbs)
+	sink := &lifecycleSink{verbs: forwarder, log: dlog.NewTestLogger()}
+
+	// Act.
+	sink.OnAsksSettled("ws-1")
+
+	// Assert.
+	if len(verbs.settled) != 1 || verbs.settled[0] != "ws-1" {
+		t.Fatalf("asks settled for %v, want [ws-1]", verbs.settled)
 	}
 }
 

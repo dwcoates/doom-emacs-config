@@ -202,13 +202,6 @@ func (f *fixture) submitRaw(req *agentreplv1.SubmitPromptRequest) *agentreplv1.S
 	return resp.Msg
 }
 
-// submitExpectingError sends a SubmitPrompt whose refusal is the subject.
-func (f *fixture) submitExpectingError(req *agentreplv1.SubmitPromptRequest) error {
-	f.t.Helper()
-	_, err := f.d.Client().SubmitPrompt(f.d.Ctx(), connect.NewRequest(req))
-	return err
-}
-
 // openFeed opens a feed and answers its first page and watch token.
 func (f *fixture) openFeed(feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	f.t.Helper()
@@ -491,19 +484,6 @@ func awaitShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what st
 	return row.GetDetachedShell().GetShell()
 }
 
-// expectNoShellSpool asserts the shell bubble's sub-feed carries NO spool body
-// at all — neither already in its page nor arriving on its tail.
-func expectNoShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what string) {
-	t.Helper()
-	page, token := f.openFeed(head.GetId())
-	for _, r := range page.GetSuccess().GetRows() {
-		if r.GetDetachedShell() != nil {
-			t.Fatalf("the shell sub-feed's page carries a spool body %v, want none: %s", r.GetDetachedShell(), what)
-		}
-	}
-	harness.ExpectNoPush(t, f.d.WatchFeed(token), what)
-}
-
 // awaitFooter reads footer pushes until one satisfies the predicate.
 func awaitFooter(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FooterView], what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
@@ -759,22 +739,6 @@ func detachedShell(work, command string) *conversationv1.AgentDetachedWork {
 					StartedAt: startedAt(1_700_000_000_000),
 				}},
 			}}},
-		}},
-	}
-}
-
-// movedShell announces that an in-turn shell unit's work LEFT for the
-// background. The handle IS the spawning call's own id (ruling, landing 3), so
-// one identity addresses the work and the unit it moved out of.
-func movedShell(unit string) *conversationv1.AgentDetachedWork {
-	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: unit},
-		Kind: bashKind(),
-		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
-			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
-			Cause: &conversationv1.DetachedWorkDetached_TimedOut{TimedOut: &conversationv1.DetachedCauseTimedOut{
-				TimeoutMs: 120_000,
-			}},
 		}},
 	}
 }

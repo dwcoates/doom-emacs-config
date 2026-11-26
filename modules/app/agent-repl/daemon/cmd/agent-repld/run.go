@@ -730,19 +730,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if built.Bind != nil {
 		built.Bind(srv)
 	}
-	if built.Prime != nil {
-		primeStart := time.Now()
-		if err := built.Prime(serving); err != nil {
-			log.Error("daemon.cmd.serve", "the opening views could not be published", dlog.Context{
-				"error": err.Error(),
-			})
-			return fmt.Errorf("agent-repld: publish the opening views: %w", err)
-		}
-		// TIMED, because it stands between the boot's reconciliation and
-		// serving: whatever it costs, every client waits.
-		log.Info("daemon.cmd.serve", "published the opening views", dlog.Context{
-			"took_ms": time.Since(primeStart).Milliseconds(),
-		})
+	if err := primeOpeningViews(serving, log, built.Prime); err != nil {
+		return err
 	}
 	// The background loops start only now, for the same reason: each of them
 	// can push, and pushing into a surface that does not exist is a drop.
@@ -1749,4 +1738,27 @@ func nameClaimHolder(record dlog.Context, err error, procs identityReader) {
 		record["holder"] = id.Name
 		record["holder_ppid"] = id.PPID
 	}
+}
+
+// primeOpeningViews publishes what a client must be able to receive before it
+// has asked for anything (Built.Prime), when the graph has any. A failure is
+// the boot's: recorded at ERROR and returned, so the daemon never serves
+// without its opening views.
+func primeOpeningViews(serving context.Context, log dlog.Logger, prime func(context.Context) error) error {
+	if prime == nil {
+		return nil
+	}
+	primeStart := time.Now()
+	if err := prime(serving); err != nil {
+		log.Error("daemon.cmd.serve", "the opening views could not be published", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("agent-repld: publish the opening views: %w", err)
+	}
+	// TIMED, because it stands between the boot's reconciliation and
+	// serving: whatever it costs, every client waits.
+	log.Info("daemon.cmd.serve", "published the opening views", dlog.Context{
+		"took_ms": time.Since(primeStart).Milliseconds(),
+	})
+	return nil
 }

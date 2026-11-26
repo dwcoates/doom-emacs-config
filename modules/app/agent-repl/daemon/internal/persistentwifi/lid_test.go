@@ -69,6 +69,9 @@ func TestALidCloseWithTheModeOnEntersTheQuietState(t *testing.T) {
 	if !slices.Equal(h.telemetry.set, []bool{true}) {
 		t.Fatalf("gauge set %v, want [true]", h.telemetry.set)
 	}
+	if set := brightnessSets(h); len(set) != 0 {
+		t.Fatalf("brightness calls %v, want the display asleep at the user's own level", set)
+	}
 	infos := h.records(dlog.LevelInfo, opQuiet)
 	if len(infos) != 1 || infos[0].Context["trigger"] != "lid_closed" {
 		t.Fatalf("INFO records = %+v, want the one entering record", infos)
@@ -100,6 +103,20 @@ func TestALidOpenLeavesTheQuietStateInReverse(t *testing.T) {
 	if !slices.Equal(h.telemetry.set, []bool{true, false}) {
 		t.Fatalf("gauge set %v, want [true false]", h.telemetry.set)
 	}
+	if set := brightnessSets(h); len(set) != 0 {
+		t.Fatalf("brightness calls %v, want the user's own level left alone", set)
+	}
+}
+
+// brightnessSets answers every brightness write the controller ran.
+func brightnessSets(h *harness) []string {
+	var out []string
+	for _, c := range h.r.ran() {
+		if strings.HasPrefix(c, argBrightness("")) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func TestALidCloseWithTheModeOffStaysAwake(t *testing.T) {

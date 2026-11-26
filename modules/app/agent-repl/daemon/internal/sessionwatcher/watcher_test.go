@@ -339,6 +339,27 @@ func TestAnUnseenUnitsTerminalRetiresItsWork(t *testing.T) {
 	}
 }
 
+// TestARestoredDetachedItemWithNoKindIsRefusedAtStart covers the opening
+// level's own malformed item: a restored detached item that states no kind is
+// recorded at ERROR and skipped, opening no watch and reaching no view.
+func TestARestoredDetachedItemWithNoKindIsRefusedAtStart(t *testing.T) {
+	// Arrange / Act.
+	h := newHarness(t, Session{Started: sessionStarted("", detachedWork("restored-detached-1", "some-earlier-activity", nil))})
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.sessionwatcher.detached_kind_unknown") {
+		t.Fatal("the kindless restored item was not recorded at ERROR")
+	}
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("live work = %+v, want the item skipped", h.w.LiveWork())
+	}
+	h.client.NoAgentOpen(t)
+	h.client.NoBashOpen(t)
+	if hasEvent(h.rec.drain(), "feed.OnStandingWork") {
+		t.Fatal("the kindless restored item reached the feed as standing work")
+	}
+}
+
 // TestAMalformedAnnouncementIsRefused covers the refusals: an announcement
 // the watcher cannot route is recorded at ERROR, opens nothing, reaches no
 // view, and leaves the live set as it was.
@@ -2952,6 +2973,70 @@ func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
 	// Assert.
 	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_open_at_attach")["turn_id"]; got != "turn-1" {
 		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}
+
+// TestATurnWaitingAtAttachIsRecordedAtInfoAndKeptOpen covers the turn an
+// adoption finds waiting behind a vendor-started turn: the shim holds it too,
+// so it is said to be kept, and never closed as ended unobserved.
+func TestATurnWaitingAtAttachIsRecordedAtInfoAndKeptOpen(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{OpenAtAttach: openRows("turn-v", "turn-q")}, nil)
+	h.session = h.client.NextSessionOpen(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStartedWaiting("turn-v", "turn-q"))
+	h.sendSessionUpdate(t, compactingUpdate())
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sessionwatcher.turn_open_at_attach",
+		Match: func(r dlog.Record) bool { return r.Context["turn_id"] == "turn-q" }}); !ok {
+		t.Fatalf("records = %+v, want turn-q kept open at INFO", h.log.Records())
+	}
+	if got := unobservedTurns(seen); len(got) != 0 {
+		t.Fatalf("turns closed as ended unobserved = %v, want none", got)
+	}
+}
+
+// TestTheTurnWaitingBehindAnAdoptedTurnIsRecordedResumedAtItsEnd covers the
+// edge at which the waiting turn starts to run: the turn ahead ended, and
+// the record names the turn now in flight.
+func TestTheTurnWaitingBehindAnAdoptedTurnIsRecordedResumedAtItsEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStartedWaiting("turn-v", "turn-q")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	endAdopted(h)
+
+	// Assert.
+	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_resumed")["turn_id"]; got != "turn-q" {
+		t.Fatalf("the INFO record names turn %v, want turn-q", got)
+	}
+}
+
+// TestTheTurnWaitingBehindAnAdoptedTurnEndsOnItsOwnTerminal covers the
+// waiting turn's close once it runs: its own stamped success ends it
+// completed, and nothing is left in flight.
+func TestTheTurnWaitingBehindAnAdoptedTurnEndsOnItsOwnTerminal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStartedWaiting("turn-v", "turn-q")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	endAdopted(h)
+
+	// Act.
+	got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-q-end", "turn-q"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-q" || ended.close != wsm.CloseCompleted {
+		t.Fatalf("turn ended = (%v, %v), want turn-q completed", ended.turn, ended.close)
+	}
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none", *turn)
 	}
 }
 

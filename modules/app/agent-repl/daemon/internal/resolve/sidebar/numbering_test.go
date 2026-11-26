@@ -147,14 +147,23 @@ func TestAFoldedSubsectionsOpenRowsHaveAFoldedTabAndTheRestRunUnbroken(t *testin
 	r.SetRegistry(foldedSubsectionRegistry())
 	liveRegistry(r, foldedSubsectionRegistry())
 
-	// Assert: a2 (in the folded subsection) is off the bar, and the numbers
-	// still run 1..N with no gap.
+	// Assert: a2 (in the folded subsection) is off the bar, its open row
+	// carrying a folded tab, and the numbers still run 1..N with no gap.
 	rows, numbers := openRowsAndNumbers(latest(t, r))
 	if want := []string{"a1", "p", "k", "m", "b1"}; !equal(rows, want) {
 		t.Fatalf("numbered rows = %v, want %v", rows, want)
 	}
 	if want := []string{"1", "2", "3", "4", "5"}; !equal(numbers, want) {
 		t.Fatalf("numbers = %v, want %v", numbers, want)
+	}
+	folded := false
+	for _, open := range rosterwalk.OpenRows(latest(t, r)) {
+		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == "a2" {
+			folded = open.GetTab().GetFolded() != nil
+		}
+	}
+	if !folded {
+		t.Fatal("a2's open row has no folded tab, want its tab folded under the collapsed subsection")
 	}
 }
 

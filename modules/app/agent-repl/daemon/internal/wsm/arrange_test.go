@@ -568,6 +568,7 @@ func TestPlaceWorkspaceIntoAnEmptySubsectionPutsItLast(t *testing.T) {
 	repoDir := arrangeRepo(t, "repo")
 	first := registerIn(t, s, repoDir, "first", nil)
 	registerIn(t, s, repoDir, "second", nil)
+	registerIn(t, s, repoDir, "third", nil)
 	later := mustSubsection(t, s, first.Repo, "later")
 
 	// Act
@@ -580,7 +581,7 @@ func TestPlaceWorkspaceIntoAnEmptySubsectionPutsItLast(t *testing.T) {
 	if got := subsectionOf(t, s, first.ID); !sameSubsection(got, &later.ID) {
 		t.Fatalf("subsection = %v, want %q", got, later.ID)
 	}
-	if got, want := orderedNames(t, s), []string{"second", "first"}; !slices.Equal(got, want) {
+	if got, want := orderedNames(t, s), []string{"third", "second", "first"}; !slices.Equal(got, want) {
 		t.Fatalf("place order = %v, want %v", got, want)
 	}
 }

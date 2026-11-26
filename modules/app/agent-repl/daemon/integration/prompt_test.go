@@ -64,60 +64,6 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 	}
 }
 
-// TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused pins the 2026-09-27
-// prompt loss end to end: a submission whose key was claimed but whose turn the
-// shim never took is NOT a duplicate, so its retry under the SAME key is
-// delivered -- one more StartTurn, and a minted turn -- rather than answered
-// duplicate_submission and dropped by the client.
-func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
-	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
-	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("do the thing"), IdempotencyKey: "retried-key", Origin: origin,
-	}); err == nil {
-		t.Fatal("the first submission succeeded, want it refused by the shim")
-	}
-
-	// Act
-	retry := f.submit("do the thing", "retried-key", origin)
-
-	// Assert
-	if retry.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("the retry = %v, want it delivered under a minted turn", retry)
-	}
-	if got := f.shim.Count(harness.RPCStartTurn); got != 2 {
-		t.Fatalf("StartTurn count = %d, want 2 (the refused original and the delivered retry)", got)
-	}
-}
-
-func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-
-	// Act: internal/server/validate.go refuses PROMPT_ORIGIN_UNSPECIFIED
-	// before the request ever resolves a workspace, so this is a pure
-	// InvalidArgument -- never an SubmitPromptError arm.
-	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
-		Workspace:      f.ws,
-		Said:           said("no origin"),
-		IdempotencyKey: "k-no-origin",
-		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
-	})
-
-	// Assert
-	if connectCode(err) != connect.CodeInvalidArgument {
-		t.Fatalf("SubmitPrompt with origin UNSPECIFIED = %v (code %v), want CodeInvalidArgument", err, connectCode(err))
-	}
-	if !containsField(err, "origin") {
-		t.Fatalf("SubmitPrompt refusal = %v, want it to name the unset field \"origin\"", err)
-	}
-	// Validation refuses before any component ever logs.
-}
-
 // ---------------------------------------------------------------------------
 // SubmitPrompt while a turn is in flight: HELD
 // ---------------------------------------------------------------------------
@@ -472,39 +418,6 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 	}
 }
 
-func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.submit("start the work", "k-running", origin)
-	f.shim.ExpectStartTurn()
-	resp2 := f.submit("a prompt to release", "k-release", origin)
-	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-
-	// Act
-	relResp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
-		Workspace: f.ws,
-		Turn:      turn2,
-		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
-	}))
-	if err != nil {
-		t.Fatalf("UpdateHeldPrompt{release} = error %v, want a success", err)
-	}
-	if relResp.Msg.GetSuccess() == nil {
-		t.Fatalf("UpdateHeldPrompt{release} = %v, want a success", relResp.Msg)
-	}
-
-	// Assert: release sends the prompt to the shim at once, to join the
-	// running turn, and interrupts nothing.
-	st2 := f.shim.ExpectStartTurn()
-	if st2.GetTurn().GetValue() != turn2.GetValue() || !st2.GetJoinRunningTurn() {
-		t.Fatalf("StartTurn after release = %v, want the released turn %q sent to join the running turn", st2, turn2.GetValue())
-	}
-	if kills := f.shim.Count(harness.RPCKillTurn); kills != 0 {
-		t.Fatalf("KillTurn calls = %d, want nothing interrupted", kills)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Held prompts across a daemon restart
 // ---------------------------------------------------------------------------
@@ -762,92 +675,6 @@ func TestSubmitPromptToASubagentBubbleDeliversViaUpdateAgentPrompt(t *testing.T)
 	}
 }
 
-func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The queue records the shim's refusal of the delivery it attempted; the
-	// refusal is an ANSWER to the caller and the record is its evidence.
-	f.d.ExpectWarnings("daemon.promptqueue.deliver")
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
-	row := awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
-		return r.GetDetachedSubagent() != nil
-	})
-	first := f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("first"), IdempotencyKey: "k-bubble-1", Origin: origin, Feed: row.GetId(),
-	})
-	if first.GetError() != nil {
-		t.Fatalf("the first bubble submit = %v, want a success", first)
-	}
-	f.shim.ExpectUpdateAgent()
-	// The SHIM is what judges a subagent's own turn, so the fake states the
-	// verdict: the next UpdateAgent is refused agent_busy
-	// (shim.v1 UpdateAgentFailure.agent_busy, landing 7).
-	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
-		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
-			Detail: "the addressed agent's own turn is already open",
-			Kind:   &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}},
-		}},
-	})
-
-	// Act
-	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("second"), IdempotencyKey: "k-bubble-2", Origin: origin, Feed: row.GetId(),
-	})
-
-	// Assert
-	// LANDING 7: the shim's refusal is relayed by kind on the landed arm
-	// SubmitPromptError.bubble_refused, and the daemon never judges the
-	// subagent's turn itself.
-	refused := resp.GetError().GetBubbleRefused()
-	if refused == nil || refused.GetAgentBusy() == nil {
-		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want error.bubble_refused{kind: agent_busy}", resp)
-	}
-	if refused.GetDetail() == "" {
-		t.Fatalf("bubble_refused.detail is empty, want the shim's own words as evidence")
-	}
-}
-
-// A PROMPT ADDRESSED AT A SETTLED SUBAGENT'S BUBBLE IS REFUSED not_deliverable,
-// by the shim's own verdict (a subagent has no SDK route for a prompt), relayed
-// by kind on SubmitPromptError.bubble_refused with the shim's words as detail.
-func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	// The queue records the shim's refusal of the delivery it attempted; the
-	// refusal is an ANSWER to the caller and the record is its evidence.
-	f.d.ExpectWarnings("daemon.promptqueue.deliver")
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
-	row := awaitRow(t, f, feed, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetSubagent().GetSettled() != nil
-	})
-	const detail = "a subagent has no SDK route for a prompt"
-	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
-		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
-			Detail: detail,
-			Kind:   &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}},
-		}},
-	})
-
-	// Act
-	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
-		Workspace: f.ws, Said: said("are you still there?"), IdempotencyKey: "k-bubble-settled", Origin: origin, Feed: row.GetId(),
-	})
-
-	// Assert
-	refused := resp.GetError().GetBubbleRefused()
-	if refused == nil || refused.GetNotDeliverable() == nil {
-		t.Fatalf("a submit to a settled subagent's bubble = %v, want error.bubble_refused{kind: not_deliverable}", resp)
-	}
-	if refused.GetDetail() != detail {
-		t.Fatalf("bubble_refused.detail = %q, want the shim's own words %q", refused.GetDetail(), detail)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Slash commands
 // ---------------------------------------------------------------------------
@@ -904,31 +731,6 @@ func TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage(t *test
 	}
 	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
 		t.Fatalf("StartTurn count after /context = %d, want 0: the panel is answered inline", got)
-	}
-}
-
-// A SECOND PUSH MOVES THE PANEL: the daemon's held usage is what /context
-// reads, so a larger figure pushed between two reads shows in the second
-// header without the reader asking the vendor anything.
-func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	topbar := f.d.WatchTopbar(f.ws)
-	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
-	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
-
-	// Act
-	f.shim.PushSessionUpdate(ctxUsage(168_900, 84))
-	second := contextPanelAfter(t, f, topbar, "168.9k", "k-context-second")
-
-	// Assert
-	if second.GetHeader().GetUsed() == first.GetHeader().GetUsed() && second.GetHeader().GetPercent() == first.GetHeader().GetPercent() {
-		t.Fatalf("the /context header did not move between pushes: used %q/percent %d then used %q/percent %d",
-			first.GetHeader().GetUsed(), first.GetHeader().GetPercent(), second.GetHeader().GetUsed(), second.GetHeader().GetPercent())
-	}
-	if second.GetHeader().GetUsed() == "" {
-		t.Fatalf("the second /context header = %v, want it composed", second.GetHeader())
 	}
 }
 
@@ -1490,45 +1292,6 @@ func TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents(t *testing.T) {
 // AnswerPermission
 // ---------------------------------------------------------------------------
 
-// AN ANSWER TO AN AGENT THE SHIM NO LONGER KNOWS IS REFUSED BY ITS LEDGERED
-// ARM. AnswerPermissionError carries no `unknown_agent` arm
-// (endpoint_answer_permission.proto); the gap is a row in daemon/ERROR-ARMS.md,
-// and server.UnlandedArm refuses it failed_precondition naming the intended
-// arm, recorded under daemon.refusal.unlanded_arm so the ledger reconciles
-// against the log.
-func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
-	t.Parallel()
-	// Arrange: an open ask, and a shim that no longer knows its agent.
-	f := newCanonical(t)
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
-	feed := f.watchRootFeed()
-	f.shim.AwaitAgentWatch()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
-	}))
-	row := awaitRow(t, f, feed, "the permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
-	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
-		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
-			Detail: "no such agent",
-			Kind:   &shimv1.UpdateAgentFailure_UnknownAgent{UnknownAgent: &shimv1.UpdateAgentUnknownAgent{}},
-		}},
-	})
-
-	// Act
-	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace: f.ws, Permission: row.GetId(),
-		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
-	}))
-
-	// Assert
-	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
-		t.Fatalf("AnswerPermission to a forgotten agent = %v, want failed_precondition", err)
-	}
-	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
-		t.Fatalf("AnswerPermission refusal = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
-	}
-}
-
 func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	t.Parallel()
 	t.Run("allow_once", func(t *testing.T) {
@@ -1615,85 +1378,6 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 // AnswerQuestion
 // ---------------------------------------------------------------------------
 
-// promptOpenQuestion builds a single-select question batch of one.
-func promptOpenQuestion(id, question string, options ...string) *conversationv1.AgentQuestion {
-	var opts []*conversationv1.AgentQuestionOption
-	for _, o := range options {
-		opts = append(opts, &conversationv1.AgentQuestionOption{Label: &conversationv1.AgentQuestionOptionLabel{Label: o}})
-	}
-	return &conversationv1.AgentQuestion{
-		Id: &conversationv1.AgentQuestionId{Value: id},
-		Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
-			Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
-				Question: &conversationv1.AgentQuestionText{Text: question},
-				Header:   "Choice",
-				Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
-					Options: opts,
-				}},
-			}}},
-			StartedAt: startedAt(1_700_000_000_000),
-		}},
-	}
-}
-
-func TestAnswerQuestionEchoesServedTextsAndLabels(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-1", "Pick one", "A", "B")},
-	}))
-	row := awaitRow(t, f, feed, "the question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
-
-	// Act
-	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
-		Workspace: f.ws, Question: row.GetId(),
-		Answers: []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A"}}},
-	}))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerQuestion = %v, %v, want a success", resp, err)
-	}
-	req := f.shim.ExpectUpdateAgent()
-	ans := req.GetInput().GetAnswer().GetQuestionAnswer()
-	if ans.GetAsk().GetValue() != "q-1" {
-		t.Fatalf("UpdateAgent answer.ask = %q, want %q", ans.GetAsk().GetValue(), "q-1")
-	}
-	sels := ans.GetAnswers().GetAnswers()
-	if len(sels) != 1 || sels[0].GetQuestion().GetText() != "Pick one" {
-		t.Fatalf("UpdateAgent answer selections = %v, want one echoing %q", sels, "Pick one")
-	}
-	if len(sels[0].GetChosen()) != 1 || sels[0].GetChosen()[0].GetLabel().GetLabel() != "A" {
-		t.Fatalf("UpdateAgent chosen = %v, want [%q]", sels[0].GetChosen(), "A")
-	}
-}
-
-func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
-	t.Parallel()
-	// Arrange: no question was ever posed, so the named feed row addresses
-	// nothing standing.
-	f := newCanonical(t)
-
-	// Act: an undecodable FeedId takes the server's own askIDFrom path
-	// (internal/server/answers.go), never reaching workspace.refuse -- no
-	// component here logs a WARN.
-	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
-		Workspace: f.ws,
-		Question:  &frontendv1.FeedId{Value: "not-a-real-feed-id"},
-		Answers:   []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A"}}},
-	}))
-
-	// Assert: `ask_not_standing` is a LANDED arm, so the refusal is typed.
-	if err != nil {
-		t.Fatalf("AnswerQuestion on a card that never stood = error %v, want the typed ask_not_standing answer", err)
-	}
-	if resp.Msg.GetError().GetAskNotStanding() == nil {
-		t.Fatalf("AnswerQuestion on a card that never stood = %v, want error.ask_not_standing", resp.Msg)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The displaced user turn: captured durably at lease acquisition, resubmitted
 // exactly once at lease release. merge_test.go's own
@@ -1703,68 +1387,6 @@ func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
 // doc comment). This is the ordinary, no-crash half: a ready-and-waiting
 // resubmission the moment the merge that displaced the turn tears down.
 // ---------------------------------------------------------------------------
-
-// TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease
-// covers audit-3 critique 24's non-bounce half: internal/workspace/fleet_rollout.go's
-// CaptureDisplaced marks the workspace's own still-in-flight turn at the
-// merge's admission (internal/merge/run.go), and
-// internal/merge/terminal.go's resubmitDisplaced puts it back with a fresh
-// TurnId at teardown. A clean self-repo merge with a passing test gate (the
-// mergeCleanRepo fixture, merge_test.go) submits nothing of its own before
-// landing, so the resubmission is the ONLY further StartTurn this
-// workspace's shim ever sees -- which is what lets the count below name the
-// resubmission exactly, with no race against the merge's own traffic.
-func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease(t *testing.T) {
-	t.Parallel()
-	// Arrange: a clean self-repo merge target with a turn of its own still
-	// open when the merge takes the lease.
-	f, d, _, script := mergeCleanRepo(t)
-	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	resp := f.submit("keep going", "k-displace", origin)
-	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
-		t.Fatalf("SubmitPrompt = %v, want a minted TurnId for the turn the merge will displace", resp)
-	}
-	displaced := f.shim.ExpectStartTurn()
-	if got := text(displaced.GetSaid()); got != "keep going" {
-		t.Fatalf("the displaced turn's StartTurn.said = %q, want %q", got, "keep going")
-	}
-	// No terminal frame is ever pushed for it: it is still the workspace's
-	// in-flight turn when FinishWorkspace is called below, which is exactly
-	// what CaptureDisplaced reads (sessionwatcher's TurnInFlight()).
-	beforeMerge := f.shim.Count(harness.RPCStartTurn)
-
-	// Act: the merge admits, captures the still-open turn as displaced, and
-	// lands with no conflict and a passing gate.
-	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
-	}
-	// ExpectStartTurnWithCount BLOCKS for the next request, so this is the
-	// resubmission's own arrival -- not a race against the merge's teardown --
-	// AND IT ANSWERS THE COUNT AT THE POP. The same teardown step that
-	// resubmits this turn then force-stops the session before removing the
-	// worktree, so a separate Count call afterwards dials a fake shim that is
-	// deliberately on its way out and reads a clean EOF from its control
-	// socket; observed once under the suite's -parallel 8 load as
-	// "no reply to count: <nil>".
-	resubmit, turns := f.shim.ExpectStartTurnWithCount()
-
-	// Assert: exactly one further StartTurn arrived -- the resubmission --
-	// and the count observed at its pop is the negative probe for a third.
-	if got := turns; got != beforeMerge+1 {
-		t.Fatalf("StartTurn count once the resubmission arrived = %d, want exactly %d (beforeMerge+1: the one resubmission, never a third)", got, beforeMerge+1)
-	}
-	if got := text(resubmit.GetSaid()); got != "keep going" {
-		t.Fatalf("the resubmitted turn's StartTurn.said = %q, want the displaced turn's own text %q", got, "keep going")
-	}
-	if resubmit.GetOrigin() != mergeDisplacedResumeOrigin {
-		t.Fatalf("the resubmitted turn's StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME (%d)", resubmit.GetOrigin(), mergeDisplacedResumeOrigin)
-	}
-	if resubmit.GetTurn().GetValue() == displaced.GetTurn().GetValue() {
-		t.Fatalf("the resubmitted turn's id = the displaced turn's own id %q, want a fresh TurnId (resubmitDisplaced mints one)", displaced.GetTurn().GetValue())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // prompt_test.go helpers
@@ -1818,42 +1440,6 @@ func (f *fixture) submitDeferred(text, key string) *agentreplv1.SubmitPromptResp
 	})
 }
 
-// TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn pins the delivery
-// end to end. The -fake heuristic interjects a prompt beginning "stop", so an
-// ORDINARY one would interrupt the running turn (see
-// TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunningTurn);
-// the deferred one is held for the turn's end, unjudged, and starts only once
-// that turn has ended, as a turn of its own.
-func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.submit("start the long task", "k-running", origin)
-	f.shim.ExpectStartTurn()
-	holds := f.d.WatchHolds(f.ws)
-
-	// Act
-	resp := f.submitDeferred("stop and rebase once this is done", "k-deferred")
-	turn := resp.GetSuccess().GetTurn().GetTurn()
-
-	// Assert: held for the turn's end, never classifying, never interjected.
-	tray := awaitView(t, f, holds, "the deferred prompt in the tray", func(tray *frontendv1.FeedHeld) bool {
-		return promptHeldEntry(tray, turn) != nil
-	})
-	if p := promptHeldEntry(tray, turn); p.GetHoldForTurnEnd() == nil {
-		t.Fatalf("held entry for the deferred prompt = %v, want hold_for_turn_end from the start", p)
-	}
-	expectNoRPC(t, f.shim, harness.RPCKillTurn)
-
-	// Act: the running turn ends on its own.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the deferred prompt starts now, as its own turn.
-	if st := f.shim.ExpectStartTurn(); st.GetTurn().GetValue() != turn.GetValue() {
-		t.Fatalf("StartTurn after the turn ended = %q, want the deferred turn %q", st.GetTurn().GetValue(), turn.GetValue())
-	}
-}
-
 // TestADeferredHoldSurvivesADaemonRestartStillDeferred pins durability: the
 // hold and its delivery are rows in wsm.db, so the restarted daemon restores
 // it as the deferred hold it was.
@@ -1888,48 +1474,6 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 	if deferredRows != 1 {
 		t.Fatalf("standing deferred held_prompts rows after the restart = %d, want 1", deferredRows)
 	}
-}
-
-// TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn pins that a
-// prompt deferred behind a running turn is never lost to a workspace restart:
-// the restart stops the running turn, and the deferred prompt is delivered to
-// the restarted session as its own turn. THE CUT WORK IS CONTINUED FIRST
-// (owner ruling, 2026-10-30): the restart owes the turn it cut its
-// resumption, so the restarted session's first turn is the "continue", and
-// the deferred prompt runs once that turn ends.
-func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange: a running turn with a prompt deferred behind it.
-	f := newCanonical(t)
-	// The sweep covers every test; the declared records are evidence of the
-	// restart's own stand-down of the shim, which the fake answers by exiting.
-	f.d.ExpectWorkspaceRestartWarnings()
-	f.shim.ExpectStartSession()
-	f.submit("start the work", "k-running-restart", origin)
-	f.shim.ExpectStartTurn()
-	turn := f.submitDeferred("run the tests afterwards", "k-deferred-restart").GetSuccess().GetTurn().GetTurn()
-
-	// Act
-	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("RestartWorkspace = %v, %v, want a success", resp, err)
-	}
-
-	// The restarted session continues the cut work first; that turn ends.
-	restarted := f.d.ShimAt(prelaunchControlSocket(f.d, f.ws, 1))
-	restarted.ExpectStartSession()
-	if st := restarted.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
-		t.Fatalf("the restarted session's first turn has origin %v, want the resumption of the cut turn", st.GetOrigin())
-	}
-	restarted.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
-
-	// Assert: the restarted session is handed the deferred prompt as its own
-	// turn. READ FROM THE SHIM'S DURABLE LOG: the restart answers once it
-	// happened, and a live dial of the new shim races its bring-up.
-	started := &shimv1.StartTurnRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartTurn,
-		"the deferred prompt's StartTurn on the restarted session", started,
-		func() bool { return started.GetTurn().GetValue() == turn.GetValue() })
 }
 
 // ---------------------------------------------------------------------------
@@ -2000,5 +1544,176 @@ func TestAWorkspaceOwingItsSummaryAsksForItUntilItsAgentSetsOne(t *testing.T) {
 	}
 	if got := text(set.GetSaid()); got != "and the footer too" {
 		t.Fatalf("StartTurn.said once the summary is set = %q, want the user's words alone", got)
+	}
+}
+
+func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	row := awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedSubagent() != nil
+	})
+	first := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("first"), IdempotencyKey: "k-bubble-1", Origin: origin, Feed: row.GetId(),
+	})
+	if first.GetError() != nil {
+		t.Fatalf("the first bubble submit = %v, want a success", first)
+	}
+	f.shim.ExpectUpdateAgent()
+	// The SHIM is what judges a subagent's own turn, so the fake states the
+	// verdict: the next UpdateAgent is refused agent_busy
+	// (shim.v1 UpdateAgentFailure.agent_busy, landing 7).
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "the addressed agent's own turn is already open",
+			Kind:   &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("second"), IdempotencyKey: "k-bubble-2", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	// LANDING 7: the shim's refusal is relayed by kind on the landed arm
+	// SubmitPromptError.bubble_refused, and the daemon never judges the
+	// subagent's turn itself.
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetAgentBusy() == nil {
+		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want error.bubble_refused{kind: agent_busy}", resp)
+	}
+	if refused.GetDetail() == "" {
+		t.Fatalf("bubble_refused.detail is empty, want the shim's own words as evidence")
+	}
+}
+
+// A PROMPT ADDRESSED AT A SETTLED SUBAGENT'S BUBBLE IS REFUSED not_deliverable,
+// by the shim's own verdict (a subagent has no SDK route for a prompt), relayed
+// by kind on SubmitPromptError.bubble_refused with the shim's words as detail.
+func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
+	row := awaitRow(t, f, feed, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent().GetSettled() != nil
+	})
+	const detail = "a subagent has no SDK route for a prompt"
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: detail,
+			Kind:   &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("are you still there?"), IdempotencyKey: "k-bubble-settled", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetNotDeliverable() == nil {
+		t.Fatalf("a submit to a settled subagent's bubble = %v, want error.bubble_refused{kind: not_deliverable}", resp)
+	}
+	if refused.GetDetail() != detail {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's own words %q", refused.GetDetail(), detail)
+	}
+}
+
+// A SECOND PUSH MOVES THE PANEL: the daemon's held usage is what /context
+// reads, so a larger figure pushed between two reads shows in the second
+// header without the reader asking the vendor anything.
+func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newCanonical(t)
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
+
+	// Act
+	f.shim.PushSessionUpdate(ctxUsage(168_900, 84))
+	second := contextPanelAfter(t, f, topbar, "168.9k", "k-context-second")
+
+	// Assert
+	if second.GetHeader().GetUsed() == first.GetHeader().GetUsed() && second.GetHeader().GetPercent() == first.GetHeader().GetPercent() {
+		t.Fatalf("the /context header did not move between pushes: used %q/percent %d then used %q/percent %d",
+			first.GetHeader().GetUsed(), first.GetHeader().GetPercent(), second.GetHeader().GetUsed(), second.GetHeader().GetPercent())
+	}
+	if second.GetHeader().GetUsed() == "" {
+		t.Fatalf("the second /context header = %v, want it composed", second.GetHeader())
+	}
+}
+
+// AN ANSWER TO AN AGENT THE SHIM NO LONGER KNOWS IS REFUSED BY ITS LEDGERED
+// ARM. AnswerPermissionError carries no `unknown_agent` arm
+// (endpoint_answer_permission.proto); the gap is a row in daemon/ERROR-ARMS.md,
+// and server.UnlandedArm refuses it failed_precondition naming the intended
+// arm, recorded under daemon.refusal.unlanded_arm so the ledger reconciles
+// against the log.
+func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open ask, and a shim that no longer knows its agent.
+	f := newCanonical(t)
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	feed := f.watchRootFeed()
+	f.shim.AwaitAgentWatch()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-gone", "act-gone")},
+	}))
+	row := awaitRow(t, f, feed, "the permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "no such agent",
+			Kind:   &shimv1.UpdateAgentFailure_UnknownAgent{UnknownAgent: &shimv1.UpdateAgentUnknownAgent{}},
+		}},
+	})
+
+	// Act
+	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace: f.ws, Permission: row.GetId(),
+		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+	}))
+
+	// Assert
+	if code := connect.CodeOf(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("AnswerPermission to a forgotten agent = %v, want failed_precondition", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "intended arm: ") || !strings.Contains(msg, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("AnswerPermission refusal = %q, want it to name the intended arm AnswerPermissionError.unknown_agent", msg)
+	}
+}
+
+// promptOpenQuestion builds a single-select question batch of one.
+func promptOpenQuestion(id, question string, options ...string) *conversationv1.AgentQuestion {
+	var opts []*conversationv1.AgentQuestionOption
+	for _, o := range options {
+		opts = append(opts, &conversationv1.AgentQuestionOption{Label: &conversationv1.AgentQuestionOptionLabel{Label: o}})
+	}
+	return &conversationv1.AgentQuestion{
+		Id: &conversationv1.AgentQuestionId{Value: id},
+		Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+			Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+				Question: &conversationv1.AgentQuestionText{Text: question},
+				Header:   "Choice",
+				Choices: &conversationv1.AgentQuestionAsked_SingleSelect{SingleSelect: &conversationv1.AgentQuestionSingleSelect{
+					Options: opts,
+				}},
+			}}},
+			StartedAt: startedAt(1_700_000_000_000),
+		}},
 	}
 }

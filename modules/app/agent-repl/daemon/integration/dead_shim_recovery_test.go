@@ -142,67 +142,6 @@ func TestAShimThatDiesOnItsOwnIsBroughtBackUnasked(t *testing.T) {
 	expectSessionHealthy(t, f.d, f)
 }
 
-func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-	f.d.RequireWarnings(deadShimRecords...)
-	f.shim.ExpectStartSession()
-	concludeFirstTurn(t, f)
-	killShim(t, f, f.shim)
-
-	// Act: the prompt races the revival the death started.
-	resp := f.submit("the prompt sent into the gap", "k-dead-shim-gap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Assert: accepted, then delivered once to the revived shim.
-	if resp.GetSuccess() == nil {
-		t.Fatalf("SubmitPrompt into the gap = %v, want accepted", resp)
-	}
-	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	revived.ExpectStartSession()
-	turn := revived.ExpectStartTurn()
-	if got := text(turn.GetSaid()); got != "the prompt sent into the gap" {
-		t.Fatalf("the delivered StartTurn said %q, want the prompt sent into the gap", got)
-	}
-	expectRPCCount(t, revived, harness.RPCStartTurn, 1)
-}
-
-func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *testing.T) {
-	t.Parallel()
-	// Arrange: the first death was brought back, and nothing has run since.
-	f := newOpened(t, harness.Opts{DurableState: true})
-	// The second death is a shim that cannot hold a session: loud by design.
-	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
-	f.shim.ExpectStartSession()
-	concludeFirstTurn(t, f)
-	killShim(t, f, f.shim)
-	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	revived.ExpectStartSession()
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first revival's resumed opening", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.workspace.bring_up" && r.Context["opening"] == "resumed"
-	})
-	roster := f.d.WatchRoster()
-
-	// Act
-	killShim(t, f, revived)
-
-	// Assert: left down, and said so.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the WARN leaving the looping shim down", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.revive" && r.Level == "warn"
-	})
-	awaitRoster(t, f.d, roster, "the roster row dead", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetDead() != nil
-	})
-	// Assert: the next prompt still brings it back and is delivered.
-	f.submit("the next prompt", "k-dead-shim-loop", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	third := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	third.ExpectStartSession()
-	if got := text(third.ExpectStartTurn().GetSaid()); got != "the next prompt" {
-		t.Fatalf("the delivered StartTurn said %q, want the next prompt", got)
-	}
-}
-
 // bootAfterADeadShim kills a session's daemon AND its shim, then boots a
 // successor on the same machine -- state root, account root, profiles and
 // locks -- with the host and web streams a running Emacs and page hold.

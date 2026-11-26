@@ -4,7 +4,6 @@ package integration
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
 
@@ -339,31 +337,6 @@ func TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain(t *testing.T) {
 	}
 }
 
-func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	// unknown_workspace is a LANDED SessionHealthError arm
-	// (endpoint_session_health.proto): server.resolveRef fills its Arm
-	// and answers it in band, so it is logged at DEBUG, never WARN
-	// (internal/server/refuse.go refuse()).
-
-	// Act
-	resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()},
-	}))
-
-	// Assert: the arm is LANDED, so the answer is always the in-band typed
-	// arm, never a transport error (settled by reading resolveRef in
-	// internal/server/refuse.go, per critique 22).
-	if err != nil {
-		t.Fatalf("SessionHealth(unknown) = error %v, want a success carrying error{unknown_workspace}", err)
-	}
-	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("SessionHealth(unknown) = %v, want error{unknown_workspace}", resp.Msg)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // ClientLog
 // ---------------------------------------------------------------------------
@@ -424,182 +397,6 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	}
 }
 
-func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newCanonicalRegistered(t)
-	sentTimestamp := "2026-09-10T16:34:56.789Z"
-	instant, err := time.Parse(time.RFC3339, sentTimestamp)
-	if err != nil {
-		t.Fatalf("parse fixture timestamp: %v", err)
-	}
-	wantTimestamp := instant.In(time.Local).Format("2006-01-02T15:04:05.000000-07:00")
-
-	// Act.
-	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
-			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
-			Operation: "sidecar.transcript.read",
-			Message:   "the sidecar read a transcript",
-			Timestamp: sentTimestamp,
-			Verbose:   true,
-			Runtime: &agentreplv1.ClientLogRecord_Sidecar{
-				Sidecar: &agentreplv1.ClientLogRuntimeSidecar{},
-			},
-		},
-	}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("ClientLog = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
-	}
-	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.ws.GetDir(), "sidecar"), "the sidecar's record", func(r harness.LogRecord) bool {
-		return r.Operation == "sidecar.transcript.read"
-	})
-	if rec.Runtime != "sidecar" {
-		t.Fatalf("the persisted record's runtime = %q, want sidecar", rec.Runtime)
-	}
-	if rec.Timestamp != wantTimestamp {
-		t.Fatalf("the persisted record's timestamp = %q, want the client's %q", rec.Timestamp, wantTimestamp)
-	}
-	if rec.Verbosity != "verbose" {
-		t.Fatalf("the persisted record's verbosity = %q, want verbose", rec.Verbosity)
-	}
-}
-
-// TestClientLogAtWarnLandsAtWarnInTheWebappSink is the warn half of the level
-// discipline: the record's level arm, not any fixed level, is what the sink
-// persists.
-func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
-			Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
-			Operation: "webapp.render.slow",
-			Message:   "a render took too long",
-		},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClientLog = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
-	}
-	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's warn record", func(r harness.LogRecord) bool {
-		return r.Operation == "webapp.render.slow"
-	})
-	if rec.Level != "warn" {
-		t.Fatalf("the persisted record's level = %q, want %q", rec.Level, "warn")
-	}
-}
-
-// TestClientLogAtErrorLandsAtErrorInTheWebappSink is the error half.
-func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
-			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
-			Operation: "webapp.crash",
-			Message:   "the webview threw uncaught",
-		},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("ClientLog = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
-	}
-	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's error record", func(r harness.LogRecord) bool {
-		return r.Operation == "webapp.crash"
-	})
-	if rec.Level != "error" {
-		t.Fatalf("the persisted record's level = %q, want %q", rec.Level, "error")
-	}
-}
-
-// TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel is the
-// validation half: the level oneof is not optional, and an unset one is a
-// Connect InvalidArgument naming the field, never an arm.
-func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	_, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
-			Operation: "webapp.something",
-			Message:   "a message with no level",
-		},
-	}))
-
-	// Assert
-	if err == nil {
-		t.Fatalf("ClientLog with no level = success, want InvalidArgument naming level")
-	}
-	if connectCode(err) != connect.CodeInvalidArgument {
-		t.Fatalf("ClientLog with no level = error %v, want CodeInvalidArgument", err)
-	}
-	if !containsField(err, "level") {
-		t.Fatalf("ClientLog with no level = error %v, want it to name the field", err)
-	}
-}
-
-// TestClientLogNeverAppearsInTheDaemonRunLog confines a client's own record to
-// the workspace's webapp sink: the daemon's run log is the DAEMON's own
-// account of itself, and a client's diagnostic sentence is not that.
-func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-
-	// Act
-	if _, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
-		Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: f.ws},
-		Record: &agentreplv1.ClientLogRecord{
-			Site: "0123456789ab", Template: "a test record",
-			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
-			Operation: "webapp.crash",
-			Message:   "a fatal client error",
-		},
-	})); err != nil {
-		t.Fatalf("ClientLog = error %v, want a success", err)
-	}
-	f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's record", func(r harness.LogRecord) bool {
-		return r.Operation == "webapp.crash"
-	})
-
-	// Assert
-	for _, r := range f.d.RunLog() {
-		if r.Operation == "webapp.crash" {
-			t.Fatalf("the run log carries the client's own record %+v, want it confined to the workspace's webapp sink", r)
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The login pty
 // ---------------------------------------------------------------------------
@@ -622,63 +419,6 @@ func TestOpenLoginSpawnsThePtyAndReplaysItsScrollback(t *testing.T) {
 	// Assert: the scrollback the pty already produced is replayed to a late
 	// subscriber, which is the never-miss invariant for this stream.
 	loginAwaitMarker(t, f, stream, harness.FakeClaudeLoginMarker)
-}
-
-// awaitLoginMarkerOn reads terminal bytes on a bare *harness.Daemon (no
-// *fixture available) until the accumulated output carries
-// harness.FakeClaudeLoginMarker, and returns everything accumulated so a
-// caller can count occurrences rather than merely detect one.
-func awaitLoginMarkerOn(t *testing.T, d *harness.Daemon, s *harness.Stream[*agentreplv1.LoginTerminalOutput]) string {
-	t.Helper()
-	var seen strings.Builder
-	harness.AwaitView(t, d.Ctx(), s, "the terminal text "+harness.FakeClaudeLoginMarker, func(o *agentreplv1.LoginTerminalOutput) bool {
-		seen.Write(o.GetBytes().GetData())
-		return strings.Contains(seen.String(), harness.FakeClaudeLoginMarker)
-	})
-	return seen.String()
-}
-
-func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.T) {
-	t.Parallel()
-	// Arrange: one workspace's repository lives directly UNDER
-	// $MULTI_REPO_ROOT, the other outside it, so the two route to DIFFERENT
-	// account roots (the same routing the existing account tests exercise in
-	// session_lifecycle_test.go's TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount).
-	d := viewInGroup(t, groupLoginTerminal)
-	multiRepo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "under-the-multi-root"))
-	multiWS := harness.Register(t, d, multiRepo.Dir)
-	defaultRepo := harness.NewRepo(t)
-	defaultWS := harness.Register(t, d, defaultRepo.Dir)
-
-	// Act
-	multiResp, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: multiWS}))
-	if err != nil {
-		t.Fatalf("OpenLogin under the multi-repo root = error %v, want a success", err)
-	}
-	defaultResp, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: defaultWS}))
-	if err != nil {
-		t.Fatalf("OpenLogin outside the multi-repo root = error %v, want a success", err)
-	}
-
-	// Assert: two distinct account roots, matching the two config dirs the
-	// harness minted.
-	if got, want := multiResp.Msg.GetSuccess().GetConfigDir(), d.MultiRepoConfigDir; got != want {
-		t.Fatalf("OpenLogin under the multi-repo root = config dir %q, want the multi-repo account root %q", got, want)
-	}
-	if got, want := defaultResp.Msg.GetSuccess().GetConfigDir(), d.DefaultConfigDir; got != want {
-		t.Fatalf("OpenLogin outside the multi-repo root = config dir %q, want the default account root %q", got, want)
-	}
-
-	// Assert: TWO ptys -- each workspace's own terminal shows exactly one
-	// banner, and neither pty is the other's.
-	multiSeen := awaitLoginMarkerOn(t, d, d.WatchLogin(multiWS))
-	if got := strings.Count(multiSeen, harness.FakeClaudeLoginMarker); got != 1 {
-		t.Fatalf("login marker count = %d on the multi-repo account's pty, want exactly 1", got)
-	}
-	defaultSeen := awaitLoginMarkerOn(t, d, d.WatchLogin(defaultWS))
-	if got := strings.Count(defaultSeen, harness.FakeClaudeLoginMarker); got != 1 {
-		t.Fatalf("login marker count = %d on the default account's pty, want exactly 1", got)
-	}
 }
 
 func TestOpenLoginWhoseVendorBinaryFailsToSpawnAnswersSpawnFailed(t *testing.T) {
@@ -815,67 +555,6 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 	}
 	if len(invocations) != 1 {
 		t.Fatalf("the browser launcher ran %d times, want exactly once: %+v", len(invocations), invocations)
-	}
-}
-
-// TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl exercises
-// OpenExternalError's invalid_url arm (endpoint_open_external.proto: "the url
-// does not parse").
-func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	// internal/workspace/links.go's OpenExternal refuses an unparseable url
-	// under ArmUnservedAnswer ("unserved_answer"), which is not a field
-	// OpenExternalError carries: the arm the contract landed
-	// (endpoint_open_external.proto's invalid_url) is not the one the verb
-	// raises, so today's answer is server.UnlandedArm's transport error at
-	// WARN under daemon.refusal.unlanded_arm, not the typed arm below.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
-
-	// Act
-	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
-		Workspace: f.ws,
-		Url:       "::not a url",
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("OpenExternal(unparseable url) = error %v, want a success carrying error{invalid_url}", err)
-	}
-	if got := resp.Msg.GetError().GetInvalidUrl(); got == nil {
-		t.Fatalf("OpenExternal(unparseable url) = %v, want error{invalid_url}", resp.Msg)
-	}
-}
-
-// TestOpenExternalWithAFailingLauncherAnswersLaunchFailed exercises
-// OpenExternalError's launch_failed{detail} arm.
-func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	// It makes the daemon's one browser launcher fail.
-	f := newRegisteredInGroup(t, groupBrowserLauncher)
-	// A launcher that will not run is recorded at ERROR under the verb's own
-	// operation and then ANSWERED as launch_failed{detail}.
-	f.d.RequireWarnings("daemon.workspace.open_external", "daemon.externalbrowser.open")
-	f.d.Browser.SetExitCode(1)
-
-	// Act
-	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
-		Workspace: f.ws,
-		Url:       "https://example.invalid/report",
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("OpenExternal(failing launcher) = error %v, want a success carrying error{launch_failed}", err)
-	}
-	got := resp.Msg.GetError().GetLaunchFailed()
-	if got == nil {
-		t.Fatalf("OpenExternal(failing launcher) = %v, want error{launch_failed}", resp.Msg)
-	}
-	if got.GetDetail() == "" {
-		t.Fatalf("launch_failed.detail = %q, want the launcher's own account of the failure", got.GetDetail())
 	}
 }
 

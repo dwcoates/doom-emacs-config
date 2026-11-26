@@ -139,37 +139,6 @@ func holdsOperation(records []harness.LogRecord, operation string) bool {
 	return false
 }
 
-// TestARequiredWarningCountsAsStaleUntilItIsProduced pins RequireWarnings'
-// half of the sweep: a declaration nothing has produced is named as stale, and
-// stops being named the moment its record is written -- which is what fails a
-// test whose list outlived the records it licensed.
-func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	f := newCanonical(t)
-	// The simulated crash starts a background relaunch revival
-	// (daemon.promptqueue.submit), which the test's end may cut short by
-	// forgetting the workspace; its failure is the crash's own consequence.
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.promptqueue.submit")
-	f.shim.ExpectStartSession()
-	f.d.RequireWarnings("daemon.shimclient.exit")
-	before := f.d.UnproducedRequiredWarnings()
-
-	// Act: the shim dies, which writes the death's one ERROR.
-	f.shim.Exit(1, "simulated crash")
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the death's error", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.shimclient.exit" && r.Level == "error"
-	})
-
-	// Assert.
-	if len(before) != 1 || before[0] != "daemon.shimclient.exit" {
-		t.Fatalf("UnproducedRequiredWarnings() before the death = %v, want the exit named", before)
-	}
-	if after := f.d.UnproducedRequiredWarnings(); len(after) != 0 {
-		t.Fatalf("UnproducedRequiredWarnings() after the death = %v, want none", after)
-	}
-}
-
 // TestOpenedShimAnswersTheShimAnOpenBroughtUpEvenOnceItHasLeft: at a short
 // idle cutoff the opened shim can be hibernated before the harness dials its
 // control socket, and OpenedShim must then answer that shim's identity at

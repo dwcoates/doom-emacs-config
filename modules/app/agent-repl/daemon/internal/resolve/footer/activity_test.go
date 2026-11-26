@@ -1,9 +1,11 @@
 package footer
 
 import (
+	"regexp"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -11,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/deployprogress"
+	kinds "agent-repld/internal/detachedkindtest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ratelimittest"
@@ -255,9 +258,13 @@ func TestTheRetryLineEndsAtTheRetriedAgentsFirstResponse(t *testing.T) {
 			// Act
 			h.r.OnActivity(testWS, mainAgent, tt.act)
 
-			// Assert
-			if got := h.view(t).GetStrip().GetStatus().GetVendorFault(); got != nil {
+			// Assert: the turn is back to working, not merely out of the fault.
+			status := h.view(t).GetStrip().GetStatus()
+			if got := status.GetVendorFault(); got != nil {
 				t.Fatalf("status = blocked %+v, want the retry ended by the response", got)
+			}
+			if status.GetWorking() == nil {
+				t.Fatalf("status = %v, want working on the running turn", status)
 			}
 		})
 	}
@@ -845,6 +852,37 @@ func TestADeliveredPromptComposesNoWorkingLine(t *testing.T) {
 	// Assert
 	if got := activityLineOf(h.view(t).GetStrip().GetStatus()); got.tier != "enduring" {
 		t.Fatalf("activity line = %+v, want the enduring line: a delivery composes no line", got)
+	}
+}
+
+// feedItemLine is a line worded from a feed item: a call or a run started,
+// landed, delivered, or moved to the background.
+var feedItemLine = regexp.MustCompile(`[✅❌] [^"]* (finished|failed|cancelled|started|delivered)|Moved to background`)
+
+func TestNoViewAcrossATurnCarriesALineWordedFromAFeedItem(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	turn := testTurnID
+	steps := []struct {
+		name string
+		act  func()
+	}{
+		{"the prompt delivered", func() { inTurn(h) }},
+		{"a read started", func() { h.r.OnActivity(testWS, mainAgent, itemFrame(t, "read-1", "read", "start")) }},
+		{"the read finished", func() { h.r.OnActivity(testWS, mainAgent, itemFrame(t, "read-1", "read", "success")) }},
+		{"a shell started", func() { h.r.OnActivity(testWS, mainAgent, itemFrame(t, "bash-1", "bash", "start")) }},
+		{"the shell moved to the background", func() { h.r.OnDetachedWork(testWS, mainAgent, movedWork("bash-1", kinds.Bash())) }},
+		{"the answer finished", func() { h.r.OnActivity(testWS, mainAgent, itemFrame(t, "resp-1", "response", "success")) }},
+		{"the turn concluded", func() { h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil) }},
+	}
+	for _, step := range steps {
+		// Act
+		step.act()
+
+		// Assert
+		if text := prototext.Format(h.view(t)); feedItemLine.MatchString(text) {
+			t.Fatalf("after %s the view carries a line worded from a feed item:\n%s", step.name, text)
+		}
 	}
 }
 

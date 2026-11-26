@@ -371,6 +371,40 @@ func TestAContextCutTellsTheFooterWhatItCarries(t *testing.T) {
 	}
 }
 
+func TestAContextCutTellsTheRosterWhatItCarriesBeforeTheShimStarts(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want footer.SessionAct
+	}{
+		{name: "clear", kind: ActClear, want: footer.ActClear},
+		{name: "compact", kind: ActCompact, want: footer.ActCompact},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			var atStart []*footer.TurnStarted
+			h.sender.startHook = func() { atStart = h.sidebar.rosterTurns() }
+
+			// Act
+			if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{
+				Kind: tc.kind, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+			}); err != nil {
+				t.Fatalf("SubmitSessionAct: %v", err)
+			}
+
+			// Assert
+			if len(atStart) != 1 || atStart[0] == nil || atStart[0].Act != tc.want {
+				t.Fatalf("roster turn facts when the shim was asked = %v, want one carrying %v", atStart, tc.want)
+			}
+			if turns := h.sidebar.rosterTurns(); len(turns) != 1 {
+				t.Fatalf("roster turn facts = %v, want the cut's one, never cleared by a started cut", turns)
+			}
+		})
+	}
+}
+
 // --- nothing overtakes a running /clear or /compact ------------------------
 
 // cutRunsWithAnInterjectingPromptHeld starts a context cut down the one path,

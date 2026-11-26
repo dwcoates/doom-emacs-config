@@ -244,6 +244,74 @@ func TestATurnEndingAfterThePlanWasPresentedLeavesItPlanned(t *testing.T) {
 	}
 }
 
+func TestAConcludedPlanEpisodeIsOnePlannedRowOnTheOpenedPage(t *testing.T) {
+	enter := func(h *harness) {
+		h.planFrame("unit-enter", &conversationv1.AgentPlanModeStart{
+			Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		})
+		h.planFrame("unit-enter", &conversationv1.AgentPlanModeSuccess{
+			Act:       &conversationv1.AgentPlanModeSuccess_Entered{Entered: &conversationv1.AgentPlanModeEntered{}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000},
+		})
+	}
+	exit := func(h *harness) {
+		h.planFrame("unit-exit", &conversationv1.AgentPlanModeStart{
+			Act:       &conversationv1.AgentPlanModeStart_Exit{Exit: &conversationv1.AgentPlanModeExit{}},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 3_000},
+		})
+		h.planFrame("unit-exit", &conversationv1.AgentPlanModeSuccess{
+			Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+				Plan: &conversationv1.AgentResponseProse{Markdown: "1. do it"},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 4_000},
+		})
+	}
+	tests := []struct {
+		name    string
+		episode []func(*harness)
+	}{
+		{name: "the enter then the exit", episode: []func(*harness){enter, exit}},
+		{name: "the enter delivered again after the exit", episode: []func(*harness){enter, exit, enter}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "plan it")
+			for _, step := range tc.episode {
+				step(h)
+			}
+
+			// Act: the turn concludes on its answer, then a reader opens the feed.
+			h.concludeAnswer("turn-1", "unit-answer", "done")
+			page, _ := h.openPage(rootFeed(), "reader-1")
+
+			// Assert: one planned bubble for the episode, beside the turn's
+			// concluded end.
+			var plans []*frontendv1.FeedRow
+			concluded := false
+			for _, row := range pageRows(t, page) {
+				if row.GetActivity().GetPlan() != nil {
+					plans = append(plans, row)
+				}
+				if row.GetTurnEnded().GetConcluded() != nil {
+					concluded = true
+				}
+			}
+			if len(plans) != 1 {
+				t.Fatalf("plan rows = %v, want exactly 1: the episode coalesces onto one FeedId", rowIDs(plans))
+			}
+			if plans[0].GetActivity().GetPlan().GetPlanned() == nil {
+				t.Fatalf("plan state = %T, want planned", plans[0].GetActivity().GetPlan().GetState())
+			}
+			if !concluded {
+				t.Fatalf("page rows = %v, want the turn's concluded terminal", rowIDs(pageRows(t, page)))
+			}
+		})
+	}
+}
+
 func TestATurnThatEndsInPlanModeBreaksTheEpisode(t *testing.T) {
 	// Arrange: an open episode.
 	h := newHarness(t)
@@ -551,21 +619,40 @@ func TestAPublishWithNoTitleFallsBackToTheFilesName(t *testing.T) {
 }
 
 func TestAListingDrawsNoBubble(t *testing.T) {
-	// Arrange, Act: a list act is a quiet read.
-	h := newHarness(t)
-	h.send(&conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
-		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
-			Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
-				Act:         &conversationv1.AgentArtifactStart_List{List: &conversationv1.AgentArtifactList{}},
-				StartedAtMs: 1_000,
-			}},
+	listStart := &conversationv1.AgentArtifact{
+		Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
+			Act:         &conversationv1.AgentArtifactStart_List{List: &conversationv1.AgentArtifactList{}},
+			StartedAtMs: 1_000,
 		}},
-	})
+	}
+	listed := &conversationv1.AgentArtifact{
+		Result: &conversationv1.AgentArtifact_Success{Success: &conversationv1.AgentArtifactSuccess{
+			Outcome: &conversationv1.AgentArtifactSuccess_Listed{Listed: &conversationv1.AgentArtifactListed{}},
+		}},
+	}
+	tests := []struct {
+		name   string
+		frames []*conversationv1.AgentArtifact
+	}{
+		{name: "the list act's start", frames: []*conversationv1.AgentArtifact{listStart}},
+		{name: "the start then its listed success", frames: []*conversationv1.AgentArtifact{listStart, listed}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act: a list act is a quiet read.
+			h := newHarness(t)
+			for _, frame := range tc.frames {
+				h.send(&conversationv1.AgentActivity{
+					ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+					Item:       &conversationv1.AgentActivity_Artifact{Artifact: frame},
+				})
+			}
 
-	// Assert.
-	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("rows = %d, want none for a listing", len(rows))
+			// Assert.
+			if rows := h.rows(rootFeed()); len(rows) != 0 {
+				t.Fatalf("rows = %d, want none for a listing", len(rows))
+			}
+		})
 	}
 }
 

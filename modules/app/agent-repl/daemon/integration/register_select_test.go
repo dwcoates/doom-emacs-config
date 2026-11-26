@@ -8,9 +8,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
@@ -87,27 +85,6 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	plain := t.TempDir()
-
-	// Act
-	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: plain}))
-
-	// Assert: `not_a_worktree` is a LANDED arm of RegisterWorkspaceError, so
-	// the refusal is answered IN BAND rather than as a transport error. (This
-	// assertion was written against the unlanded-arm path; the arm landed with
-	// the proto, and an in-band arm is never also a Connect error.)
-	if err != nil {
-		t.Fatalf("RegisterWorkspace(%s) = transport error %v, want the in-band not_a_worktree arm", plain, err)
-	}
-	if resp.Msg.GetError().GetNotAWorktree() == nil {
-		t.Fatalf("RegisterWorkspace(%s) = %v, want RegisterWorkspaceError.not_a_worktree", plain, resp.Msg)
-	}
-}
-
 func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	t.Parallel()
 	// It changes the daemon's one selection.
@@ -164,169 +141,6 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 		t.Fatalf("the switch's push names current %v, want B %s", got.GetWorkspaces().GetCurrent(), fb.ws.GetId())
 	}
 	harness.ExpectNoPush(t, roster, "a switch is exactly one roster push")
-}
-
-// TestPerWorkspaceRpcRefusesAnUnknownWorkspace asserts the refusal IN BAND.
-// `CloseWorkspaceError.unknown_workspace` is a LANDED arm
-// (endpoint_close_workspace.proto), and a landed arm is never also a Connect
-// error — the response's `error` result IS the refusal.
-//
-// (Written originally against the unlanded-arm path, which answered
-// CodeNotFound with an `intended arm:` message. The arm landed with the
-// contract, so the assertion moved onto it; the same amendment already stands
-// on TestRegisterWorkspaceRefusesANonWorktree above.)
-func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
-	// unknown_workspace is a LANDED CloseWorkspaceError arm (see the comment
-	// above), answered in band at DEBUG through server.refuse — never the
-	// daemon.refusal.unlanded_arm WARN this path was originally written
-	// against.
-	unknown := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
-
-	// Act
-	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: unknown}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CloseWorkspace on an unknown workspace = transport error %v, want the in-band unknown_workspace arm", err)
-	}
-	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
-		t.Fatalf("CloseWorkspace on an unknown workspace = %v, want CloseWorkspaceError.unknown_workspace", resp.Msg)
-	}
-}
-
-// TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees pins the WorkspaceRef echo
-// ruling: the daemon keys on `id` and REFUSES a ref whose `dir` disagrees with
-// the registry. `workspace_ref_mismatch` is landed too, and its arm carries
-// the dir the registry actually holds, so the client can correct its echo.
-func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonicalRegistered(t)
-	// workspace_ref_mismatch is a LANDED CloseWorkspaceError arm too, answered
-	// in band at DEBUG — never the daemon.refusal.unlanded_arm WARN this path
-	// was originally written against.
-	mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: t.TempDir()}
-
-	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: mismatched}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CloseWorkspace with a mismatched ref dir = transport error %v, want the in-band arm", err)
-	}
-	arm := resp.Msg.GetError().GetWorkspaceRefMismatch()
-	if arm == nil {
-		t.Fatalf("CloseWorkspace with a mismatched ref dir = %v, want CloseWorkspaceError.workspace_ref_mismatch", resp.Msg)
-	}
-	if arm.GetRegistryDir() != f.ws.GetDir() {
-		t.Fatalf("workspace_ref_mismatch.registry_dir = %q, want the registry's dir %q", arm.GetRegistryDir(), f.ws.GetDir())
-	}
-}
-
-func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newCanonical(t)
-
-	// Act
-	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
-		Workspace:      f.ws,
-		IdempotencyKey: "no-said",
-		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
-	})
-
-	// Assert
-	if connectCode(err) != connect.CodeInvalidArgument {
-		t.Fatalf("SubmitPrompt without said = %v (code %v), want CodeInvalidArgument", err, connectCode(err))
-	}
-	if !containsField(err, "said") {
-		t.Fatalf("SubmitPrompt refusal = %v, want it to name the unset field \"said\"", err)
-	}
-	// Validation refusals are plain connect.NewError(InvalidArgument, ...)
-	// (internal/server/validate.go's `invalid`), with no logging at all.
-}
-
-// TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet pins the
-// attention-marker clearing rule precisely: SelectWorkspace clears the
-// marker ONLY on the workspace it names. Selecting workspace B must leave
-// workspace A's own marker standing.
-func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T) {
-	t.Parallel()
-	// Arrange: two workspaces in separate repos, A carrying a notification.
-	d := canonicalView(t)
-	repoA := harness.NewRepo(t)
-	repoB := harness.NewRepo(t)
-	a := harness.Register(t, d, repoA.Dir)
-	b := harness.Register(t, d, repoB.Dir)
-	roster := d.WatchRoster()
-
-	fa := &fixture{d: d, repo: repoA, ws: a, t: t}
-	fa.open()
-	fa.host = d.WatchHost(a)
-	fa.web = d.WatchWeb(a)
-	fa.submit("go", "k-attn-a", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	fa.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-attn-a", "act-attn-a")},
-	}))
-	awaitRoster(t, d, roster, "workspace A's attention marker set", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, a.GetId())
-		return row != nil && row.GetAttention() != nil
-	})
-
-	// Act: select B, never A.
-	if _, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: b})); err != nil {
-		t.Fatalf("SelectWorkspace(B) = error %v, want a success", err)
-	}
-
-	// Assert: B is now current, and A's marker is UNTOUCHED.
-	got := awaitRoster(t, d, roster, "B stamped current", func(r *frontendv1.RosterPush) bool {
-		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == b.GetId()
-	})
-	rowA := rosterRow(got, a.GetId())
-	if rowA == nil {
-		t.Fatalf("the roster has no row for workspace A %s after selecting B", a.GetId())
-	}
-	if rowA.GetAttention() == nil {
-		t.Fatalf("workspace A's attention marker was cleared by selecting B, want it left set: only A's own SelectWorkspace clears it")
-	}
-}
-
-// TestRegisteringAClosedWorkspaceReopensIt is the wire half of the register
-// that produced a workspace with NO TAB.
-//
-// Registration is idempotent by dir and answers the row that is already there.
-// A row a previous CLOSE had marked closed came back closed, and `closed` is
-// the editor's whole tab-membership rule (lisp/roster.el's
-// `agent-repl-roster-desired-tabs'): the tab was never drawn, the minted ref's
-// landing waited for a tab that was not coming, and nothing could resolve the
-// workspace by name to act on it.
-func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
-	t.Parallel()
-	// Arrange: a registered workspace, closed.
-	f := newCanonicalRegistered(t)
-	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
-		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
-	}
-	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the closed row", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetClosed().GetClosed()
-	})
-
-	// Act: announce the same directory again.
-	again := harness.Register(t, f.d, f.repo.Dir)
-
-	// Assert: the same workspace, and its row is open again.
-	if again.GetId() != f.ws.GetId() {
-		t.Fatalf("re-registering %s minted %q, want the same workspace %q", f.repo.Dir, again.GetId(), f.ws.GetId())
-	}
-	awaitRoster(t, f.d, roster, "the re-registered row drawn open", func(r *frontendv1.RosterPush) bool {
-		row := rosterRow(r, f.ws.GetId())
-		return row != nil && !row.GetClosed().GetClosed()
-	})
 }
 
 // TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck pins the fix

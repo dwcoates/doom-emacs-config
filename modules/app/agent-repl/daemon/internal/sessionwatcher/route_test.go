@@ -1292,6 +1292,9 @@ func TestRouteQueryDied(t *testing.T) {
 	if !h.w.Free() {
 		t.Fatal("a dead session is not free; a lease holder would wait forever")
 	}
+	if ended := requireEvent(t, got, "lifecycle.OnTurnEnded"); ended.turn == nil || *ended.turn != "turn-1" || ended.close != wsm.CloseFailed {
+		t.Fatalf("turn ended = (%v, %v), want turn-1 failed", ended.turn, ended.close)
+	}
 }
 
 // A DEATH WITH NO TURN IN FLIGHT -- an idle session's vendor crashing, or the
@@ -3034,6 +3037,38 @@ func TestAWaitingTurnsOwnTerminalEndsItAndLeavesTheAdoptedTurnRunning(t *testing
 	}
 }
 
+// TestEachOfTwoRacingTurnsEndsOnItsOwnStampedTerminal covers a daemon turn
+// racing a vendor-started one: the vendor's stamped terminal ends the vendor's
+// turn alone, and the daemon turn's own stamped terminal then ends it.
+func TestEachOfTwoRacingTurnsEndsOnItsOwnStampedTerminal(t *testing.T) {
+	// Arrange.
+	h := raceBehindAdopted(t, true)
+
+	// Act.
+	vendorEnd := endAdopted(h)
+	racingEnd := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-q-end", "turn-q"))
+
+	// Assert.
+	endedTurns := func(events []event) []ids.TurnID {
+		var turns []ids.TurnID
+		for _, e := range events {
+			if e.name() == "lifecycle.OnTurnEnded" && e.turn != nil {
+				turns = append(turns, *e.turn)
+			}
+		}
+		return turns
+	}
+	if got := endedTurns(vendorEnd); !slices.Equal(got, []ids.TurnID{"turn-v"}) {
+		t.Fatalf("the vendor's terminal ended %v, want turn-v alone", got)
+	}
+	if got := endedTurns(racingEnd); !slices.Equal(got, []ids.TurnID{"turn-q"}) {
+		t.Fatalf("the racing turn's terminal ended %v, want turn-q alone", got)
+	}
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none once both ended", *turn)
+	}
+}
+
 func TestAWaitingTurnTheShimRefusedStandsNothingWhenTheAdoptedTurnEnds(t *testing.T) {
 	// Arrange.
 	h := raceBehindAdopted(t, false)
@@ -3482,6 +3517,39 @@ func vendorSessionIDsTold(got []event) []string {
 		}
 	}
 	return ids
+}
+
+// A TURN DOES NOT MOVE THE RESUME HANDLE: only a rotation names a new vendor
+// conversation, so a turn run to its terminal, however it ended, tells the
+// lifecycle sink no vendor session id.
+func TestATurnEndedOnItsTerminalTellsNoVendorSessionID(t *testing.T) {
+	tests := []struct {
+		name  string
+		frame *conversationv1.AgentFrame
+	}{
+		{name: "a success terminal", frame: frameSuccess("main-1", completed())},
+		{name: "a failure terminal", frame: &conversationv1.AgentFrame{
+			AgentId: agentID("main-1"),
+			Result:  &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a turn in flight on a named main agent.
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := h.route(h.main, entryFrame(tt.frame))
+
+			// Assert.
+			requireEvent(t, got, "lifecycle.OnTurnEnded")
+			if told := vendorSessionIDsTold(got); len(told) != 0 {
+				t.Fatalf("told %v, want no vendor session id for a turn", told)
+			}
+		})
+	}
 }
 
 // A ROTATION MOVES THE RESUME HANDLE: the id it names is what a later resume

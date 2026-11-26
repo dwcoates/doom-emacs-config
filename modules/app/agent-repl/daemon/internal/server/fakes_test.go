@@ -536,8 +536,10 @@ type fakeVerbs struct {
 	// api answers the agent API's verbs.
 	api agentAPI
 
-	// externalOpens records every url OpenExternal was handed, in order.
-	externalOpens []string
+	// externalOpens records every url OpenExternal was handed, in order;
+	// externalOpenErr is what it answers.
+	externalOpens   []string
+	externalOpenErr error
 
 	// coldGateAnswers records every AnswerColdGate request the handler handed
 	// the verb, in order; answerColdGateErr is what it answers.
@@ -658,8 +660,12 @@ type fakeVerbs struct {
 	// set.
 	registerRecord wsm.Workspace
 	registerErr    error
-	// registeredPaths records every RegisterRepository path the verb received.
-	registeredPaths []string
+	// registeredPaths records every RegisterRepository path the verb received;
+	// registerRepositoryAnswer is what it answers, or registerRepositoryErr
+	// when set.
+	registeredPaths          []string
+	registerRepositoryAnswer workspace.RegisteredRepository
+	registerRepositoryErr    error
 	// arrangements records every ArrangeSidebar verb call, spelled
 	// "<method> <args>", and arrangeErr is what each answers instead.
 	arrangements []string
@@ -740,6 +746,11 @@ type fakeVerbs struct {
 	retryResponse *shimv1.RetryVendorErrorNowResponse
 	retryErr      error
 
+	// permissionAnswers and questionAnswers are every answer the
+	// AnswerPermission and AnswerQuestion verbs were handed, in order;
+	// answerPermissionErr and answerQuestionErr are what they answer.
+	permissionAnswers   []*conversationv1.AgentAnswer
+	questionAnswers     []*conversationv1.AgentAnswer
 	answerPermissionErr error
 	answerQuestionErr   error
 	// draftEdits is every UpdateQuestionDraft call's ask and edit, in order;
@@ -1105,7 +1116,10 @@ func (f *fakeVerbs) RegisterAll(_ context.Context, dirs []string) []workspace.Re
 
 func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {
 	f.registeredPaths = append(f.registeredPaths, path)
-	return workspace.RegisteredRepository{}, nil
+	if f.registerRepositoryErr != nil {
+		return workspace.RegisteredRepository{}, f.registerRepositoryErr
+	}
+	return f.registerRepositoryAnswer, nil
 }
 
 func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskChange) error {
@@ -1241,11 +1255,13 @@ func (f *fakeVerbs) Close(_ context.Context, _ ids.WorkspaceID, by wsm.CloseCaus
 
 func (f *fakeVerbs) Forget(context.Context, ids.WorkspaceID) error { return f.forgetErr }
 
-func (f *fakeVerbs) AnswerPermission(context.Context, ids.WorkspaceID, *conversationv1.AgentAnswer) error {
+func (f *fakeVerbs) AnswerPermission(_ context.Context, _ ids.WorkspaceID, answer *conversationv1.AgentAnswer) error {
+	f.permissionAnswers = append(f.permissionAnswers, answer)
 	return f.answerPermissionErr
 }
 
-func (f *fakeVerbs) AnswerQuestion(context.Context, ids.WorkspaceID, *conversationv1.AgentAnswer) error {
+func (f *fakeVerbs) AnswerQuestion(_ context.Context, _ ids.WorkspaceID, answer *conversationv1.AgentAnswer) error {
+	f.questionAnswers = append(f.questionAnswers, answer)
 	return f.answerQuestionErr
 }
 
@@ -1655,7 +1671,7 @@ func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path stri
 // OpenExternal records the url the browser would have been handed.
 func (v *fakeVerbs) OpenExternal(_ context.Context, _ ids.WorkspaceID, link string) error {
 	v.externalOpens = append(v.externalOpens, link)
-	return nil
+	return v.externalOpenErr
 }
 
 // OpenFeedLink records the link and answers the seeded unresolved question
@@ -2047,6 +2063,8 @@ type fakeHealth struct {
 	health.Reporter
 	daemon  *agentreplv1.DaemonHealthResponse
 	session *agentreplv1.SessionHealthResponse
+	// sessionAsks counts every Session report asked for.
+	sessionAsks int
 	// daemonErr, when set, fails every daemon report.
 	daemonErr error
 	// faults are the open faults every scope answers with.
@@ -2088,6 +2106,7 @@ func (f *fakeHealth) Daemon(context.Context) (*agentreplv1.DaemonHealthResponse,
 }
 
 func (f *fakeHealth) Session(context.Context, ids.WorkspaceID) (*agentreplv1.SessionHealthResponse, error) {
+	f.sessionAsks++
 	return f.session, nil
 }
 

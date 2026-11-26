@@ -910,6 +910,32 @@ func TestASessionBroughtUpForWorkIsNeverParkedBeforeItsTurnCloses(t *testing.T) 
 	}
 }
 
+func TestClosingAWorkspaceInRemoteControlStandsNothingDown(t *testing.T) {
+	// Arrange: closed now, its cache warm, no resource allocation holding it,
+	// and remote control on, as a workspace's mode stands by default.
+	rec := warm()
+	rec.Closed = true
+	rec.Closure = &wsm.Closure{At: now}
+	h := newHarness(t, rec)
+	h.hold = func(ids.WorkspaceID) wsm.ShimHold { return wsm.ShimHold{} }
+	h.db.remote = map[ids.WorkspaceID]bool{theWorkspace: true}
+
+	// Act
+	h.reconcile("the workspace was closed or reopened")
+
+	// Assert: nothing parked or hibernated, and its one last beat still owed.
+	if len(h.idleDowns) != 0 || len(h.coldDowns) != 0 || len(h.visitDowns) != 0 {
+		t.Fatalf("idle %+v, cold %+v, visit %+v: want nothing stood down at the close", h.idleDowns, h.coldDowns, h.visitDowns)
+	}
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("no beat armed: a closed workspace owes its conversation one last keep-alive")
+	}
+	records := h.ownerRecords()
+	if len(records) != 1 || records[0].Context["left_up"] != upRemoteControl {
+		t.Fatalf("owner records = %+v, want the session left up for %s", records, upRemoteControl)
+	}
+}
+
 func TestAClosedWorkspacesSessionIsParkedAtOnceAndOwesOneLastBeat(t *testing.T) {
 	// Arrange: closed now, its cache warm from a turn ten minutes ago, and no
 	// resource allocation holding it, as the roster says of a closed workspace.

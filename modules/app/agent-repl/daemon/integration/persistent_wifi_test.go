@@ -94,62 +94,6 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	})
 }
 
-func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	d := harness.StartDaemon(t, harness.Opts{})
-	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
-	openCtx, cancelOpen := d.WaitCtx()
-	defer cancelOpen()
-	harness.AwaitBootWifiStanding(t, openCtx, stream)
-	onCtx, cancelOn := d.WaitCtx()
-	defer cancelOn()
-	if _, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
-		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
-	})); err != nil {
-		t.Fatalf("UpdatePersistentWifiMode(on) error = %v", err)
-	}
-
-	// Act: close the lid, on battery power.
-	d.PowerSource.Unplug()
-	awaitPowerSource(d, "battery")
-	d.Lid.Close()
-
-	// Assert: the quiet state stands, the display asleep at the user's level.
-	closedCtx, cancelClosed := d.WaitCtx()
-	defer cancelClosed()
-	harness.AwaitView(t, closedCtx, stream, "the closed lid quieted the machine", func(r *agentreplv1.WatchDaemonResponse) bool {
-		s := r.GetPersistentWifi()
-		return s.GetLidClosed() != nil && s.GetQuiet().GetDisplayAsleep() != nil
-	})
-	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "asleep" {
-		t.Fatalf("display with the lid closed = %s, want asleep", got)
-	}
-	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
-		t.Fatalf("brightness with the lid closed = %s, want the user's own %s", got, harness.FakeBrightness)
-	}
-	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != "1" || kept != harness.FakeEnergyMode {
-		t.Fatalf("energy mode with the lid closed = %s, recorded %q, want Low Power Mode with the user's %s recorded", got, kept, harness.FakeEnergyMode)
-	}
-
-	// Act: open it.
-	d.Lid.Open()
-
-	// Assert: the quiet state is over and the display awake.
-	reopenedCtx, cancelReopened := d.WaitCtx()
-	defer cancelReopened()
-	harness.AwaitView(t, reopenedCtx, stream, "the opened lid left the quiet state", func(r *agentreplv1.WatchDaemonResponse) bool {
-		s := r.GetPersistentWifi()
-		return s.GetLidOpen() != nil && s.GetQuiet() == nil
-	})
-	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
-		t.Fatalf("display after opening = %s, want awake", got)
-	}
-	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
-		t.Fatalf("energy mode after opening = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
-	}
-}
-
 func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
 	t.Parallel()
 	// Arrange: the mode on, the machine on AC power.

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
@@ -156,6 +158,26 @@ func TestSubmitHoldsUnderTheDrainLease(t *testing.T) {
 	}
 	if !got.Parked() || got.Held == nil || *got.Held != wsm.HoldShutdown {
 		t.Fatalf("disposition = %+v, want a shutdown hold", got)
+	}
+}
+
+func TestSubmitStampsTheDrainsScheduleOnTheDurableShutdownHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
+	h.lease(wsm.HolderDrain, wsm.PolicyHold)
+	want := drain.ScheduleID(*h.db.schedule)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the flaky test")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	held, ok := h.db.held["t1"]
+	if !ok || held.Hold == nil || *held.Hold != wsm.HoldShutdown {
+		t.Fatalf("held row = %+v (found %v), want it held under the shutdown hold", held, ok)
+	}
+	if want == "" || held.ScheduleID != want {
+		t.Fatalf("schedule id = %q, want the drain's own %q", held.ScheduleID, want)
 	}
 }
 
@@ -310,6 +332,32 @@ func TestSubmitRefusesALeasePolicyItDoesNotKnow(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("an unknown lease policy must be surfaced rather than defaulted")
+	}
+}
+
+// TestTurnsOnALiveSessionBringNothingUp pins that a workspace's opening is its
+// one bring-up: a turn on the live session reaches the shim it already has,
+// and the queue's one path to a bring-up (Deps.Revive) is never taken.
+func TestTurnsOnALiveSessionBringNothingUp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: two turns, each run to its end.
+	for _, turn := range []ids.TurnID{"t1", "t2"} {
+		if _, err := h.q.Submit(context.Background(), submission(turn, "say something")); err != nil {
+			t.Fatalf("Submit(%s): %v", turn, err)
+		}
+		h.watcher.idle()
+		h.q.OnTurnEnded(theWorkspace, turn, wsm.CloseCompleted)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{"t1", "t2"}) {
+		t.Fatalf("started = %v, want both turns on the live session", started)
+	}
+	if h.revivals != 0 {
+		t.Fatalf("revivals = %d, want no bring-up for a turn on a live session", h.revivals)
 	}
 }
 
