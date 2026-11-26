@@ -149,3 +149,17 @@ Its brief names this file, and it is the mediator's to write.
   from the previous revision, reads (2026-11-26T09:02:38Z: the launcher
   renamed to `Zettel.app.staged`). The fix restores the staged path, never a
   second landing.
+- A `daemon.feed.durable` record "a durable row carries fields this build has
+  no descriptor for" after a landing that retires a proto field means that
+  landing's layout row edit missed a stored shape; the fix is a NEW additive
+  layout step with a row edit (the stamp already stands past the landing's
+  step), never an edit of the landed step. The same holds for a
+  `daemon.wsm.turn_starts` refusal naming a retired `PROMPT_ORIGIN_*`: the
+  `turns.origin` text is carried onto the surviving origin closest in meaning
+  (2026-11-26: `PROMPT_ORIGIN_MERGE_PICK` onto
+  `PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR`, layout 223). The live file can be
+  checked read-only with sqlite before deciding.
+- `daemon.wsm.*` "refused a write on a read-only handle" at a deploy's boot
+  means a new writer runs on the joining daemon before its promotion; the fix
+  is the store's held-write pattern (hold under `heldMu`, write in `Promote`),
+  never a wait or a retry in the caller.
