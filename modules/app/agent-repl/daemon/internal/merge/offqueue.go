@@ -32,9 +32,6 @@ const (
 	ArmBranchGone = "branch_gone"
 	// ArmAlreadyLanded refuses a requeue of a merge that landed.
 	ArmAlreadyLanded = "already_landed"
-	// ArmVersionAlreadyRecorded refuses a requeue that supplies a version
-	// increment for a request that recorded its own.
-	ArmVersionAlreadyRecorded = "version_already_recorded"
 	// ArmWorkspaceClosed refuses a requeue of a closed workspace's merge.
 	ArmWorkspaceClosed = "workspace_closed"
 	// ArmColdGated is DEPRECATED and never answered (2026-11-20): it refused
@@ -67,9 +64,7 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 	string(CauseDaemonShutdown): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_DaemonShutdown{DaemonShutdown: &agentreplv1.MergeQueueStatusOffQueueCauseDaemonShutdown{}}}
 	},
-	causePickFailed: func() *agentreplv1.MergeQueueStatusOffQueueCause {
-		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_PickFailed{PickFailed: &agentreplv1.MergeQueueStatusOffQueueCausePickFailed{}}}
-	},
+
 	causeFinishFailed: func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_FinishFailed{FinishFailed: &agentreplv1.MergeQueueStatusOffQueueCauseFinishFailed{}}}
 	},
@@ -81,9 +76,6 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 	},
 	string(CauseAgentGaveUp): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_GaveUp{GaveUp: &agentreplv1.MergeQueueStatusOffQueueCauseGaveUp{}}}
-	},
-	wsm.MergeLeftAdopted: func() *agentreplv1.MergeQueueStatusOffQueueCause {
-		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_Adopted{Adopted: &agentreplv1.MergeQueueStatusOffQueueCauseAdopted{}}}
 	},
 }
 
@@ -125,9 +117,6 @@ type OffQueueMember struct {
 	Name string
 	// Branch is the branch the request lands.
 	Branch string
-	// Requester is the workspace that asked for an ASYNC merge, empty for a
-	// workspace's own.
-	Requester ids.WorkspaceID
 	// Cause is why it left its queue.
 	Cause string
 	// LeftAt is when it left.
@@ -155,11 +144,7 @@ func (o *orchestrator) offQueueOf(ctx context.Context, repository wsm.Repository
 		if ws.Repo != repository.ID {
 			continue
 		}
-		member := OffQueueMember{Workspace: ws.ID, Name: ws.Name, Branch: requestBranch(ws, record.Source), Cause: record.Cause, LeftAt: record.LeftAt}
-		if ws.MergeOf != nil {
-			member.Requester = ws.MergeOf.Requester
-		}
-		out = append(out, member)
+		out = append(out, OffQueueMember{Workspace: ws.ID, Name: ws.Name, Branch: requestBranch(ws, record.Source), Cause: record.Cause, LeftAt: record.LeftAt})
 	}
 	return out, nil
 }
@@ -181,8 +166,6 @@ type Requeue struct {
 	// the merge of that name. Neither places it at the back.
 	Front       bool
 	PlaceBehind string
-	// Version is the increment of an adopted request, which recorded none.
-	Version *wsm.VersionIncrement
 	// Model, when set, is the model the merge's session resumes under,
 	// recorded in the requeue's own store write. The caller checked it
 	// against the login's catalog.
@@ -201,12 +184,11 @@ type Requeued struct {
 }
 
 // Requeue puts workspace req.Workspace's merge, standing off its queue, back
-// in line AS ITSELF: the same workspace (for an async merge, the same merge
-// workspace), branch and request, at the placement asked for. It refuses,
-// changing nothing, a merge that holds no request (unknown_merge), stands in
-// line (still_queued), landed (already_landed), belongs to a closed workspace
-// (workspace_closed), lands a branch that is gone (branch_gone), or whose
-// version increment is missing or misplaced.
+// in line AS ITSELF: the same workspace, branch and request, at the placement
+// asked for. It refuses, changing nothing, a merge that holds no request
+// (unknown_merge), stands in line (still_queued), landed (already_landed),
+// belongs to a closed workspace (workspace_closed), or lands a branch that is
+// gone (branch_gone).
 //
 // A WORKSPACE PARKED AT ITS COLD GATE IS REQUEUED AND ITS GATE ANSWERED BY A
 // COMPACTION (owner request, 2026-11-20): the merge goes in line skipped, as
@@ -221,7 +203,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	const op = "daemon.merge.requeue"
 	ws := req.Workspace
 	log := o.log(ctx, ws)
-	fields := dlog.Context{"workspace": string(ws), "requested_by": req.By.String(), "front": req.Front, "place_behind": req.PlaceBehind, "version_supplied": req.Version != nil, "model": req.Model}
+	fields := dlog.Context{"workspace": string(ws), "requested_by": req.By.String(), "front": req.Front, "place_behind": req.PlaceBehind, "model": req.Model}
 	if req.Front && req.PlaceBehind != "" {
 		err := fmt.Errorf("merge: the requeue of %s is placed at the front and behind %q at once", ws, req.PlaceBehind)
 		log.Error(op, "a requeue contradicts itself about its placement", withField(fields, "error", err.Error()))
@@ -237,11 +219,6 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 		return Requeued{}, err
 	}
 	fields["cause"] = rec.Cause
-	if req.Version != nil && !rec.Adopted {
-		refusal := refuse(ArmVersionAlreadyRecorded, ws, "the request recorded its own version increment, which a requeue keeps")
-		logRefusal(log, op, logsite.Msg("refused a requeue that would change a recorded version increment"), fields, refusal)
-		return Requeued{}, refusal
-	}
 	branch := requestBranch(record, rec.Source)
 	fields["branch"] = branch
 	exists, err := o.deps.Git.BranchExists(ctx, record.Dir, branch)
@@ -254,27 +231,6 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 		refusal.Fields = map[string]any{"branch": branch}
 		logRefusal(log, op, logsite.Msg("refused a requeue whose branch is gone"), fields, refusal)
 		return Requeued{}, refusal
-	}
-	source := rec.Source
-	if req.Version != nil {
-		source.Version = req.Version
-	}
-	// THE VERSION RULE IS THE REQUEST'S OWN (checkVersion): a recorded
-	// request passed it when it was asked for, and an adopted one is checked
-	// with the increment it is given now.
-	asked := Request{Workspace: ws, Source: source, By: req.By, Asker: req.Asker}
-	deploy, err := o.requestDeploy(ctx, record, asked)
-	if err != nil {
-		if _, refused := Refused(err); refused {
-			logRefusal(log, op, logsite.Msg("refused a requeue for its repository's deploy config"), fields, err)
-		} else {
-			log.Error(op, "could not read the repository's deploy config", withField(fields, "error", err.Error()))
-		}
-		return Requeued{}, err
-	}
-	if err := checkVersion(ws, asked, deploy); err != nil {
-		logRefusal(log, op, logsite.Msg("refused a requeue for its version increment"), fields, err)
-		return Requeued{}, err
 	}
 	place := wsm.RequeuePlacement{Front: req.Front}
 	if req.PlaceBehind != "" {
@@ -295,11 +251,7 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 		return Requeued{}, err
 	}
 	fields["repo"] = string(repo)
-	var version *wsm.VersionIncrement
-	if rec.Adopted {
-		version = req.Version
-	}
-	if _, err := o.deps.DB.RequeueOffQueueMerge(ctx, repo, ws, place, version, req.Model, o.deps.Now()); err != nil {
+	if _, err := o.deps.DB.RequeueOffQueueMerge(ctx, repo, ws, place, req.Model, o.deps.Now()); err != nil {
 		log.Error(op, "could not put the request back on its queue", withField(fields, "error", err.Error()))
 		return Requeued{}, err
 	}
@@ -360,102 +312,44 @@ func (o *orchestrator) offQueueRecord(ctx context.Context, op string, log dlog.L
 	return wsm.OffQueueMerge{}, refusal
 }
 
-// Discarded is what a discard did: for an async merge, that it closed the
-// merge workspace and whether it removed the worktree its request asked to
-// clean up.
-type Discarded struct {
-	Async                  bool
-	CleanupWorktreeRemoved bool
-}
-
 // Discard ends workspace WS's request standing off its queue without
-// landing it. A workspace's own merge loses only its request. An ASYNC
-// merge's merge workspace is closed by CLOSE (the daemon's ordinary close,
-// whose transaction ends the request with it, wsm.markClosedInTx), and the
-// worktree its request asked to clean up is removed through git's clean
-// door, never forced, and no branch is deleted. It refuses a merge in line
-// (still_queued) and one holding no request (unknown_merge).
-func (o *orchestrator) Discard(ctx context.Context, ws ids.WorkspaceID, close func(context.Context) error) (Discarded, error) {
+// landing it: only the request goes, and the workspace, its worktree and its
+// branch stay. It refuses a merge in line (still_queued) and one holding no
+// request (unknown_merge).
+func (o *orchestrator) Discard(ctx context.Context, ws ids.WorkspaceID) error {
 	const op = "daemon.merge.discard"
 	log := o.log(ctx, ws)
 	fields := dlog.Context{"workspace": string(ws)}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the workspace of the merge to discard", withField(fields, "error", err.Error()))
-		return Discarded{}, err
+		return err
 	}
 	// A CLOSED WORKSPACE HOLDS NOTHING TO DISCARD: its close ended any
 	// request it held.
 	if record.Closed {
 		refusal := refuse(ArmUnknownMerge, ws, "the merge's workspace is closed, and a closed workspace holds no request")
 		logRefusal(log, op, logsite.Msg("refused a discard of a closed workspace's merge"), fields, refusal)
-		return Discarded{}, refusal
+		return refusal
 	}
 	rec, err := o.offQueueRecord(ctx, op, log, record, fields)
 	if err != nil {
-		return Discarded{}, err
+		return err
 	}
 	fields["cause"] = rec.Cause
-	// THE QUEUE IS RESOLVED BEFORE ANYTHING CHANGES: a closed merge
-	// workspace's directory may not outlive its close.
+	// THE QUEUE IS RESOLVED BEFORE ANYTHING CHANGES.
 	repo, err := o.repoKeyFor(ctx, record.Dir)
 	if err != nil {
 		log.Error(op, "could not resolve the discarded merge's repository", withField(fields, "error", err.Error()))
-		return Discarded{}, err
+		return err
 	}
-	if record.MergeOf == nil {
-		if err := o.deps.DB.DiscardOffQueueMerge(ctx, ws); err != nil {
-			log.Error(op, "could not discard the request", withField(fields, "error", err.Error()))
-			return Discarded{}, err
-		}
-		log.Info(op, "discarded a workspace's own merge off its queue; the workspace, its worktree and its branch stay", fields)
-		o.republishOffQueue(ctx, log, record.ID, repo)
-		return Discarded{}, nil
+	if err := o.deps.DB.DiscardOffQueueMerge(ctx, ws); err != nil {
+		log.Error(op, "could not discard the request", withField(fields, "error", err.Error()))
+		return err
 	}
-	if err := close(ctx); err != nil {
-		if _, refused := Refused(err); refused {
-			logRefusal(log, op, logsite.Msg("the merge workspace's close was refused; the request stands"), fields, err)
-		} else {
-			log.Error(op, "could not close the discarded async merge's merge workspace; the request stands", withField(fields, "error", err.Error()))
-		}
-		return Discarded{}, err
-	}
-	out := Discarded{Async: true}
-	if origin := record.MergeOf; origin.CleanupWorktree && origin.CleanupDir != "" {
-		out.CleanupWorktreeRemoved = o.cleanupDiscarded(ctx, log, record, origin.CleanupDir)
-	}
-	log.Info(op, "discarded an async merge off its queue and closed its merge workspace", withField(fields, "cleanup_worktree_removed", out.CleanupWorktreeRemoved))
+	log.Info(op, "discarded a workspace's own merge off its queue; the workspace, its worktree and its branch stay", fields)
 	o.republishOffQueue(ctx, log, record.ID, repo)
-	return out, nil
-}
-
-// cleanupDiscarded removes DIR, the worktree a discarded async merge's request
-// asked to clean up, through git's clean door, and answers whether it did. A
-// worktree holding uncommitted changes is kept, and a removal that fails is
-// recorded: the discard itself stands either way.
-func (o *orchestrator) cleanupDiscarded(ctx context.Context, log dlog.Logger, record wsm.Workspace, dir string) bool {
-	const op = "daemon.merge.discard"
-	fields := dlog.Context{"workspace": string(record.ID), "worktree": dir}
-	clean, err := o.deps.Git.IsClean(ctx, dir)
-	if err != nil {
-		log.Error(op, "could not read whether the worktree to clean up is clean; it is kept", withField(fields, "error", err.Error()))
-		return false
-	}
-	if !clean {
-		log.Info(op, "kept the worktree the discarded merge asked to clean up: it holds uncommitted changes", fields)
-		return false
-	}
-	main, err := o.deps.Git.MainWorktree(ctx, record.Dir)
-	if err != nil {
-		log.Error(op, "could not resolve the repository of the worktree to clean up; it is kept", withField(fields, "error", err.Error()))
-		return false
-	}
-	if err := o.deps.Git.RemoveCleanWorktree(ctx, main, dir); err != nil {
-		log.Error(op, "could not remove the worktree the discarded merge asked to clean up", withField(fields, "error", err.Error()))
-		return false
-	}
-	log.Info(op, "removed the worktree the discarded merge asked to clean up", fields)
-	return true
+	return nil
 }
 
 // republishOffQueue republishes REPO's queue, so the status' subscribers and

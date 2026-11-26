@@ -1,11 +1,9 @@
 package merge
 
 import (
-	workspacev1 "agentrepl/proto/workspace/v1"
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"agent-repld/internal/dlog"
@@ -34,7 +32,7 @@ import (
 // IT REFUSES PRE-STATE. An unmergeable request leaves no trail: nothing is
 // recorded before the refusal, so there is no state to stamp and nothing to
 // clean up.
-func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, error) {
+func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	besideOffQueue, openChildren := logsite.Msg("refused a merge request beside the request standing off its queue"), logsite.Msg("refused a merge that would close a workspace with open children")
 	const op = "daemon.merge.enqueue"
 	ws := req.Workspace
@@ -47,21 +45,21 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		err := fmt.Errorf("merge: a one-shot merge of %s must be an in-place own-branch merge that closes the requester, not %s (keep_open %v)",
 			ws, req.Source.Kind, req.Source.KeepOpen)
 		log.Error(op, "a one-shot merge request contradicts itself", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	// A MERGE IS PLACED ONE WAY, at the front or behind a named merge: the
 	// placement's oneof at the boundary guarantees it.
 	if req.Source.Front && req.PlaceBehind != "" {
 		err := fmt.Errorf("merge: the merge of %s is placed at the front and behind %q at once", ws, req.PlaceBehind)
 		log.Error(op, "a merge request contradicts itself about its placement", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	// WHO ASKED IS NAMED EXACTLY WHEN AN AGENT ASKED: the boundary that
 	// builds the request guarantees it.
 	if (req.By == RequestedByAgent) != (req.Asker != "") {
 		err := fmt.Errorf("merge: a merge of %s asked by %s names the asking workspace %q", ws, req.By, req.Asker)
 		log.Error(op, "a merge request contradicts itself about who asked", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	if req.Asker != "" {
 		fields["asker"] = string(req.Asker)
@@ -69,16 +67,16 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	if err := checkAsker(record, req.Asker); err != nil {
 		logRefusal(log, op, logsite.Msg("refused a merge its asker may not ask for"), fields, err)
-		return Enqueued{}, err
+		return err
 	}
 	source, err := o.checkSource(ctx, record, req.Source)
 	if err != nil {
 		logRefusal(log, op, logsite.Msg("refused a merge request"), fields, err)
-		return Enqueued{}, err
+		return err
 	}
 	if req.PlaceBehind != "" {
 		fields["place_behind"] = req.PlaceBehind
@@ -89,7 +87,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			} else {
 				log.Error(op, "could not read the queue a merge is placed in", withField(fields, "error", err.Error()))
 			}
-			return Enqueued{}, err
+			return err
 		}
 	}
 	if v := req.Source.Version; v != nil {
@@ -105,18 +103,18 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		} else {
 			log.Error(op, "could not read the repository's deploy config", withField(fields, "error", err.Error()))
 		}
-		return Enqueued{}, err
+		return err
 	}
 	// A DEPLOY ONTO A VERSIONED REPOSITORY'S MAIN BRANCH MOVES ITS VERSION, and
 	// no other deploy does (checkVersion).
 	if err := checkVersion(ws, req, deploy); err != nil {
 		logRefusal(log, op, logsite.Msg("refused a deploy request for its version increment"), fields, err)
-		return Enqueued{}, err
+		return err
 	}
 	// AN AGENT'S FINISH RUNS ITS RULE SUITES FIRST (rulecheck.go), once every
 	// cheaper refusal has been asked, and before anything is recorded.
 	if err := o.checkRules(ctx, record, req, source, deploy, fields); err != nil {
-		return Enqueued{}, err
+		return err
 	}
 	if source.Branch != "" {
 		fields["branch"] = source.Branch
@@ -125,13 +123,13 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	// Asked before anything is flushed or recorded, so a refused merge
 	// changes nothing; the request's own transaction checks again, which is
 	// the guarantee. The refusal is the answer, has_open_children.
-	if err := o.deps.DB.RequireNoOpenChildren(ctx, source.Closes(ws, record.Landing)...); err != nil {
+	if err := o.deps.DB.RequireNoOpenChildren(ctx, source.Closes(ws, record.Effects)...); err != nil {
 		if wsm.IsFamilyRefusal(err) {
 			logRefusal(log, op, openChildren, fields, err)
-			return Enqueued{}, err
+			return err
 		}
 		log.Error(op, "could not read whether the merge closes a workspace with open children", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT (offqueue.go). Asked
 	// before anything is flushed or recorded, so a refused request changes
@@ -140,32 +138,32 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	rec, found, err := o.deps.DB.OffQueueMergeOf(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read whether the workspace's merge stands off its queue", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	if found {
 		refusal := mergeOffQueueRefusal(record, rec.Cause)
 		logRefusal(log, op, besideOffQueue, fields, refusal)
-		return Enqueued{}, refusal
+		return refusal
 	}
 	session, found, err := o.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace's session", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	if found && session.Terminal != nil && session.Terminal.Kind == "deleted" {
 		err := refuse(ArmSessionDeleted, ws, "the session was deleted, so the merge's prompts and repairs can never run")
 		logRefusal(log, op, logsite.Msg("refused a merge for a deleted session"), fields, err)
-		return Enqueued{}, err
+		return err
 	}
 	repo, err := o.repoKeyFor(ctx, record.Dir)
 	if err != nil {
 		log.Error(op, "could not resolve the requesting workspace's repository", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	if _, running := o.runFor(ws); running {
 		err := refuse(ArmAlreadyMerging, ws, "this workspace's merge is already in flight")
 		logRefusal(log, op, logsite.Msg("refused a merge request while the workspace's merge runs"), fields, err)
-		return Enqueued{}, err
+		return err
 	}
 	// AN IN-PLACE MERGE THE AGENT'S TURN ASKED FOR FLUSHES THE HELD QUEUE
 	// (owner ruling, 2026-10-12): the merge runs in this session once the
@@ -178,7 +176,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	// recorded; the queue records why.
 	if req.By == RequestedByAgent {
 		if err := o.deps.Queue.FlushHeld(ctx, ws); err != nil {
-			return Enqueued{}, fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
+			return fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
 		}
 	}
 	requestMerge := o.deps.DB.RequestMerge
@@ -196,20 +194,20 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			// A TYPED REFUSAL THE CALLER ACTS ON, not a condition to remediate:
 			// the merge it asked for already stands, and the answer says so.
 			logRefusal(log, op, logsite.Msg("refused a duplicate merge request"), withField(fields, "repo", string(repo)), refusal)
-			return Enqueued{}, refusal
+			return refusal
 		}
 		var offQueue *wsm.MergeOffQueueError
 		if errors.As(err, &offQueue) {
 			refusal := mergeOffQueueRefusal(record, offQueue.Cause)
 			logRefusal(log, op, besideOffQueue, withField(fields, "repo", string(repo)), refusal)
-			return Enqueued{}, refusal
+			return refusal
 		}
 		if wsm.IsFamilyRefusal(err) {
 			logRefusal(log, op, openChildren, fields, err)
-			return Enqueued{}, err
+			return err
 		}
 		log.Error(op, "could not record the merge request", withField(fields, "error", err.Error()))
-		return Enqueued{}, err
+		return err
 	}
 	o.mu.Lock()
 	o.repoOf[ws] = repo
@@ -231,10 +229,10 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		// A workspace whose finish stage runs hooks waits instead, for any
 		// turn in flight to end and then for those hooks: a prompt hook is a
 		// turn of the workspace, which cannot run beside one (finish.go).
-		return Enqueued{}, o.queueRequest(ctx, ws, repo)
+		return o.queueRequest(ctx, ws, repo)
 	}
 	o.awaitRequestingTurn(ws, repo)
-	return Enqueued{}, nil
+	return nil
 }
 
 // checkAsker refuses an in-place merge of WS asked by a workspace that may not

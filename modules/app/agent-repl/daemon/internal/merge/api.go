@@ -27,7 +27,6 @@ import (
 	testrunv1 "agentrepl/proto/testrun/v1"
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"agent-repld/internal/desktopnotify"
@@ -131,7 +130,7 @@ type Orchestrator interface {
 	// to any client -- only once the turn that asked for it has ended (a
 	// merge the USER asked for over an rpc has no requesting turn and is put
 	// in line at once). It answers what the request reserved.
-	Enqueue(ctx context.Context, req Request) (Enqueued, error)
+	Enqueue(ctx context.Context, req Request) error
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
@@ -196,9 +195,9 @@ type Orchestrator interface {
 	// Requeue puts a merge that left its queue without landing back in line
 	// as itself: the same workspace, branch and request (offqueue.go).
 	Requeue(ctx context.Context, req Requeue) (Requeued, error)
-	// Discard ends a request standing off its queue without landing it;
-	// CLOSE closes an async merge's merge workspace (offqueue.go).
-	Discard(ctx context.Context, ws ids.WorkspaceID, close func(context.Context) error) (Discarded, error)
+	// Discard ends a request standing off its queue without landing it
+	// (offqueue.go): only the request goes.
+	Discard(ctx context.Context, ws ids.WorkspaceID) error
 	// SetGithubDeployments installs, WHOLE, every workspace whose owned pull
 	// request stands in a GitHub merge queue (githubdeploy.go): each is drawn
 	// as deploying, and at its GitHub place in its repository's merge queue.
@@ -276,24 +275,15 @@ type Orchestrator interface {
 	// OnBacklogged is told WS was backlogged: a merge standing at its cold gate
 	// leaves its queue (CauseBackloggedAtColdGate). It returns at once.
 	OnBacklogged(ws ids.WorkspaceID)
-	// RevealMergeWorkspace draws a hidden async merge workspace in the tab bar
-	// and the sidebar from now on, naming CAUSE in its record, and restates the
-	// requester's bubble head with its switch. It is a no-op for a workspace
-	// that is no merge workspace or is already revealed. IT ENDS WITH THE
-	// WORKSPACE DRAWABLE OR WITH AN ERROR, recorded at ERROR: a reveal that
-	// cannot be recorded, or that left the workspace backlogged, fails its two
-	// callers (a select, and a show through workspace.Verbs.SetBacklogged).
-	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error
-	// WorkspaceLinksChanged draws again the heads of WS's merges, and of the
-	// async merges WS asked for, once WS's links changed: a merge's target
+	// WorkspaceLinksChanged draws again the heads of WS's merges once WS's
+	// links changed: a merge's target
 	// opens the pull request the workspace owns
 	// (frontend.v1.FeedMergeBranchLineTarget.pull_request), which a finish
 	// hook stores mid-merge.
 	WorkspaceLinksChanged(ws ids.WorkspaceID)
 	// InterruptTab stops the turn an AGENTIC merge tab of REQUESTER's feed
-	// draws (agentrepl.v1.InterruptRequest.merge_tab): the merge workspace's
-	// turn for an async merge, which also reveals that workspace, or the
-	// requester's own for a sync merge. It answers whether a turn was running.
+	// draws (agentrepl.v1.InterruptRequest.merge_tab): the requester's own
+	// turn. It answers whether a turn was running.
 	// A ref that names no live agentic tab of a merge drawn in REQUESTER's
 	// feed is refused (not_merge_tab).
 	InterruptTab(ctx context.Context, requester ids.WorkspaceID, tab feedid.Ref) (bool, error)
@@ -450,11 +440,6 @@ type Request struct {
 	// in-place merge lands only on the ask of the workspace itself, of its
 	// owner, of the workspace it lands into, or of the user (checkAsker).
 	Asker ids.WorkspaceID
-	// Detached runs a named branch's merge ASYNC, in a hidden MERGE WORKSPACE
-	// forked from the requester instead of in the requester
-	// (agentrepl.v1.MergeWorkspaceAsync); nil runs it SYNC, in place. It is
-	// legal on the branch source alone.
-	Detached *DetachedRun
 	// OneShot ANNOUNCES the requester a one-shot: its own branch merges in
 	// place once the requesting turn ends and the requester closes once it
 	// lands, and the request marks the requester a one-shot on its creation
@@ -469,94 +454,21 @@ type Request struct {
 	PlaceBehind string
 }
 
-// Enqueued is what a recorded request reserved.
-type Enqueued struct {
-	// MergeBranch is the branch an ASYNC request's merge workspace will be
-	// created under, reserved from now until it exists
-	// (agentrepl.v1.CreateWorkspaceAsyncMergeAccepted.merge_workspace_branch).
-	// Empty for an in-place merge.
-	MergeBranch string
+// HandBacks hands a merge's outcome back to the conversation of the workspace
+// whose merge it was. The merge package never submits to a session itself:
+// this seam is the one way it tells a workspace how its merge ended.
+type HandBacks interface {
+	// HandBack reports how WS's own merge ended to WS's conversation. RECORD
+	// is WS's registry record.
+	HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, outcome DetachedOutcome) error
 }
 
-// DetachedRun is what an async request says about its merge workspace.
-type DetachedRun struct {
-	// Name is the merge workspace's name as the requesting agent chose it,
-	// unprefixed. It is checked and reserved when the request is recorded.
-	Name string
-	// Pick is the requesting agent's instruction for preparing the branch
-	// before it joins the queue (agentrepl.v1.MergeWorkspaceAsync.instruction),
-	// empty when the branch lands as it is.
-	Pick string
-	// CompactAfter compacts the requester's conversation once the merge
-	// lands (agentrepl.v1.MergeWorkspaceAsync.compact_after).
-	CompactAfter bool
-	// CloseOnLanding is another workspace the merge closes once it lands
-	// (agentrepl.v1.MergeWorkspaceAsync.one_shot), empty when it closes none.
-	CloseOnLanding ids.WorkspaceID
-	// CleanupWorktree removes, once the merge lands, the worktree that had
-	// the branch checked out when the request was accepted
-	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
-	CleanupWorktree bool
-	// Hooks are the deploy hooks the merge workspace runs in place of its
-	// repository's (agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks), and
-	// it never inherits its requester's. Empty when the request names none.
-	Hooks wsm.DeployHooks
-	// Maker is the workspace the merged work was done in: the merge workspace
-	// forks its conversation, and it is the one target besides the primary
-	// branch the branch may land in (agentrepl.v1.CreateWorkspaceAsyncMerge).
-	Maker ids.WorkspaceID
-	// IntoMaker lands the branch into the maker's branch instead of on the
-	// primary branch.
-	IntoMaker bool
-}
-
-// NewDetachedRun is the async run the rpc reads off a request: the merge
-// workspace's name and the instruction with their surrounding space trimmed,
-// and the landing asks, deploy hooks, maker and target as given.
-func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, hooks wsm.DeployHooks, maker ids.WorkspaceID, intoMaker bool) *DetachedRun {
-	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
-		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Hooks: hooks, Maker: maker, IntoMaker: intoMaker}
-}
-
-// DetachedMerges forks the merge workspace a detached request runs in, and
-// hands a detached merge's outcome back to the workspace that asked for it.
-// The merge package never creates a workspace or submits to another
-// workspace's session itself: this seam is the one way it does either.
-type DetachedMerges interface {
-	// Fork answers the merge workspace forked for ORIGIN's request, creating
-	// it when none is registered yet: a fork of the requester's conversation
-	// named NAME (the name the request reserved), its own worktree on BASE as
-	// it stands now — the requester's branch for a whole-branch merge, the
-	// target branch for a pick — landing by ORIGIN's TargetDir and
-	// ParentBranch and running exactly ORIGIN's Hooks, which the hand-off
-	// decided, and recording ORIGIN (whose Requester is REQUESTER's id) as
-	// what it was forked for. It is idempotent per request, so a hand-off a restart cut
-	// short finds the workspace already forked.
-	Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// HandBack reports how a detached merge ended to the conversation of the
-	// workspace that asked for it.
-	HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, outcome DetachedOutcome) error
-	// Reveal draws a hidden merge workspace in the tab bar and the sidebar
-	// from now on, and answers whether this call revealed it (false when it
-	// already was).
-	Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error)
-}
-
-// Names is the slice of workspace naming an async request needs: its merge
-// workspace's name is checked and reserved when the request is recorded, so
-// the fork can never collide.
+// Names resolves a merge's name as an agent may spell it: supplied, or with
+// the workspace prefix.
 type Names interface {
-	// ClaimMergeName resolves NAME (unprefixed) to the branch a merge workspace
-	// of the repository at REPODIR would be created under, and claims it until
-	// RELEASE is called: no other name allocation hands it out meanwhile. The
-	// caller releases once the request carrying the name is recorded (which
-	// reserves it durably) or refused. A name that is already a workspace, a
-	// branch, an occupied worktree directory, a reservation or a claim answers
-	// TAKEN with no claim.
-	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
-	// MergeBranch resolves NAME (unprefixed) to the name its merge workspace
-	// would stand under, claiming nothing: the name a merge off its queue is
-	// matched against.
+	// MergeBranch resolves NAME (unprefixed) to the name its workspace would
+	// stand under, claiming nothing: the name a merge in line is matched
+	// against.
 	MergeBranch(name string) string
 }
 
@@ -748,14 +660,14 @@ type Deps struct {
 	TurnInFlight func(ws ids.WorkspaceID) (ids.TurnID, bool)
 	// Feed carries the merge bubble's tabs.
 	Feed feed.Resolver
-	// Detached forks a detached request's merge workspace and hands its
-	// outcome back to the requester.
-	Detached DetachedMerges
+	// HandBacks hands a merge's outcome back to the workspace whose merge it
+	// was.
+	HandBacks HandBacks
 	// QueueEvents is told every change of every queue this daemon makes, with
 	// the queue as it stands after it: the merge queue subscriptions' notices
 	// (internal/mergenotice).
 	QueueEvents QueueObserver
-	// Names checks and claims an async request's merge workspace name.
+	// Names resolves a merge's name as an agent may spell it.
 	Names Names
 	// Footer and Sidebar receive the merge facts.
 	Footer  footer.Resolver

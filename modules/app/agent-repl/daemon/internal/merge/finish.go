@@ -54,15 +54,11 @@ type finishTarget struct {
 	queuedAt time.Time
 }
 
-// finishTargetOf reads the finish stage WS's deploy runs: none for an async
-// merge (a merge workspace's own merge).
+// finishTargetOf reads the finish stage WS's deploy runs.
 func (o *orchestrator) finishTargetOf(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (finishTarget, error) {
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return finishTarget{}, fmt.Errorf("merge: reading the finishing workspace %s: %w", ws, err)
-	}
-	if record.MergeOf != nil {
-		return finishTarget{}, nil
 	}
 	dir, err := o.targetDirOf(ctx, ws, source)
 	if err != nil {
@@ -77,12 +73,8 @@ func (o *orchestrator) finishTargetOf(ctx context.Context, ws ids.WorkspaceID, s
 }
 
 // hasFinishStage reports whether a deploy of RECORD into DEPLOY's target runs
-// any finish-stage hook: never an async merge's merge workspace, and
-// otherwise whenever its kind's finish hooks are not empty.
+// any finish-stage hook: whenever its kind's finish hooks are not empty.
 func (o *orchestrator) hasFinishStage(deploy deployTarget, record wsm.Workspace) bool {
-	if record.MergeOf != nil {
-		return false
-	}
 	return len(o.deps.Builtins.Hooks(deploy.cfg, lifecycleconfig.StageFinish, deploy.owner.kind, deploy.toMain)) > 0
 }
 

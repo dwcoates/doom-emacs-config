@@ -82,15 +82,6 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 			}
 		}
 	}
-	// THE ASYNC REQUESTS STILL WAITING FOR THEIR TURN'S END are re-armed:
-	// each requester's are handed off once its turn in flight -- if one
-	// survived the restart -- has ended, oldest first.
-	requests, err := o.deps.DB.AllAsyncMergeRequests(ctx)
-	if err != nil {
-		o.deps.Log.Global().Error(op, "could not read the async merge requests to re-arm", dlog.Context{"error": err.Error()})
-		return err
-	}
-	o.rearmAsyncRequests(requests, nil)
 	for _, repo := range repos {
 		if err := o.republishQueue(ctx, repo); err != nil {
 			return err
@@ -119,20 +110,6 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		o.mu.Lock()
 		o.repoOf[entry.Workspace] = repo
 		o.mu.Unlock()
-		// A MERGE WORKSPACE'S PICK is begun, or taken back where the restart
-		// left it, before its merge joins the queue. A row that still carries
-		// its detach was never handed off (HandOffDetachedMerge rewrites the
-		// row onto the merge workspace without one): it names the requester,
-		// whose pick it is not, so it is re-armed below like any request, and
-		// its wait's end makes the hand-off that begins the pick.
-		if entry.Source.Pick != "" && entry.Source.Detach == "" {
-			if entry.Source.PickStartedAt == nil {
-				o.deps.Log.Global().Info(op, "begins an async merge's pick the restart cut short before it began", dlog.Context{
-					"workspace": string(entry.Workspace), "repo": string(repo)})
-				return o.startPick(ctx, entry.Workspace, repo, entry)
-			}
-			return o.resumePick(ctx, repo, entry)
-		}
 		// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it is put in
 		// line once the requester's turn in flight -- if one survived the
 		// restart -- has ended.
@@ -156,13 +133,6 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		o.recoverColdGated(ctx, repo, entry)
 	}
 	o.parkQueued(ctx, "daemon.merge.recover", repo, entry.Source, entry.Workspace, entry.Ledger)
-	// A PICK THE RESTART CUT SHORT AT THE HEAD is taken back where it stood;
-	// one that never began waits for its admission to begin it (admitFront).
-	if entry.Source.Pick != "" && entry.Source.PickStartedAt != nil {
-		o.deps.Log.Global().Info(op, "resumes the pick a restart cut short at the head of the queue", dlog.Context{
-			"workspace": string(entry.Workspace), "repo": string(repo)})
-		return o.resumePick(ctx, repo, entry)
-	}
 	o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
 		"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
 	return nil

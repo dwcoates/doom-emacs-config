@@ -77,20 +77,14 @@ func checkVersion(ws ids.WorkspaceID, req Request, d deployTarget) error {
 }
 
 // requestTarget answers where a request's merge will land, by the rule the
-// run resolves its subject by (resolveSubject): a workspace's own branch and
-// an async request (which lands by its requester's geometry) in the target
-// recorded at creation (the main worktree for the main checkout, which has no
-// creation), another workspace's in that workspace's, and a named branch run
-// in place in the repository's main worktree.
-//
-// An async request lands where detachedLanding says.
+// run resolves its subject by (resolveSubject): a workspace's own branch in
+// the target recorded at creation (the main worktree for the main checkout,
+// which has no creation), another workspace's in that workspace's, and a named
+// branch run in place in the repository's main worktree.
 func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspace, req Request) (string, error) {
 	switch {
-	case req.Source.Kind == wsm.MergeSourceBranch && req.Detached == nil:
+	case req.Source.Kind == wsm.MergeSourceBranch:
 		return o.deps.Git.MainWorktree(ctx, requester.Dir)
-	case req.Detached != nil:
-		target, _, err := o.detachedLanding(ctx, requester, wsm.MergeSource{DetachMaker: req.Detached.Maker, DetachTargetMaker: req.Detached.IntoMaker})
-		return target, err
 	case req.Source.Kind == wsm.MergeSourceWorkspace:
 		job, err := o.layoutFor(ctx, req.Source.Workspace)
 		if err != nil {

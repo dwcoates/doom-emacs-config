@@ -87,11 +87,7 @@ func (o *orchestrator) checkRules(ctx context.Context, requester wsm.Workspace, 
 		log.Info(opRuleCheck, "no worktree holds the merge's branch, so its rule suites run in the gate alone", withField(fields, "branch", source.Branch))
 		return nil
 	}
-	maker := ws
-	if req.Detached != nil && req.Detached.Maker != "" {
-		maker = req.Detached.Maker
-	}
-	name, err := o.workspaceName(ctx, opRuleCheck, maker)
+	name, err := o.workspaceName(ctx, opRuleCheck, ws)
 	if err != nil {
 		return err
 	}
@@ -100,7 +96,7 @@ func (o *orchestrator) checkRules(ctx context.Context, requester wsm.Workspace, 
 		log.Debug(opRuleCheck, "the roster declares no rule suite, so none runs before the merge", fields)
 		return nil
 	}
-	fields = dlog.Merge(fields, dlog.Context{"maker": string(maker), "worktree": tree, "suites": strings.Join(suites, ","), "bound_seconds": ruleCheckBound.Seconds()})
+	fields = dlog.Merge(fields, dlog.Context{"workspace": string(ws), "worktree": tree, "suites": strings.Join(suites, ","), "bound_seconds": ruleCheckBound.Seconds()})
 	argv := append(o.deps.TestCommand(tree, script, name), "--suites", strings.Join(suites, ","))
 	log.Info(opRuleCheck, "the merge's rule suites started on the branch's worktree", fields)
 	output, end, err := o.runRuleCheck(ctx, log, tree, argv, name, ruleCheckBound, fields)
@@ -123,7 +119,7 @@ func (o *orchestrator) checkRules(ctx context.Context, requester wsm.Workspace, 
 		return nil
 	}
 	found := readFailingTests(output, tree)
-	if err := o.recordFailingCases(ctx, maker, found, fields); err != nil {
+	if err := o.recordFailingCases(ctx, ws, found, fields); err != nil {
 		return err
 	}
 	refusal := refuse(ArmRuleChecksFailed, ws, "the branch failed its rule suites (%s) in %s; fix the cases named, commit, and ask again", strings.Join(suites, ", "), tree)

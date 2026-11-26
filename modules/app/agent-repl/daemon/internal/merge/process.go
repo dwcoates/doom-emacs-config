@@ -941,23 +941,14 @@ func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranc
 
 // afterGiveUp is what a repair brief says becomes of its agent once it gives
 // the merge up. It is the ONE home of that sentence, which both repair briefs
-// splice in: an async merge's own merge workspace ends its session at once
-// (endSession), and a merge in place hands its workspace back.
+// splice in: the merge runs in place, and hands its workspace back.
 func (r *run) afterGiveUp() string {
-	if _, async := r.o.requesterOf(r.ws); async {
-		return afterGiveUpAsync
-	}
 	return afterGiveUpInPlace
 }
 
-const (
-	// afterGiveUpAsync is afterGiveUp's sentence in a merge workspace of its
-	// own, forked from its maker's conversation.
-	afterGiveUpAsync = "Giving up ends this merge workspace's session at once, and your work with it. Your work is only ever this merge's, in this worktree: never carry it on in the branch or the worktree of the workspace this one was forked from."
-	// afterGiveUpInPlace is afterGiveUp's sentence in the workspace whose
-	// own branch the merge lands.
-	afterGiveUpInPlace = "The workspace is yours again."
-)
+// afterGiveUpInPlace is afterGiveUp's sentence in the workspace whose own
+// branch the merge lands.
+const afterGiveUpInPlace = "The workspace is yours again."
 
 // conflictSettled reads the conflict resolution's end: the failed outcome when
 // it gave up, or a new rebasing round the rebase continues in.

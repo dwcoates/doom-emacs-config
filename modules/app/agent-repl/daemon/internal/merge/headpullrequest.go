@@ -18,20 +18,16 @@ import (
 // opHeadPullRequest is the operation the head's pull request records under.
 const opHeadPullRequest = "daemon.merge.head_pull_request"
 
-// headPullRequest answers the url of the pull request WS's merge, drawn at
-// AT, deploys: the one deployable owned pull request
-// (wsm.DeployablePullRequests) of WS and, for an async merge, of the
-// requesting workspace. Empty when they own none, when they own several (the
-// head cannot tell which, recorded at INFO), when LINE has no target, and
-// when a workspace's links cannot be read (recorded at ERROR).
-func (o *orchestrator) headPullRequest(ws ids.WorkspaceID, at bubble, line branchLine) string {
+// headPullRequest answers the url of the pull request WS's merge deploys:
+// the one deployable owned pull request (wsm.DeployablePullRequests) of WS.
+// Empty when it owns none, when it owns several (the head cannot tell which,
+// recorded at INFO), when LINE has no target, and when its links cannot be
+// read (recorded at ERROR).
+func (o *orchestrator) headPullRequest(ws ids.WorkspaceID, line branchLine) string {
 	if line.target == "" {
 		return ""
 	}
 	owners := []ids.WorkspaceID{ws}
-	if at.async() {
-		owners = append(owners, at.ws)
-	}
 	var urls []string
 	for _, owner := range owners {
 		links, err := o.deps.DB.WorkspaceLinks(context.Background(), owner)
@@ -54,13 +50,13 @@ func (o *orchestrator) headPullRequest(ws ids.WorkspaceID, at bubble, line branc
 }
 
 // WorkspaceLinksChanged draws again every head this daemon drew for a merge
-// of WS, or for an async merge WS asked for, so its target opens the pull
-// request WS's links now name (Orchestrator).
+// of WS, so its target opens the pull request WS's links now name
+// (Orchestrator).
 func (o *orchestrator) WorkspaceLinksChanged(ws ids.WorkspaceID) {
 	o.heads.mu.Lock()
 	defer o.heads.mu.Unlock()
 	for merging, head := range o.heads.last {
-		if at := o.bubbleOf(merging); merging == ws || at.ws == ws {
+		if merging == ws {
 			o.drawHead(merging, head, headLinks)
 		}
 	}

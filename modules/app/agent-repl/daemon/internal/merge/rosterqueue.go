@@ -64,24 +64,6 @@ func (d rosterQueueDB) RequestOneShotMerge(ctx context.Context, repo wsm.RepoKey
 	return d.republished(ctx, repo, d.DB.RequestOneShotMerge(ctx, repo, id, source, at))
 }
 
-// RequestAsyncMerge records an async request and republishes its
-// repository's queue.
-func (d rosterQueueDB) RequestAsyncMerge(ctx context.Context, repo wsm.RepoKey, requester wsm.WorkspaceID, turn wsm.TurnID, source wsm.MergeSource, at time.Time) error {
-	return d.republished(ctx, repo, d.DB.RequestAsyncMerge(ctx, repo, requester, turn, source, at))
-}
-
-// DropAsyncMergeRequest drops an async request and republishes its
-// repository's queue.
-func (d rosterQueueDB) DropAsyncMergeRequest(ctx context.Context, repo wsm.RepoKey, request wsm.DetachedMergeID, cause string) error {
-	return d.republished(ctx, repo, d.DB.DropAsyncMergeRequest(ctx, repo, request, cause))
-}
-
-// HandOffDetachedMerge moves a detached request onto its merge workspace and
-// republishes its repository's queue.
-func (d rosterQueueDB) HandOffDetachedMerge(ctx context.Context, repo wsm.RepoKey, requester wsm.WorkspaceID, request wsm.DetachedMergeID, mergeWS wsm.WorkspaceID, branch, pick string, at time.Time) error {
-	return d.republished(ctx, repo, d.DB.HandOffDetachedMerge(ctx, repo, requester, request, mergeWS, branch, pick, at))
-}
-
 // RemoveMergeQueueEntry drops a row and republishes its repository's queue.
 func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string) error {
 	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause))
@@ -216,13 +198,6 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	requesters, err := o.asyncRequesters(ctx, repo, entries)
-	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not resolve the requester of a merge workspace on the queue, so the roster is not told the queue"),
-			logsite.Msg("the requesters' read ended when its context was cancelled; the roster is not told the queue"),
-			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
-		return
-	}
 	// THE DEPLOY CHECK'S HOLD IS DRAWN FROM THE ONE READ THE HOLD ITSELF
 	// TAKES (deployHoldOf), so the paused drawing and the hold never disagree.
 	hold, err := o.deployHoldOf(ctx, repo)
@@ -232,7 +207,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	queue := sidebar.MergeQueue{Pause: pause, DeployCheck: rosterDeployCheck(hold), AsyncRequesters: requesters}
+	queue := sidebar.MergeQueue{Pause: pause, DeployCheck: rosterDeployCheck(hold)}
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
@@ -291,7 +266,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "held_by": hold.heldBy(), "requesters": ids.Strings(requesters)}
+	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "held_by": hold.heldBy()}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.noteOrder(repo, queue)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
@@ -338,77 +313,9 @@ func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
 		if o.offQueueHidden(record.Workspace) {
 			continue
 		}
-		ws, err := o.deps.DB.Workspace(ctx, record.Workspace)
-		if err != nil {
-			recordFailed(o.deps.Log.Global(), op, logsite.Msg("could not read the workspace of a merge off its queue, so the roster is not told them"),
-				logsite.Msg("the workspace read ended when its context was cancelled; the roster is not told the merges off their queues"),
-				dlog.Context{"workspace": string(record.Workspace)}, err)
-			return
-		}
-		entry := sidebar.OffQueueEntry{Workspace: ws.ID, Credited: ws.ID, Cause: OffQueueWords(record.Cause)}
-		if ws.MergeOf != nil {
-			entry.Credited, entry.Async = ws.MergeOf.Requester, true
-		}
-		entries = append(entries, entry)
+		entries = append(entries, sidebar.OffQueueEntry{Workspace: record.Workspace, Cause: OffQueueWords(record.Cause)})
 	}
 	o.deps.Sidebar.SetOffQueue(entries)
-}
-
-// asyncRequesters answers the workspace whose own branch each async merge on
-// REPO's queue merges: a merge workspace's requester for each of ENTRIES, in
-// queue order, then each async request's requester not yet handed off, in the
-// order they were asked for.
-func (o *orchestrator) asyncRequesters(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
-	var out []ids.WorkspaceID
-	for _, entry := range entries {
-		c, err := o.creditOf(ctx, entry.Workspace)
-		if err != nil {
-			return nil, err
-		}
-		if c.async {
-			out = append(out, c.workspace)
-		}
-	}
-	requests, err := o.deps.DB.AllAsyncMergeRequests(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, req := range requests {
-		if req.Repo == repo {
-			out = append(out, req.Requester)
-		}
-	}
-	return out, nil
-}
-
-// credit is who the roster credits a merge to and the name it draws it under.
-type credit struct {
-	// workspace is the workspace the merge is credited to.
-	workspace ids.WorkspaceID
-	// async reports an async merge.
-	async bool
-	// asyncName is an async merge's own name (sidebar.QueueEntry.AsyncName),
-	// empty for a sync merge.
-	asyncName string
-	// name is the name of the workspace the merge runs in.
-	name string
-}
-
-// creditOf answers how the roster credits the merge running in WS: a
-// merge workspace is credited to its requester and named by its own name, and
-// every other merge is credited to the workspace it runs in, under that
-// workspace's name. It is the one place
-// the roster's credit is decided, so the async-merging marker and the merge
-// queue view never disagree on who a merge is drawn as.
-func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID) (credit, error) {
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		return credit{}, err
-	}
-	if record.MergeOf != nil {
-		return credit{workspace: record.MergeOf.Requester, async: true, asyncName: record.Name, name: record.Name}, nil
-	}
-	return credit{workspace: ws, name: record.Name}, nil
 }
 
 // rosterLine answers the merges of LINE as the roster draws them, front
@@ -420,15 +327,8 @@ func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID) (credit
 func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed, queueHeld bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
 	for i, entry := range line {
-		c, err := o.creditOf(ctx, entry.Workspace)
-		if err != nil {
-			return nil, err
-		}
 		drawn := sidebar.QueueEntry{
 			Workspace: entry.Workspace,
-			Credited:  c.workspace,
-			Async:     c.async,
-			AsyncName: c.asyncName,
 			Admitted:  entry.State != wsm.MergeQueued,
 			Clock:     entry.Clock,
 			Repair:    rosterRepair(entry.Slot),
@@ -466,11 +366,10 @@ func rosterRepair(slot wsm.MergeSlot) sidebar.QueueRepair {
 }
 
 // bubbleHeadID is the row id of the head of the merge bubble the merge
-// running in WS draws under LEASE, on the root feed of the workspace the
-// bubble is drawn in (bubbleOf): what a click on the merge in the roster's
-// queue reveals.
+// running in WS draws under LEASE, on WS's own root feed: what a click on the
+// merge in the roster's queue reveals.
 func (o *orchestrator) bubbleHeadID(ws ids.WorkspaceID, lease ids.LeaseID) *frontendv1.FeedId {
-	return headFeedID(o.bubbleOf(ws).ws, lease)
+	return headFeedID(ws, lease)
 }
 
 // ledgerStages answers the stages of the merge running in WS under LEASE, read
