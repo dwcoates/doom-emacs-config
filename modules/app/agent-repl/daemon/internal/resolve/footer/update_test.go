@@ -106,6 +106,7 @@ func TestTheBuildNamesEveryComponentItBuilds(t *testing.T) {
 	components := []deployprogress.Component{
 		deployprogress.Shim, deployprogress.Webapp, deployprogress.Daemon,
 		deployprogress.Store, deployprogress.Sidecar, deployprogress.Zettel, deployprogress.Tests, deployprogress.Launcher,
+		deployprogress.PersistentWifi,
 	}
 
 	// Act

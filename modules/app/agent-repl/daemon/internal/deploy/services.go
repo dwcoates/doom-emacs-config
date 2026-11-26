@@ -28,6 +28,8 @@ const (
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
 	ZettelLabel  = "com.agentrepl.zettel"
 	TestsLabel   = "com.agentrepl.tests"
+	// WifiLabel is the persistent-wifi service.
+	WifiLabel = "com.agentrepl.persistent-wifi"
 	// LauncherLabel is the launcher's launchd agent.
 	LauncherLabel = "app.zettel.launcher"
 	// RetiredNotifierLabel is the launch agent the launcher replaced. Both
@@ -38,7 +40,7 @@ const (
 )
 
 // Standalone is a service no other service's restart moves, and that moves
-// none: zettel and the test service. Every one is built, installed, judged,
+// none: zettel, the test service and the persistent-wifi service. Every one is built, installed, judged,
 // restarted, rolled back and kept current at boot by the same code, from its
 // entry in Standalones.
 type Standalone struct {
@@ -53,6 +55,9 @@ type Standalone struct {
 	// Short and Display name it in records: "the <Short> restart failed",
 	// "restarted <Display>".
 	Short, Display string
+	// Held is a service that takes its socket from a socket holder
+	// (Restarter.WifiHolder), ensured before it starts or restarts.
+	Held bool
 }
 
 // The standalone services.
@@ -61,10 +66,13 @@ var (
 		Progress: deployprogress.Zettel, Short: "zettel", Display: "zettel"}
 	Tests = Standalone{Component: ComponentTests, Label: TestsLabel, Service: buildreport.ServiceTests,
 		Progress: deployprogress.Tests, Short: "test service", Display: "the test service"}
+	Wifi = Standalone{Component: ComponentPersistentWifi, Label: WifiLabel, Service: buildreport.ServicePersistentWifi,
+		Progress: deployprogress.PersistentWifi, Short: "persistent-wifi service", Display: "the persistent-wifi service",
+		Held: true}
 )
 
 // Standalones is every standalone service, in the order a deploy reports them.
-var Standalones = []Standalone{Zettel, Tests}
+var Standalones = []Standalone{Zettel, Tests, Wifi}
 
 // restartWith is S's restart through services, in the one shape a deploy's
 // restartOnto and its rollbackRestart take.
@@ -207,6 +215,11 @@ type Restarter struct {
 	LauncherApp    string
 	RegisterApp    func(ctx context.Context, bundle string) error
 	LauncherHolder string
+	// WifiHolder is the id of the socket holder that holds the
+	// persistent-wifi service's socket (holderensure.HolderOfSocket), ensured
+	// before the service starts or restarts; empty when no declared holder
+	// holds that socket (a harness's own), and then none is ensured.
+	WifiHolder string
 }
 
 // serviceWindowBounds bound each service restart's resource window: about
@@ -412,6 +425,9 @@ func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
 // manager.
 func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 	fields := dlog.Context{s.Short: s.Label}
+	if err := r.ensureStandaloneHolder(ctx, s, fields); err != nil {
+		return err
+	}
 	// A SERVICE THE MANAGER DOES NOT HOLD CANNOT BE KICKSTARTED (2026-11-16:
 	// the test service's first deploy failed with launchctl exit 113 and
 	// rolled the whole deploy back). It is loaded from its definition, written
@@ -443,6 +459,9 @@ func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 // shim writes into it -- so the boot runs it beside the bring-ups, never
 // before a shim starts.
 func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) error {
+	if err := r.ensureStandaloneHolder(ctx, s, dlog.Context{s.Short: s.Label}); err != nil {
+		return err
+	}
 	bootstrapped, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
 	if err != nil {
 		return err
@@ -463,8 +482,21 @@ func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) e
 // service S, and touches nothing that runs: a joining successor's step,
 // which must not restart a service the incumbent is still serving through.
 func (r *Restarter) EnsureStandaloneLoaded(ctx context.Context, s Standalone) error {
+	if err := r.ensureStandaloneHolder(ctx, s, dlog.Context{s.Short: s.Label}); err != nil {
+		return err
+	}
 	_, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
 	return err
+}
+
+// ensureStandaloneHolder ensures the socket holder of standalone service S,
+// when S is Held, before anything starts S: its definition takes its socket
+// from the holder. The persistent-wifi service is the one held standalone.
+func (r *Restarter) ensureStandaloneHolder(ctx context.Context, s Standalone, fields dlog.Context) error {
+	if !s.Held {
+		return nil
+	}
+	return r.ensureHolderOf(ctx, s.Display, r.WifiHolder, fields)
 }
 
 // EnsureStandalonesCurrent is EnsureStandaloneCurrent for every standalone

@@ -38,15 +38,17 @@ const opHotReload = "daemon.hotreload"
 
 // The services a deploy reloads, in the order the card lists them.
 const (
-	ServiceStore    = "store"
-	ServiceSidecar  = "sidecar"
-	ServiceZettel   = "zettel"
-	ServiceTests    = "test service"
-	ServiceLauncher = "launcher"
-	ServiceDaemon   = "daemon"
-	ServiceShim     = "shim"
-	ServiceWebapp   = "webapp"
-	ServiceElisp    = "elisp"
+	ServiceStore   = "store"
+	ServiceSidecar = "sidecar"
+	ServiceZettel  = "zettel"
+	ServiceTests   = "test service"
+	// ServicePersistentWifi is the persistent-wifi service.
+	ServicePersistentWifi = "persistent-wifi service"
+	ServiceLauncher       = "launcher"
+	ServiceDaemon         = "daemon"
+	ServiceShim           = "shim"
+	ServiceWebapp         = "webapp"
+	ServiceElisp          = "elisp"
 )
 
 // The step every service shares, before any service's own.
@@ -85,6 +87,8 @@ var specs = []serviceSpec{
 		about: "Serves the zettel chats. A stale one is restarted at once; nothing else depends on it."},
 	{name: ServiceTests, reload: "restart", built: true, current: "already running the fresh build",
 		about: "Runs test suites for the merge queue and the workspaces. A stale one is restarted at once."},
+	{name: ServicePersistentWifi, reload: "restart", built: true, current: "already running the fresh build",
+		about: "Holds persistent-wifi mode: the power settings and the hotspot joins. A stale one is restarted at once; the daemon's calls meanwhile wait for it on its held socket."},
 	{name: ServiceLauncher, reload: "restart", built: true, current: "already running the fresh build",
 		about: "Zettel.app, which opens Emacs and posts every desktop banner, on macOS alone. A stale launcher is restarted at once; a banner posted meanwhile waits for it on its held socket."},
 	{name: ServiceDaemon, reload: "hand over", built: true, current: "already running the fresh build",
@@ -103,17 +107,18 @@ var specs = []serviceSpec{
 // installed with it (deploy.go). Every step a deploy's builder runs must be
 // here: deploy's TestEveryBuildStepIsATrackedTarget holds the two in step.
 var buildTargets = map[string]struct{ service, step string }{
-	"shim":       {ServiceShim, stepBuild},
-	"lock":       {ServiceShim, "build shim-lock"},
-	"webapp":     {ServiceWebapp, stepBuild},
-	"daemon":     {ServiceDaemon, stepBuild},
-	"wifi":       {ServiceDaemon, "build Wi-Fi helper"},
-	"sockethold": {ServiceDaemon, "build socket holder"},
-	"store":      {ServiceStore, stepBuild},
-	"sidecar":    {ServiceSidecar, stepBuild},
-	"zettel":     {ServiceZettel, stepBuild},
-	"tests":      {ServiceTests, stepBuild},
-	"launcher":   {ServiceLauncher, stepBuild},
+	"shim":            {ServiceShim, stepBuild},
+	"lock":            {ServiceShim, "build shim-lock"},
+	"webapp":          {ServiceWebapp, stepBuild},
+	"daemon":          {ServiceDaemon, stepBuild},
+	"wifi":            {ServiceDaemon, "build Wi-Fi helper"},
+	"sockethold":      {ServiceDaemon, "build socket holder"},
+	"store":           {ServiceStore, stepBuild},
+	"sidecar":         {ServiceSidecar, stepBuild},
+	"zettel":          {ServiceZettel, stepBuild},
+	"tests":           {ServiceTests, stepBuild},
+	"persistent-wifi": {ServicePersistentWifi, stepBuild},
+	"launcher":        {ServiceLauncher, stepBuild},
 }
 
 // buildEverything is the one step a builder override runs in place of every

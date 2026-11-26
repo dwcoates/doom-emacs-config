@@ -61,6 +61,15 @@ func TestClassify(t *testing.T) {
 			want: map[int]Group{testSelf: {Process: ProcessDaemon}, testEmacs: {Process: ProcessEmacs}, 10: {Process: ProcessStore}, 11: {Process: ProcessSidecar}},
 		},
 		{
+			name: "launchd's persistent-wifi service and the tools it runs are one group, a test's service is not",
+			ids: baseHost(
+				Identity{PID: 13, PPID: 1, Name: "agent-repl-wifi"},
+				Identity{PID: 14, PPID: 13, Name: "pmset"},
+				Identity{PID: 15, PPID: 900, Name: "agent-repl-wifi"},
+			),
+			want: map[int]Group{testSelf: {Process: ProcessDaemon}, testEmacs: {Process: ProcessEmacs}, 13: {Process: ProcessPersistentWifi}, 14: {Process: ProcessPersistentWifi}},
+		},
+		{
 			name: "Emacs's WebKit processes by role, another app's are not",
 			ids: baseHost(
 				Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.WebContent", Responsible: testEmacs},

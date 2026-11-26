@@ -66,7 +66,7 @@ func TestNewRegistry(t *testing.T) {
 
 func TestValidProgramCoversExactlyTheClosedSet(t *testing.T) {
 	// Arrange
-	want := []string{"daemon", "store", "sidecar"}
+	want := []string{"daemon", "store", "sidecar", "persistent-wifi"}
 
 	// Act / Assert
 	if len(Programs) != len(want) {

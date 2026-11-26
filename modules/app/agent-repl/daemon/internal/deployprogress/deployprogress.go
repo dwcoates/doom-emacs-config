@@ -69,6 +69,9 @@ const (
 	Webapp  Component = "webapp"
 	Zettel  Component = "zettel"
 	Tests   Component = "tests"
+	// PersistentWifi is the persistent-wifi service, which holds the
+	// persistent-wifi mode.
+	PersistentWifi Component = "persistent_wifi"
 	// Launcher is the launcher, Zettel.app, which posts every macOS desktop
 	// banner.
 	Launcher Component = "launcher"

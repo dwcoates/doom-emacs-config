@@ -103,7 +103,7 @@ func logged(log *dlog.TestSurfaces, level, operation, substr string) bool {
 
 // artifacts are the bytes one fake build stages, per artifact.
 type artifacts struct {
-	shim, webappEntry, daemon, store, sidecar, zettel, tests, lock, holder string
+	shim, webappEntry, daemon, store, sidecar, zettel, tests, wifiService, lock, holder string
 	// wifi is the Wi-Fi helper app's source hash; empty stages and installs
 	// no helper.
 	wifi string
@@ -134,6 +134,7 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	writeFile(t, s.CacheBin(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, s.CacheBin(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, s.CacheBin(buildreport.ServiceTests), a.tests)
+	writeFile(t, s.CacheBin(buildreport.ServicePersistentWifi), a.wifiService)
 	writeFile(t, s.CacheBin("shim-lock"), a.lock)
 	writeFile(t, s.CacheBin(HolderBinary), a.holder)
 	if a.wifi != "" {
@@ -156,6 +157,7 @@ func (a artifacts) installInto(t *testing.T, live Live) {
 	writeFile(t, live.CacheBinPath(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceTests), a.tests)
+	writeFile(t, live.CacheBinPath(buildreport.ServicePersistentWifi), a.wifiService)
 	writeFile(t, live.CacheBinPath("shim-lock"), a.lock)
 	writeFile(t, live.CacheBinPath(HolderBinary), a.holder)
 	if live.WifiApp != "" && a.wifi != "" {
@@ -762,8 +764,8 @@ const runningLayout = 11
 // theFresh is the build every harness stages; theOld is what is installed and
 // running before it.
 var (
-	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", tests: "tests-2", lock: "lock-2", holder: "holder-2", wifi: "wifi-2"}
-	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", tests: "tests-1", lock: "lock-1", holder: "holder-1", wifi: "wifi-1"}
+	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", tests: "tests-2", wifiService: "wifi-service-2", lock: "lock-2", holder: "holder-2", wifi: "wifi-2"}
+	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", tests: "tests-1", wifiService: "wifi-service-1", lock: "lock-1", holder: "holder-1", wifi: "wifi-1"}
 )
 
 // theHolders are the harness's declared socket holders.
@@ -819,6 +821,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 	h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theFresh.sidecar))
 	h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theFresh.zettel))
 	h.report(t, buildreport.ServiceTests, 104, hashOf(t, theFresh.tests))
+	h.report(t, buildreport.ServicePersistentWifi, 105, hashOf(t, theFresh.wifiService))
 	d, err := New(Deps{
 		Live:        live,
 		StagingRoot: filepath.Join(t.TempDir(), "staging"),

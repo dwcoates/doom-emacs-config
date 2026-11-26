@@ -746,6 +746,43 @@ so it steers no later return to Emacs.
   and again after, and `Notifier.Close` cancels and joins them before the state
   client closes.
 
+## Persistent wifi is its own service (`cmd/agent-repl-wifi`, `internal/persistentwifi`, `internal/wifirpc`)
+
+- THE DAEMON DOES NOT RUN PERSISTENT WIFI. The lid and power-source watchers, the
+  `pmset` settings, the display sleep, the application freeze
+  (`internal/appfreeze`, with its thaw guard) and the Wi-Fi failover run in the
+  persistent-wifi service, `com.agentrepl.persistent-wifi` (`services/AGENTS.md`),
+  a command of this module, so a daemon restart or deploy never stops the
+  failover and a fault in the Wi-Fi code never takes the daemon down.
+  `docs/protobuf-design/persistent-wifi.md`, section 15, is the record.
+- THE DAEMON KEEPS THE API SURFACE AND ITS OWN REACTION. `UpdatePersistentWifiMode`
+  is validated by `persistentwifi.ValidateUpdate` (the one validator, whose
+  `ValidUpdate` is the only request `persistentwifi.Controller.Update` takes) and
+  passed through `wifirpc.Client.Update`; the standing the topbar and the Emacs
+  streams show is the one `wifirpc.Client` follows (`persistentwifi.v1.WatchStanding`)
+  on a socket a socket holder owns, so a connect queues until the service
+  accepts. The daemon moves its own view gate (`viewquiet`) from the quiet state
+  the standing carries (`wifiStandingReceiver`): its views stop and its page
+  views freeze while the lid is closed, as before.
+- A STANDING THE SERVICE DID NOT SERVE IS NEVER SHOWN. The client publishes
+  `agentrepl.v1.PersistentWifiState.service_unreachable` from daemon start until
+  the first connection serves, and the moment a serving connection ends, before
+  it reopens; that standing carries no quiet state, so the gate lifts. The boot
+  never waits on the service, and a service that is down is recorded, never
+  covered by a fallback.
+- THE SERVICE PROTECTS EVERY CONNECTED DAEMON'S TREE from its freeze: it reads each
+  connection's peer pid from the kernel (`LOCAL_PEERPID`, `SO_PEERCRED`) and
+  `appfreeze.Protection.Selves` names those pids with its own, so the daemon,
+  its shims and its agent sessions are never frozen while connected, and no
+  checkout path is configured.
+- THE QUIET STATE'S ORDER IS A CONTRACT: the standing carrying the quiet state is
+  published before the freeze and the display sleep, and the standing without
+  it before the display wakes, so the daemon's views stop first and lift first.
+- Every timeout in these packages is five times its measured expected time, with
+  the measurement and its date at the site (`wifirpc.DefaultFirstStandingBound`,
+  `readHeaderTimeout`, `cmd/agent-repl-wifi`'s `shutdownGrace`, `probeTimeout`
+  and `stopGrace`).
+
 ## A network change is heard, never polled for (`internal/netwatch`)
 
 The daemon owns the ONE watcher of the operating system's network events: a

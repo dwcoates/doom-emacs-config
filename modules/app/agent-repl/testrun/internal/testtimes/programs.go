@@ -31,7 +31,10 @@ const (
 // programs maps an executable's base name to its label; Program handles the
 // names that come in families (a Go test binary, the go command's tools).
 var programs = map[string]string{
-	"agent-repld":         ProgramDaemon,
+	"agent-repld": ProgramDaemon,
+	// The persistent-wifi service is a command of the daemon's module, and was
+	// the daemon's own CPU before it became a service.
+	"agent-repl-wifi":     ProgramDaemon,
 	"fakeshim":            ProgramFakeShim,
 	"git":                 ProgramGit,
 	"covdata":             ProgramCovdata,

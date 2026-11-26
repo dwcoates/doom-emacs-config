@@ -42,6 +42,9 @@ const (
 	ServiceZettel = "zettel"
 	// ServiceTests is the test service, which runs every merge gate.
 	ServiceTests = "agent-repl-tests"
+	// ServicePersistentWifi is the persistent-wifi service
+	// (daemon/cmd/agent-repl-wifi), which holds the persistent-wifi mode.
+	ServicePersistentWifi = "agent-repl-wifi"
 	// ServiceLauncher is the launcher, Zettel.app (launcher/), which writes
 	// its report from Swift in this same shape (Sources/ZettelLauncher/
 	// BuildReport.swift).

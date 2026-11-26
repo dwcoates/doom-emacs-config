@@ -198,25 +198,11 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.FakeLid, cfg.FakePowerSource = lid, source
-	switch {
-	case dir != "" && !filepath.IsAbs(dir):
-		return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
-	case goos == "linux" && dir != "":
-		cfg.Linux = LinuxToolsIn(dir)
-	case goos == "linux":
-		cfg.Linux = DefaultLinuxTools()
-	case dir != "":
-		cfg.Tools = ToolsIn(dir)
-	default:
-		cfg.Tools = DefaultTools()
-		// THE WI-FI HELPER IS INSTALLED UNDER HOME (WifiAppIn); a HOME that
-		// is not absolute would name it relative to the daemon's directory.
-		home := getenv("HOME")
-		if !filepath.IsAbs(home) {
-			return Config{}, fmt.Errorf("persistentwifi: HOME=%q is not an absolute path, so the Wi-Fi helper app cannot be found", home)
-		}
-		cfg.Tools.WifiApp = WifiAppIn(home)
+	tools, linux, err := toolsFromEnv(goos, getenv)
+	if err != nil {
+		return Config{}, err
 	}
+	cfg.Tools, cfg.Linux = tools, linux
 	switch {
 	case lid != "" && getenv(appfreeze.EnvApps) == "":
 		cfg.FreezeApps = nil
@@ -234,4 +220,38 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 		cfg.Hotspot = hotspot
 	}
 	return cfg, nil
+}
+
+// ToolsFromEnv resolves only the macOS tools from getenv: what a process that
+// merely stops the Wi-Fi helper's waiting asks (StopAsks) needs, without the
+// lid, the power source, the hotspot or the freeze list, which belong to the
+// persistent-wifi service. The tools dir's rules are ConfigFromEnv's.
+func ToolsFromEnv(getenv func(string) string) (Tools, error) {
+	tools, _, err := toolsFromEnv(runtime.GOOS, getenv)
+	return tools, err
+}
+
+// toolsFromEnv resolves the tools of goos: the tools dir's, else the
+// production layout.
+func toolsFromEnv(goos string, getenv func(string) string) (Tools, LinuxTools, error) {
+	dir := getenv(EnvToolsDir)
+	switch {
+	case dir != "" && !filepath.IsAbs(dir):
+		return Tools{}, LinuxTools{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
+	case goos == "linux" && dir != "":
+		return Tools{}, LinuxToolsIn(dir), nil
+	case goos == "linux":
+		return Tools{}, DefaultLinuxTools(), nil
+	case dir != "":
+		return ToolsIn(dir), LinuxTools{}, nil
+	}
+	tools := DefaultTools()
+	// THE WI-FI HELPER IS INSTALLED UNDER HOME (WifiAppIn); a HOME that
+	// is not absolute would name it relative to the process's directory.
+	home := getenv("HOME")
+	if !filepath.IsAbs(home) {
+		return Tools{}, LinuxTools{}, fmt.Errorf("persistentwifi: HOME=%q is not an absolute path, so the Wi-Fi helper app cannot be found", home)
+	}
+	tools.WifiApp = WifiAppIn(home)
+	return tools, LinuxTools{}, nil
 }

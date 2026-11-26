@@ -178,3 +178,22 @@ func TestThePersistentWifiStandingStandsOnEveryStrip(t *testing.T) {
 		})
 	}
 }
+
+func TestPersistentWifiChipDrawsAnUnreachableServiceAsUnreadWithItsCause(t *testing.T) {
+	// Arrange: the standing the daemon holds while the service is down.
+	state := &agentreplv1.PersistentWifiState{
+		ServiceUnreachable: &agentreplv1.PersistentWifiServiceUnreachable{Detail: "the watch ended: EOF"},
+	}
+
+	// Act
+	chip := persistentWifiChip(state)
+
+	// Assert
+	if chip.GetWifi() != nil || chip.GetMode() != nil || chip.GetLid() != nil {
+		t.Fatalf("chip = %v, want every fact unassigned", chip)
+	}
+	want := persistentWifiTooltip + ". The persistent-wifi service is unreachable: the watch ended: EOF."
+	if got := chip.GetTooltip().GetText(); got != want {
+		t.Fatalf("tooltip = %q, want %q", got, want)
+	}
+}

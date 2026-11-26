@@ -84,6 +84,7 @@ var (
 	fakeshimBinary string
 	gitBinary      string
 	testsBinary    string
+	wifiBinary     string
 	buildErr       error
 	// checkoutRepo is the real repository root every daemon's own pinned
 	// checkout is laid from (newDaemonCheckout); runPinned sets it once.
@@ -207,6 +208,10 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE TEST SERVICE EVERY DAEMON'S MERGE GATES RUN ON (testservice.go):
 		// a real one, as our own system, never the owner's.
 		{&testsBinary, "agent-repl-tests", ".", filepath.Join(filepath.Dir(module), "testservice"), false, nil},
+		// THE PERSISTENT-WIFI SERVICE EVERY DAEMON'S TOPBAR CHANGES THE MODE
+		// THROUGH (wifiservice.go): a real one over the fake host, never the
+		// owner's.
+		{&wifiBinary, "agent-repl-wifi", "./cmd/agent-repl-wifi", "", false, nil},
 	} {
 		path, err := testenv.ProgramOr(os.Getenv, b.name, func() (string, error) {
 			d, err := binDir()
@@ -440,6 +445,15 @@ func TestServiceBinary(t testing.TB) string {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
 	}
 	return testsBinary
+}
+
+// WifiServiceBinary is the built persistent-wifi service.
+func WifiServiceBinary(t testing.TB) string {
+	t.Helper()
+	if wifiBinary == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	return wifiBinary
 }
 
 // FakeGitBinary is the built scripted `git`.

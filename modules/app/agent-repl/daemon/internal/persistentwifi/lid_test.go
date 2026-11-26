@@ -57,8 +57,8 @@ func TestALidCloseWithTheModeOnEntersTheQuietState(t *testing.T) {
 	h.hear(LidClosed)
 
 	// Assert
-	if !slices.Equal(h.viewMoves, []bool{true}) || h.freezer.count("freeze") != 1 || h.r.count(argDisplaySleep) != 1 {
-		t.Fatalf("views %v, freezer %v, calls %v: want views stopped, one freeze, one display sleep", h.viewMoves, h.freezer.calls, h.r.ran())
+	if !slices.Equal(h.telemetry.set, []bool{true}) || h.freezer.count("freeze") != 1 || h.r.count(argDisplaySleep) != 1 {
+		t.Fatalf("quiet gauge %v, freezer %v, calls %v: want the gauge set, one freeze, one display sleep", h.telemetry.set, h.freezer.calls, h.r.ran())
 	}
 	last := h.lastStanding(t).changes[len(h.changes)-1]
 	q := last.GetQuiet()
@@ -94,8 +94,8 @@ func TestALidOpenLeavesTheQuietStateInReverse(t *testing.T) {
 	if h.r.count(argDisplayWake) != 1 || !slices.Equal(h.freezer.calls, []string{"freeze:lid_closed", "thaw:lid_open"}) {
 		t.Fatalf("calls %v, freezer %v: want one wake and one thaw", calls, h.freezer.calls)
 	}
-	if !slices.Equal(h.viewMoves, []bool{true, false}) {
-		t.Fatalf("views %v, want stopped then resumed", h.viewMoves)
+	if !slices.Equal(h.telemetry.set, []bool{true, false}) {
+		t.Fatalf("quiet gauge %v, want set then cleared", h.telemetry.set)
 	}
 	if last := h.changes[len(h.changes)-1]; last.GetLidOpen() == nil || last.GetQuiet() != nil {
 		t.Fatalf("standing = %v, want the lid open and no quiet state", last)
@@ -127,8 +127,8 @@ func TestALidCloseWithTheModeOffStaysAwake(t *testing.T) {
 	h.hear(LidClosed)
 
 	// Assert
-	if h.freezer.count("freeze") != 0 || h.r.count(argDisplaySleep) != 0 || len(h.viewMoves) != 0 {
-		t.Fatalf("freezer %v, calls %v, views %v: want nothing quieted", h.freezer.calls, h.r.ran(), h.viewMoves)
+	if h.freezer.count("freeze") != 0 || h.r.count(argDisplaySleep) != 0 || len(h.telemetry.set) != 0 {
+		t.Fatalf("freezer %v, calls %v, quiet gauge %v: want nothing quieted", h.freezer.calls, h.r.ran(), h.telemetry.set)
 	}
 	if last := h.changes[len(h.changes)-1]; last.GetLidClosed() == nil || last.GetQuiet() != nil {
 		t.Fatalf("standing = %v, want the lid closed and no quiet state", last)
@@ -144,8 +144,8 @@ func TestADaemonHearingAnOpenLidThawsAKeptFrozenSet(t *testing.T) {
 	h.hear(LidOpen)
 
 	// Assert
-	if !slices.Equal(h.freezer.calls, []string{"thaw:lid_open"}) || len(h.viewMoves) != 0 {
-		t.Fatalf("freezer %v, views %v: want one thaw and no view move", h.freezer.calls, h.viewMoves)
+	if !slices.Equal(h.freezer.calls, []string{"thaw:lid_open"}) || len(h.telemetry.set) != 0 {
+		t.Fatalf("freezer %v, quiet gauge %v: want one thaw and no view move", h.freezer.calls, h.telemetry.set)
 	}
 }
 
@@ -453,5 +453,70 @@ func TestALidChangeRecordsHowLongItWaitedForTheLock(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no lid change record naming its lock wait: %+v", h.records("info", opLid))
+	}
+}
+
+// lastQuietPublished answers whether the standing last handed to OnChange
+// carries the quiet state, and whether any standing was handed.
+func (h *harness) lastQuietPublished() (quiet, any bool) {
+	if len(h.changes) == 0 {
+		return false, false
+	}
+	return h.changes[len(h.changes)-1].GetQuiet() != nil, true
+}
+
+func TestTheStandingCarryingTheQuietStateIsPublishedBeforeTheFreezeAndTheDisplaySleep(t *testing.T) {
+	// Arrange: what had been published when the freeze and the display sleep ran.
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
+	var atFreeze, atSleep struct{ quiet, any bool }
+	h.freezer.onCall = func(call string) {
+		if strings.HasPrefix(call, "freeze:") {
+			atFreeze.quiet, atFreeze.any = h.lastQuietPublished()
+		}
+	}
+	h.r.before = map[string]func(context.Context){argDisplaySleep: func(context.Context) {
+		atSleep.quiet, atSleep.any = h.lastQuietPublished()
+	}}
+	h.r.on(argDisplaySleep, answer{})
+
+	// Act
+	h.hear(LidClosed)
+
+	// Assert
+	if !atFreeze.any || !atFreeze.quiet {
+		t.Fatalf("at the freeze the standing last published had quiet %v (published %v), want the quiet state already published", atFreeze.quiet, atFreeze.any)
+	}
+	if !atSleep.any || !atSleep.quiet {
+		t.Fatalf("at the display sleep the standing last published had quiet %v (published %v), want the quiet state already published", atSleep.quiet, atSleep.any)
+	}
+}
+
+func TestTheStandingWithoutTheQuietStateIsPublishedBeforeTheDisplayWakesAndTheApplicationsThaw(t *testing.T) {
+	// Arrange: the quiet state stands, the lid closed.
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
+	h.r.on(argDisplaySleep, answer{})
+	h.r.on(argDisplayWake, answer{})
+	h.hear(LidClosed)
+	var atWake, atThaw struct{ quiet, any bool }
+	h.freezer.onCall = func(call string) {
+		if strings.HasPrefix(call, "thaw:") {
+			atThaw.quiet, atThaw.any = h.lastQuietPublished()
+		}
+	}
+	h.r.before = map[string]func(context.Context){argDisplayWake: func(context.Context) {
+		atWake.quiet, atWake.any = h.lastQuietPublished()
+	}}
+
+	// Act
+	h.hear(LidOpen)
+
+	// Assert
+	if !atWake.any || atWake.quiet {
+		t.Fatalf("at the display's wake the standing last published had quiet %v, want the quiet state already lifted", atWake.quiet)
+	}
+	if !atThaw.any || atThaw.quiet {
+		t.Fatalf("at the thaw the standing last published had quiet %v, want the quiet state already lifted", atThaw.quiet)
 	}
 }

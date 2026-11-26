@@ -11,7 +11,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/usersetup"
-	"agent-repld/internal/viewquiet"
 )
 
 // harness is one controller over a fake runner.
@@ -31,9 +30,6 @@ type harness struct {
 	lid       *fakeLidWatcher
 	source    *fakePowerSourceWatcher
 	freezer   *fakeFreezer
-	views     *viewquiet.Gate
-	// viewMoves are the quiet gate's transitions, as a follower heard them.
-	viewMoves []bool
 	telemetry *fakeQuietTelemetry
 	energy    *fakeEnergyStore
 }
@@ -66,14 +62,14 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		r: r, log: dlog.NewTestLogger(), clock: newFakeClock(), energy: &fakeEnergyStore{r: r},
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
 		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(), source: newFakePowerSourceWatcher(),
-		freezer: &fakeFreezer{}, views: viewquiet.New(nil), telemetry: &fakeQuietTelemetry{},
+		freezer: &fakeFreezer{}, telemetry: &fakeQuietTelemetry{},
 		published: make(chan *agentreplv1.PersistentWifiState, 256),
 		network:   newFakeNetwork(), power: newFakePower(),
 	}
 	c, err := New(Deps{
 		Config: Config{Platform: "darwin", Tools: tools, Hotspot: configured},
 		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, PowerSource: h.source, LegacyLidDims: h.dims,
-		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
+		Freezer: h.freezer, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
 		Exists:  func(p string) bool { return h.exists[p] },
 		ScanDir: t.TempDir(),
@@ -89,7 +85,6 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	// THE MACHINE IS ON BATTERY POWER unless a test says otherwise
 	// (withPowerSource, hearSource): a closed lid then sets Low Power Mode.
 	h.c.powerSource = powerSourceFact{kind: powerSourceBattery}
-	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
 	// A loss's record reads the radio's power; it is powered unless a test
 	// says otherwise.
 	h.r.on(argRadioPower, answer{out: radioPowered})
@@ -120,7 +115,16 @@ func (h *harness) records(level, operation string) []dlog.Record {
 	return dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
 }
 
-func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
+// update is the validated mode change for ACTION ("on", "off", else toggle).
+func update(action string) ValidUpdate {
+	valid, err := ValidateUpdate(updateRequest(action))
+	if err != nil {
+		panic(err)
+	}
+	return valid
+}
+
+func updateRequest(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
 	switch action {
 	case "on":
 		return &agentreplv1.UpdatePersistentWifiModeRequest{Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}}}
@@ -135,7 +139,7 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
 		return Deps{Config: Config{Platform: "darwin", Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
 			Lid: newFakeLidWatcher(), PowerSource: newFakePowerSourceWatcher(), LegacyLidDims: &fakeLidDims{},
-			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil), EnergyRecord: &fakeEnergyStore{},
+			Freezer: &fakeFreezer{}, EnergyRecord: &fakeEnergyStore{},
 			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}
 	}
 	cases := []struct {
@@ -149,7 +153,6 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no power source watcher", break_: func(d *Deps) { d.PowerSource = nil }},
 		{name: "no store for an earlier build's lid dim", break_: func(d *Deps) { d.LegacyLidDims = nil }},
 		{name: "no application freezer", break_: func(d *Deps) { d.Freezer = nil }},
-		{name: "no view gate", break_: func(d *Deps) { d.Views = nil }},
 		{name: "no network change signal", break_: func(d *Deps) { d.NetworkChanged = nil }},
 		{name: "no power change signal", break_: func(d *Deps) { d.PowerChanges = nil }},
 		{name: "no store of the recorded energy mode", break_: func(d *Deps) { d.EnergyRecord = nil }},

@@ -64,6 +64,24 @@ func TestUpdatePersistentWifiModeRefusesARequestWithNoAction(t *testing.T) {
 	}
 }
 
+func TestUpdatePersistentWifiModeAnswersAnUnreachableServiceAsItsError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.PersistentWifi.err = connect.NewError(connect.CodeUnavailable, errors.New("the service is down"))
+	req := &agentreplv1.UpdatePersistentWifiModeRequest{
+		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
+	}
+
+	// Act.
+	_, err := h.Client.UpdatePersistentWifiMode(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) || cerr.Code() != connect.CodeUnavailable {
+		t.Fatalf("error = %v, want Unavailable", err)
+	}
+}
+
 func TestAnEmacsDaemonStreamIsToldThePersistentWifiStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

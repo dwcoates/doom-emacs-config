@@ -163,6 +163,8 @@ func updateComponent(c deployprogress.Component) *frontendv1.FooterStatusActivit
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Tests{Tests: &frontendv1.FooterStatusActivityUpdateComponentTests{}}
 	case deployprogress.Launcher:
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Launcher{Launcher: &frontendv1.FooterStatusActivityUpdateComponentLauncher{}}
+	case deployprogress.PersistentWifi:
+		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_PersistentWifi{PersistentWifi: &frontendv1.FooterStatusActivityUpdateComponentPersistentWifi{}}
 	}
 	return out
 }

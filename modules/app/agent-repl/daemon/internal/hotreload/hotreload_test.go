@@ -174,7 +174,7 @@ func finishEverythingButShims(f *fixture) {
 	f.t.Built(map[string]string{ServiceWebapp: "web-fresh-build"})
 	f.t.InstallBegan()
 	f.t.InstallEnded()
-	for _, name := range []string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests} {
+	for _, name := range []string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServicePersistentWifi} {
 		f.t.ServiceCurrent(name)
 	}
 	f.t.DaemonCurrent()
@@ -235,7 +235,7 @@ func TestBeginDrawsEveryServiceScheduledInTheMediatorsRootFeed(t *testing.T) {
 			t.Fatalf("service %s = %s, want scheduled", s.GetName().GetText(), got)
 		}
 	}
-	want := []string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}
+	want := []string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServicePersistentWifi, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("services %v, want %v", names, want)
 	}
@@ -251,9 +251,9 @@ func TestTheCardListsTheLauncherOnlyWhereThePlatformDeploysIt(t *testing.T) {
 		want     []string
 	}{
 		{"a platform with no launcher", false,
-			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
+			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServicePersistentWifi, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
 		{"macOS, which deploys the launcher", true,
-			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServiceLauncher, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
+			[]string{ServiceStore, ServiceSidecar, ServiceZettel, ServiceTests, ServicePersistentWifi, ServiceLauncher, ServiceDaemon, ServiceShim, ServiceWebapp, ServiceElisp}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -368,6 +368,7 @@ func TestBuildSteps(t *testing.T) {
 		{"the socket holder built", func(f *fixture) { f.t.BuildStepBegan("sockethold"); f.t.BuildStepEnded("sockethold", nil) }, ServiceDaemon, "build socket holder", "done:built"},
 		{"an override builds every service", func(f *fixture) { f.t.BuildStepBegan("build") }, ServiceTests, "build", "running:building"},
 		{"the test service's target", func(f *fixture) { f.t.BuildStepBegan("tests") }, ServiceTests, "build", "running:building"},
+		{"the persistent-wifi service's target", func(f *fixture) { f.t.BuildStepBegan("persistent-wifi") }, ServicePersistentWifi, "build", "running:building"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

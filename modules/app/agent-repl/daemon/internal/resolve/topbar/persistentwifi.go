@@ -35,6 +35,14 @@ const persistentWifiTooltip = "Closing laptop lid disables agents"
 // -- so only then does a second sentence name what could not be read.
 func persistentWifiChip(state *agentreplv1.PersistentWifiState) *frontendv1.TopbarPersistentWifi {
 	chip := &frontendv1.TopbarPersistentWifi{}
+	// A SERVICE THE DAEMON CANNOT REACH HAS NO FACT TO DRAW: every arm stays
+	// unassigned (the muted glyph the contract promises the tooltip explains),
+	// and the tooltip says why, so the chip never shows a standing from before
+	// the service went away.
+	if unreachable := state.GetServiceUnreachable(); unreachable != nil {
+		chip.Tooltip = &frontendv1.TopbarPersistentWifiTooltip{Text: persistentWifiTooltip + ". The persistent-wifi service is unreachable: " + unreachable.GetDetail() + "."}
+		return chip
+	}
 	var unread []string
 	switch {
 	case state.GetJoined() != nil:

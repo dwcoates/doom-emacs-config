@@ -412,15 +412,24 @@ type fakeFreezer struct {
 	// held is what Frozen answers: frozen from a freeze until a thaw.
 	held     []appfreeze.Frozen
 	onChange func()
+	// onCall runs at the start of each freeze and thaw, handed its call, so a
+	// test reads what the controller had published by then.
+	onCall func(call string)
 }
 
 func (f *fakeFreezer) Freeze(_ context.Context, trigger string) []appfreeze.Frozen {
+	if f.onCall != nil {
+		f.onCall("freeze:" + trigger)
+	}
 	f.calls = append(f.calls, "freeze:"+trigger)
 	f.held = f.frozen
 	return f.frozen
 }
 
 func (f *fakeFreezer) Thaw(_ context.Context, trigger string) {
+	if f.onCall != nil {
+		f.onCall("thaw:" + trigger)
+	}
 	f.calls = append(f.calls, "thaw:"+trigger)
 	f.held = nil
 }

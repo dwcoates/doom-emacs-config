@@ -7,7 +7,6 @@ import (
 
 	"agent-repld/internal/appfreeze"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/viewquiet"
 )
 
 const opQuiet = "daemon.persistentwifi.quiet"
@@ -19,14 +18,19 @@ const opQuiet = "daemon.persistentwifi.quiet"
 //  1. on battery power, the energy mode in use is recorded and Low Power
 //     Mode set (energy.go), which then follows the power source while the
 //     state stands;
-//  2. the views stop (Views): the daemon resolves and publishes no view for a
-//     local page, and the pages and Emacs idle on the standing's push;
+//  2. the views stop: the standing carrying the quiet state
+//     (agentrepl.v1.PersistentWifiState.quiet) is published as a step of its
+//     own, before the freeze and the display sleep, and the daemon, which
+//     follows the standing the service publishes, resolves and publishes no
+//     view for a local page, so the pages and Emacs idle on the standing's
+//     push;
 //  3. the configured applications are frozen (Freezer);
 //  4. the display sleeps.
 //
-// Leaving it undoes the four in reverse, so the display is awake before the
-// applications move, the views resync at the state everything left, and the
-// recorded energy mode is restored last.
+// Leaving it undoes the four in reverse, with the standing without the quiet
+// state published first, so the daemon's views lift before the display wakes.
+// The display is then awake before the applications move, the views resync at
+// the state everything left, and the recorded energy mode is restored last.
 // The decision reads STATES, never transitions, so a restart, a handover or a
 // repeated lid report reaches the same answer: a frozen set kept by an
 // earlier daemon is adopted while the state stands and thawed the moment it
@@ -100,7 +104,12 @@ func (c *Controller) holdQuietLocked(ctx context.Context, mode modeKnown, energy
 func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
 	c.quiet = true
 	energyStep := c.holdEnergyLocked(ctx, energy, trigger)
-	c.views.Set(true)
+	// THE DAEMON'S VIEWS STOP FIRST: the standing carrying the quiet state is
+	// published before the freeze and the display sleep, as the in-process
+	// gate once moved there, so no view is drawn for the pages those steps
+	// put out of sight. The standing's own publication after the whole
+	// transition states what the steps did.
+	c.republishLocked()
 	frozen := c.freezer.Freeze(ctx, trigger)
 	display := c.sleepDisplayLocked(ctx, trigger)
 	if c.telemetry != nil {
@@ -113,12 +122,14 @@ func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energ
 }
 
 func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
-	// THE VIEWS LIFT FIRST, and a failover attempt in flight is ended: no
-	// page view waits on the display's wake, and no network is joined once
-	// the quiet state is left.
-	c.views.Set(false)
+	// THE STANDING WITHOUT THE QUIET STATE IS PUBLISHED FIRST, so the daemon
+	// lifts its views before the display wakes, the applications thaw and the
+	// energy mode is restored: no page view waits on any of them. A failover
+	// attempt in flight is ended too, and no network is joined once the quiet
+	// state is left.
 	c.quiet = false
 	c.abandonFailoverLocked()
+	c.republishLocked()
 	display := c.wakeDisplayLocked(ctx, trigger)
 	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)
@@ -168,7 +179,3 @@ func frozenNames(frozen []appfreeze.Frozen) map[string]int {
 	}
 	return out
 }
-
-// NoViews is a view gate nobody follows, for a controller whose daemon draws
-// no views (a test of the controller alone).
-func NoViews() *viewquiet.Gate { return viewquiet.New(nil) }

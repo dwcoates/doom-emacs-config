@@ -14,10 +14,13 @@ const (
 	ProgramDaemon  = "daemon"
 	ProgramStore   = "store"
 	ProgramSidecar = "sidecar"
+	// ProgramPersistentWifi is the persistent-wifi service, which owns the
+	// lid-closed quiet state and the Wi-Fi failover.
+	ProgramPersistentWifi = "persistent-wifi"
 )
 
 // Programs lists every program in the closed set, in a stable order.
-var Programs = []string{ProgramDaemon, ProgramStore, ProgramSidecar}
+var Programs = []string{ProgramDaemon, ProgramStore, ProgramSidecar, ProgramPersistentWifi}
 
 // BuildInfoName is the series every runtime exposes with value 1, labeled by
 // its program and the content hash of the binary it runs. Grouping any other

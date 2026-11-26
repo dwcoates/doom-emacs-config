@@ -144,15 +144,20 @@ func ProcLister(tree procstat.Tree) Lister {
 	}
 }
 
-// Protection says which processes are never frozen: the daemon itself and
-// every ancestor of it below launchd (the editor that started it), every
+// Protection says which processes are never frozen: each process of Selves
+// (the service itself and every daemon connected to it) and every ancestor
+// of them below launchd (the editor that started a daemon), every
 // process whose executable lies under one of PathPrefixes (agent-repl's own
 // binaries: the store, the sidecar, the shims), every process of a bundle
 // named in neverFrozen (the editor and terminals), and every descendant of
 // any of those, which is everything an agent session spawned.
 type Protection struct {
-	// Self is the daemon's own pid.
-	Self int
+	// Selves answers the pids whose trees are never frozen, asked at each
+	// read of the process table: the service's own pid, and the pid of every
+	// daemon connected to it, whose shims and agent sessions descend from it.
+	// A daemon is protected only while its connection lives, so the answer
+	// changes as daemons come and go.
+	Selves func() []int
 	// PathPrefixes are the directories agent-repl's binaries run from.
 	PathPrefixes []string
 }
@@ -166,15 +171,17 @@ func (p Protection) protected(table []Process, appOf AppOf) map[int]bool {
 		children[proc.PPID] = append(children[proc.PPID], proc.PID)
 	}
 	roots := map[int]bool{}
-	// The daemon and its ancestors, short of launchd (pid 1), whose
+	// Each self and its ancestors, short of launchd (pid 1), whose
 	// descendants are every process on the machine.
-	for pid := p.Self; pid > 1; {
-		roots[pid] = true
-		proc, ok := byPID[pid]
-		if !ok {
-			break
+	for _, self := range p.Selves() {
+		for pid := self; pid > 1; {
+			roots[pid] = true
+			proc, ok := byPID[pid]
+			if !ok {
+				break
+			}
+			pid = proc.PPID
 		}
-		pid = proc.PPID
 	}
 	for _, proc := range table {
 		for _, prefix := range p.PathPrefixes {

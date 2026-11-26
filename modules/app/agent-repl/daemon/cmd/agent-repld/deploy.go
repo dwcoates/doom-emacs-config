@@ -90,11 +90,13 @@ type deployerParams struct {
 	Reports deploy.LandingReports
 	Clients deploy.Clients
 	Runner  deploy.Runner
-	// WifiTools is the daemon's one persistent Wi-Fi tool set
-	// (persistentwifi.ConfigFromEnv), so the deploy stops the helper's asks
-	// with the tools every other Wi-Fi step uses: a harness's fakes under
-	// test, never the host's own pkill.
+	// WifiTools is the persistent Wi-Fi tool set (persistentwifi.ToolsFromEnv),
+	// so the deploy stops the helper's asks with the tools the persistent-wifi
+	// service uses: a harness's fakes under test, never the host's own pkill.
 	WifiTools persistentwifi.Tools
+	// WifiSocket is the persistent-wifi service's socket, whose socket holder
+	// a restart of the service ensures.
+	WifiSocket string
 	// Store is the store's socket, which a store restart awaits.
 	Store string
 	// TestsSocket is the test service's socket, which a restart of the
@@ -302,6 +304,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
 		Shim: p.ShimMain, Webapp: p.WebappDist, WifiApp: where.wifiApp,
 	}
+	restarter.WifiHolder, _ = holderensure.HolderOfSocket(holders, p.WifiSocket)
 	if p.Launcher {
 		live.Applications = where.applications
 		restarter.LauncherApp = live.LauncherApp()

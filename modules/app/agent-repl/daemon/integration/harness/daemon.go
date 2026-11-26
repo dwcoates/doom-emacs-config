@@ -569,6 +569,10 @@ type Daemon struct {
 	// TestsSocket is the socket of the real test service its merge gates run
 	// on, shared by every daemon over its state root (TestsSocketFor).
 	TestsSocket string
+	// WifiSocket is the socket of the real persistent-wifi service the
+	// topbar's mode change passes through, shared by every daemon over its
+	// state root (WifiSocketFor).
+	WifiSocket string
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
@@ -858,6 +862,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		}
 	}
 	d.TestsSocket = ensureTestService(t, d.StateDir, d.LockDir)
+	d.WifiSocket = ensureWifiService(t, d)
 	// ON MACOS THE LAUNCHER POSTS EVERY BANNER, on its own socket: the fake
 	// one accepts before the daemon boots, so every banner reaches it.
 	if runtime.GOOS == "darwin" {
@@ -873,6 +878,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		ShimMain: mainJS, WebappDist: d.WebappDir,
 		Store: opts.ServiceBinaries.Store, Sidecar: opts.ServiceBinaries.Sidecar,
 		Tests: TestServiceBinary(t),
+		Wifi:  WifiServiceBinary(t),
 	})
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
@@ -925,6 +931,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"--webapp-dist", d.WebappDir,
 		"--store-socket", d.StoreSocket,
 		"--tests-socket", d.TestsSocket,
+		"--wifi-socket", d.WifiSocket,
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,
@@ -985,9 +992,6 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_AUDIO_OUTPUT_CMD="+d.AudioOutput.Path,
 		"AGENT_REPL_BLUETOOTH_CMD="+d.Bluetooth.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
-		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
-		"AGENT_REPL_PERSISTENT_WIFI_LID="+d.Lid.Path,
-		"AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE="+d.PowerSource.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		"AGENT_REPL_SYSTEMD_USER_DIR="+filepath.Join(root, "systemd-user"),
 		// The launcher a macOS deploy installs and registers: a directory

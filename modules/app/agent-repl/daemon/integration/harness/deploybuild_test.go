@@ -25,6 +25,7 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 		name      string
 		real      bool
 		realTests bool
+		realWifi  bool
 		service   string
 		want      func(store, sidecar, tests string) string
 	}{
@@ -42,6 +43,10 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			want: func(_, _, tests string) string { return readOrFail(t, tests) }},
 		{name: "no real test service stages the placeholder", service: "agent-repl-tests",
 			want: func(_, _, _ string) string { return fakeServiceBinary("agent-repl-tests") }},
+		{name: "a real persistent-wifi service is staged as a link to its binary", realWifi: true, service: "agent-repl-wifi",
+			want: func(_, _, _ string) string { return "the real persistent-wifi service\n" }},
+		{name: "no real persistent-wifi service stages the placeholder", service: "agent-repl-wifi",
+			want: func(_, _, _ string) string { return fakeServiceBinary("agent-repl-wifi") }},
 		{name: "zettel stages the placeholder beside placeholder services", service: "zettel",
 			want: func(_, _, _ string) string { return fakeServiceBinary("zettel") }},
 	}
@@ -68,6 +73,9 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			tests := writeStandIn(t, dir, "real-tests", "the real test service\n")
 			if tc.realTests {
 				src.Tests = tests
+			}
+			if tc.realWifi {
+				src.Wifi = writeStandIn(t, dir, "real-wifi", "the real persistent-wifi service\n")
 			}
 			b := NewFakeDeployBuilder(t, filepath.Join(dir, "bin"), src)
 			b.Stage(DeployCurrent)
@@ -107,6 +115,7 @@ func TestFakeDeployBuilderLinksEveryRealBinaryItStages(t *testing.T) {
 		Store:      writeStandIn(t, dir, "real-store", "the real store\n"),
 		Sidecar:    writeStandIn(t, dir, "real-sidecar", "the real sidecar\n"),
 		Tests:      writeStandIn(t, dir, "real-tests", "the real test service\n"),
+		Wifi:       writeStandIn(t, dir, "real-wifi", "the real persistent-wifi service\n"),
 	}
 	b := NewFakeDeployBuilder(t, filepath.Join(dir, "bin"), src)
 	b.Stage(DeployCurrent)
@@ -119,10 +128,11 @@ func TestFakeDeployBuilderLinksEveryRealBinaryItStages(t *testing.T) {
 
 	// Assert
 	for staged, real := range map[string]string{
-		filepath.Join(out, "daemon", "bin", "agent-repld"):          daemonBinary,
-		filepath.Join(out, "cache-bin", buildreport.ServiceStore):   src.Store,
-		filepath.Join(out, "cache-bin", buildreport.ServiceSidecar): src.Sidecar,
-		filepath.Join(out, "cache-bin", buildreport.ServiceTests):   src.Tests,
+		filepath.Join(out, "daemon", "bin", "agent-repld"):                 daemonBinary,
+		filepath.Join(out, "cache-bin", buildreport.ServiceStore):          src.Store,
+		filepath.Join(out, "cache-bin", buildreport.ServiceSidecar):        src.Sidecar,
+		filepath.Join(out, "cache-bin", buildreport.ServiceTests):          src.Tests,
+		filepath.Join(out, "cache-bin", buildreport.ServicePersistentWifi): src.Wifi,
 	} {
 		a, err := os.Stat(staged)
 		if err != nil {
@@ -192,10 +202,11 @@ func TestPlaceholderServicesAreTheOnesNoWorldRunsForReal(t *testing.T) {
 		sources DeploySources
 		want    []string
 	}{
-		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}},
-		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel, buildreport.ServiceTests}},
-		{name: "a real test service", sources: DeploySources{Tests: "/bin/tests"}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}},
-		{name: "every service real but zettel", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar", Tests: "/bin/tests"}, want: []string{buildreport.ServiceZettel}},
+		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests, buildreport.ServicePersistentWifi}},
+		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel, buildreport.ServiceTests, buildreport.ServicePersistentWifi}},
+		{name: "a real test service", sources: DeploySources{Tests: "/bin/tests"}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServicePersistentWifi}},
+		{name: "a real persistent-wifi service", sources: DeploySources{Wifi: "/bin/wifi"}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}},
+		{name: "every service real but zettel", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar", Tests: "/bin/tests", Wifi: "/bin/wifi"}, want: []string{buildreport.ServiceZettel}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
