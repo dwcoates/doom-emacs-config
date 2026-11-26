@@ -164,6 +164,13 @@ struct HotspotTests {
               bounded("the scan", within: 0.01) { () -> Result<Int, HotspotFailure> in release.wait(); return .success(5) },
               .failure(HotspotFailure(detail: "the scan did not answer within 0.01s")))
         release.signal()
+        check("awaited work that answers through its callback answers its result",
+              awaiting("the ask", within: 1) { answer in answer(.success(7)) }, Result<Int, HotspotFailure>.success(7))
+        check("awaited work whose callback never comes answers which work and the bound",
+              awaiting("the ask", within: 0.01) { (_: @escaping (Result<Int, HotspotFailure>) -> Void) in },
+              .failure(HotspotFailure(detail: "the ask did not answer within 0.01s")))
+        check("awaited work answered twice keeps its first answer",
+              awaiting("the ask", within: 1) { answer in answer(.success(1)); answer(.success(2)) }, Result<Int, HotspotFailure>.success(1))
         exit(failures == 0 ? 0 : 1)
     }
 }

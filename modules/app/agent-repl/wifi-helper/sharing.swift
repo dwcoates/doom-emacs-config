@@ -93,25 +93,11 @@ final class SharingPhones: NSObject, HotspotPhones {
         typealias Completion = @convention(block) (AnyObject?, AnyObject?) -> Void
         typealias Enable = @convention(c) (AnyObject, Selector, AnyObject, Completion) -> Void
         let call = unsafeBitCast(session.method(for: selector), to: Enable.self)
-        let answered = DispatchSemaphore(value: 0)
-        let lock = NSLock()
-        var result: Result<HotspotCredentials, HotspotFailure>?
         // THE COMPLETION ANSWERS THE HOTSPOT'S INFO, or nil and an error
         // (2026-11-26: SFRemoteHotspotInfo with name, password and channel).
-        let completion: Completion = { info, error in
-            let r = hotspotCredentials(info: info, error: error)
-            lock.lock()
-            result = r
-            lock.unlock()
-            answered.signal()
+        return awaiting("sharingd's ask to enable \(phone.name)'s hotspot", within: within) { answer in
+            call(session, selector, device) { info, error in answer(hotspotCredentials(info: info, error: error)) }
         }
-        call(session, selector, device, completion)
-        guard answered.wait(timeout: .now() + within) == .success else {
-            return .failure(HotspotFailure(detail: "sharingd did not answer the ask to enable \(phone.name)'s hotspot within \(within)s"))
-        }
-        lock.lock()
-        defer { lock.unlock() }
-        return result!
     }
 }
 

@@ -162,17 +162,20 @@ func hotspotCredentials(info: AnyObject?, error: AnyObject?) -> Result<HotspotCr
                                        channel: (info.value(forKey: "channel") as? NSNumber)?.intValue))
 }
 
-// bounded runs WORK off the calling thread and answers its result, or
-// .failure naming WHAT and the bound when it ran past WITHIN. A late result
-// is dropped: the helper exits once it answers, ending the work with it.
-func bounded<T>(_ what: String, within: TimeInterval, _ work: @escaping () -> Result<T, HotspotFailure>) -> Result<T, HotspotFailure> {
+// awaiting starts work through START, handing it the one callback that
+// answers it, and waits for that answer: its result, or .failure naming WHAT
+// and the bound when none came within WITHIN. A late answer is dropped: the
+// helper exits once it answers, ending the work with it.
+func awaiting<T>(_ what: String, within: TimeInterval,
+                 _ start: (@escaping (Result<T, HotspotFailure>) -> Void) -> Void) -> Result<T, HotspotFailure> {
     let done = DispatchSemaphore(value: 0)
     let lock = NSLock()
     var result: Result<T, HotspotFailure>?
-    DispatchQueue.global().async {
-        let r = work()
+    start { r in
         lock.lock()
-        result = r
+        if result == nil {
+            result = r
+        }
         lock.unlock()
         done.signal()
     }
@@ -182,4 +185,12 @@ func bounded<T>(_ what: String, within: TimeInterval, _ work: @escaping () -> Re
     lock.lock()
     defer { lock.unlock() }
     return result!
+}
+
+// bounded runs WORK off the calling thread and answers its result
+// (awaiting).
+func bounded<T>(_ what: String, within: TimeInterval, _ work: @escaping () -> Result<T, HotspotFailure>) -> Result<T, HotspotFailure> {
+    awaiting(what, within: within) { answer in
+        DispatchQueue.global().async { answer(work()) }
+    }
 }
