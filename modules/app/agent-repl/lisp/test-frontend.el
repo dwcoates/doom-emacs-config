@@ -2502,10 +2502,10 @@ while a bottom side window stood came out shorter than its siblings."
         (kill-buffer input-buf)
         (kill-buffer side-buf)))))
 
-(ert-deftest agent-repl-test-frontend-composer-height-survives-a-restore ()
+(ert-deftest agent-repl-test-frontend-a-restored-composer-mounts-grown-to-its-text ()
   "A RESTORED workspace — composer buffer already alive and full of text —
-mounts at the same height as a freshly created one.  Nothing about the
-composer's content may reach its height."
+mounts grown to its text, which stops at `agent-repl-input-max-height-factor'
+times the height a freshly created one mounts at."
   (let ((buf1 (generate-new-buffer "*fake-webview-h5a*"))
         (buf2 (generate-new-buffer "*fake-webview-h5b*"))
         (fresh (generate-new-buffer "*agent-panel-input-ws1*"))
@@ -2525,10 +2525,11 @@ composer's content may reach its height."
             (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
                        (lambda (_ws) restored)))
               ;; Act
-              (agent-repl--frontend-display-webview "ws2" buf2)
+              (let ((agent-repl-input-max-height-factor 3))
+                (agent-repl--frontend-display-webview "ws2" buf2))
               ;; Assert
               (should (= (window-total-height (get-buffer-window restored))
-                         created)))))
+                         (* 3 created))))))
       (delete-other-windows)
       (dolist (b (list buf1 buf2 fresh restored))
         (when (buffer-live-p b) (kill-buffer b))))))

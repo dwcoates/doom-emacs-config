@@ -1674,11 +1674,13 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
     (should (null told))))
 
 (ert-deftest agent-repl-window-test-the-dock-height-is-the-live-input-windows-pixels ()
-  "A live input window's total pixel height is the height sent."
+  "A live input window at its normal height sends its total pixel height."
   (agent-repl-test--with-clean-state
     (let ((docks nil))
       (cl-letf (((symbol-function 'agent-repl-window--panel-window)
                  (lambda (_kind &optional _ws _frame) (selected-window)))
+                ((symbol-function 'agent-repl-window--input-height)
+                 (lambda (&rest _) (window-total-height (selected-window))))
                 ((symbol-function 'window-pixel-height) (lambda (&optional _w) 137))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock)
                  (lambda (_ws pixels) (push pixels docks) t)))
