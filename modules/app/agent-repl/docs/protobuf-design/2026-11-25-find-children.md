@@ -28,17 +28,22 @@ so it never dispatches a fix again for work a child already did.
 - `killed`
 - `folded`, naming the child it went into
 - `unrecorded`
+- `nuked`, for a nuked workspace whose record is not yet forgotten
 
-A landed workspace keeps its own `landed` standing. A nuked one is never
-found, because its record is gone.
+A landed workspace keeps its own `landed` standing.
 
 ## Decisions
 
 - **Closes record their kind in the store.** A close used to tell its kind to
   the workspace's followers and then drop it. It is now stored in
-  `workspaces.closure_how` (layout 214), so a find can tell a kill apart from a
+  `workspaces.closure_how` (layout 217), so a find can tell a kill apart from a
   close. A close recorded before this layout reads `unrecorded`, rather than a
   guessed kind.
+- **A nuke is found until its record is forgotten.** A nuke closes the record
+  before its teardown and forgets it after, so a find made in between, or
+  after a teardown that failed partway, finds it as `nuked`. The first draft
+  assumed no nuked record is ever found, and the find handler panicked on one
+  (the merge gate's `TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed`).
 - **A fold is the production mediator's record.** The child a folded child
   went into is stored in `production_children.folded_into`. The find answers
   `folded` for any workspace that table names, whatever kind its close

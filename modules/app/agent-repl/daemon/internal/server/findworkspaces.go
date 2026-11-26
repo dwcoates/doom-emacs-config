@@ -387,6 +387,10 @@ func closedHowOf(ws wsm.Workspace, byID map[wsm.WorkspaceID]wsm.Workspace, folds
 		how.How = &agentreplv1.FoundWorkspaceClosedHow_Closed{Closed: &agentreplv1.FoundWorkspaceClosedHowClosed{}}
 	case wsm.HowKilled:
 		how.How = &agentreplv1.FoundWorkspaceClosedHow_Killed{Killed: &agentreplv1.FoundWorkspaceClosedHowKilled{}}
+	case wsm.HowNuked:
+		// A NUKE CLOSES THE RECORD BEFORE ITS TEARDOWN and forgets it after,
+		// so a find made meanwhile, or after a teardown that failed, finds it.
+		how.How = &agentreplv1.FoundWorkspaceClosedHow_Nuked{Nuked: &agentreplv1.FoundWorkspaceClosedHowNuked{}}
 	case wsm.HowUnrecorded:
 		how.How = &agentreplv1.FoundWorkspaceClosedHow_Unrecorded{Unrecorded: &agentreplv1.FoundWorkspaceClosedHowUnrecorded{}}
 	default:

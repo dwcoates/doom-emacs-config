@@ -40,7 +40,8 @@
   2h` lists this workspace's children still at work plus those that ended in
   the last two hours. A closed workspace's `standing.closed.how` says how it
   ended: `closed`, `killed`, `folded` (into the child its `into` names) or
-  `unrecorded` (closed before the daemon recorded how). It answers 50 by default; `-limit N`
+  `unrecorded` (closed before the daemon recorded how), or `nuked` (a nuke
+  whose teardown has not yet forgotten the record). It answers 50 by default; `-limit N`
   or `-all` change that, and a cut answer is a `partial` extent naming how
   many were omitted. Zettel chat threads and async-merge workspaces are not
   answered. Use it whenever the agent needs to find the workspace that did

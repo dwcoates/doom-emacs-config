@@ -332,7 +332,7 @@ message FoundWorkspaceStandingClosed {
 }
 
 // How a closed workspace that never landed ended. THE ARM IS HOW, and
-// exactly one holds. A nuked workspace is never found: its record is gone.
+// exactly one holds.
 message FoundWorkspaceClosedHow {
   oneof how {
     // Closed: by the user, an agent, or the daemon.
@@ -345,6 +345,11 @@ message FoundWorkspaceClosedHow {
     FoundWorkspaceClosedHowFolded folded = 3;
     // Closed before the daemon recorded how a workspace ended.
     FoundWorkspaceClosedHowUnrecorded unrecorded = 4;
+    // Nuked (NukeWorkspace): its session killed, and its worktree, branch
+    // and record being destroyed. A nuke closes the record first and forgets
+    // it once the teardown is done, so the record is found only while that
+    // teardown runs or after it failed partway.
+    FoundWorkspaceClosedHowNuked nuked = 5;
   }
 }
 // Closed. No fields.
@@ -359,6 +364,8 @@ message FoundWorkspaceClosedHowFolded {
 }
 // How it ended was not recorded. No fields.
 message FoundWorkspaceClosedHowUnrecorded {}
+// Nuked, its record not yet forgotten. No fields.
+message FoundWorkspaceClosedHowNuked {}
 // Its branch landed, and the workspace is closed.
 message FoundWorkspaceStandingLanded {
   // When its merge landed, unix milliseconds.
