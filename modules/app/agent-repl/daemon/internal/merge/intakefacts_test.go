@@ -142,6 +142,42 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 	}
 }
 
+// TestTheIntakesWindowEndsAtALogSiteMark pins that where a deploy check
+// reads to is a mark, so the production span starting there is read from
+// the tally exactly.
+func TestTheIntakesWindowEndsAtALogSiteMark(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, nil }
+	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
+
+	// Act
+	_, window, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("intakeBrief = %v", err)
+	}
+	edge, err := h.db.checks.LogSiteEdgeAt(context.Background(), window.Through)
+	if err != nil || edge != wsm.LogSiteEdgeMark {
+		t.Fatalf("LogSiteEdgeAt(%v) = (%v, %v), want the window's end a mark", window.Through, edge, err)
+	}
+}
+
+func TestAWindowWhoseEndCannotBeMarkedEscalatesTheCheck(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.markErr = errors.New("database is locked")
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	assertBriefFailureEscalated(t, h, "the deploy check's brief could not be composed", "database is locked")
+}
+
 func TestAWindowThatCannotBeReadEscalatesTheCheck(t *testing.T) {
 	// Arrange
 	h := checked(t)

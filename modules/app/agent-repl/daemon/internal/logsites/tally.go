@@ -4,8 +4,9 @@
 // agentrepl.v1.ListLogSites).
 //
 // ONE PASS READS EVERY SINK FROM ITS OWN CURSOR, to the end of its last
-// whole line, and adds what it read to the (deploy, site, level, hour) rows
-// (wsm logsites.go). It runs:
+// whole line, and adds what it read to the (deploy, site, level, bucket) rows
+// (wsm logsites.go): a bucket is an hour, split at every mark inside it. It
+// runs:
 //
 //   - at the start of the daemon's hourly retention pass, BEFORE anything is
 //     pruned, so every file the daemon removes was read to its end first
@@ -17,11 +18,12 @@
 //   - before every window is answered, so an answer is current to the
 //     moment it is asked.
 //
-// A RECORD IS CREDITED TO THE DEPLOY SERVING AT ITS TIMESTAMP. A pass
-// snapshots the deploys and an instant in one transaction, and tallies only
-// the records written before that instant; a deploy recorded later begins
-// later (wsm.DB.LogSiteSnapshot), so no record is credited to a deploy that
-// did not serve it. A record at or after the instant is left for the next
+// A RECORD IS CREDITED TO THE DEPLOY SERVING AT ITS TIMESTAMP, in the bucket
+// that holds it. A pass snapshots the deploys, the marks and an instant in
+// one transaction, and tallies only the records written before that instant;
+// a deploy or mark recorded later is later (wsm.DB.LogSiteSnapshot), so no
+// record is credited to a deploy that did not serve it or to a bucket on the
+// wrong side of a mark. A record at or after the instant is left for the next
 // pass, its file's cursor standing before it.
 package logsites
 
@@ -49,7 +51,7 @@ const opPass = "daemon.logsites.pass"
 
 // Store is the part of the daemon's store the tally keeps its rows in.
 type Store interface {
-	LogSiteSnapshot(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error)
+	LogSiteSnapshot(ctx context.Context, now func() time.Time) (wsm.LogSiteBoundaries, time.Time, error)
 	RecordLogSiteDeploy(ctx context.Context, now func() time.Time) (time.Time, error)
 	PruneLogSiteDeploys(ctx context.Context, keep int) (int64, error)
 	LogSiteCursor(ctx context.Context, file string) (int64, bool, error)
@@ -57,6 +59,7 @@ type Store interface {
 	ForgetLogSiteCursors(ctx context.Context, live []string) (int64, error)
 	LogSiteRows(ctx context.Context, from, to time.Time, levels []string) ([]wsm.LogSiteRow, error)
 	OldestLogSiteHour(ctx context.Context) (time.Time, bool, error)
+	LogSiteEdgeAt(ctx context.Context, at time.Time) (wsm.LogSiteEdge, error)
 }
 
 const (
@@ -182,9 +185,9 @@ func (t *Tallier) Pass(ctx context.Context, reason string) (Report, error) {
 
 func (t *Tallier) pass(ctx context.Context, reason string) (Report, error) {
 	var report Report
-	deploys, until, err := t.store.LogSiteSnapshot(ctx, t.now)
+	bounds, until, err := t.store.LogSiteSnapshot(ctx, t.now)
 	if err != nil {
-		return report, fmt.Errorf("logsites: snapshot the deploys: %w", err)
+		return report, fmt.Errorf("logsites: snapshot the deploys and marks: %w", err)
 	}
 	sources, err := listSources(t.dirs)
 	if err != nil {
@@ -206,7 +209,7 @@ func (t *Tallier) pass(ctx context.Context, reason string) (Report, error) {
 			continue
 		}
 		live = append(live, id)
-		if err := t.tallyFile(ctx, src, id, deploys, until, &report); err != nil {
+		if err := t.tallyFile(ctx, src, id, bounds, until, &report); err != nil {
 			if ctx.Err() != nil {
 				return report, err
 			}
@@ -234,7 +237,7 @@ func (t *Tallier) fileFailed(path, reason string, err error) error {
 
 // tallyFile tallies SRC from its cursor, one chunk per transaction, to the
 // end of its last whole line or its first record at or after UNTIL.
-func (t *Tallier) tallyFile(ctx context.Context, src source, id string, deploys []time.Time, until time.Time, report *Report) error {
+func (t *Tallier) tallyFile(ctx context.Context, src source, id string, bounds wsm.LogSiteBoundaries, until time.Time, report *Report) error {
 	offset, _, err := t.store.LogSiteCursor(ctx, id)
 	if err != nil {
 		return err
@@ -266,7 +269,7 @@ func (t *Tallier) tallyFile(ctx context.Context, src source, id string, deploys 
 	malformedAt := int64(-1)
 	var malformed int64
 	for {
-		chunk, done, err := readChunk(ctx, r, offset, deploys, until, report, &malformed, &malformedAt)
+		chunk, done, err := readChunk(ctx, r, offset, bounds, until, report, &malformed, &malformedAt)
 		if err != nil {
 			return err
 		}
@@ -306,7 +309,7 @@ type countKey struct {
 	deploy time.Time
 	site   string
 	level  string
-	hour   time.Time
+	bucket time.Time
 }
 
 // chunkTally is what one chunk read.
@@ -332,7 +335,7 @@ func (c chunkTally) counts() []wsm.LogSiteCount {
 		case a.Level != b.Level:
 			return a.Level < b.Level
 		default:
-			return a.Hour.Before(b.Hour)
+			return a.Bucket.Before(b.Bucket)
 		}
 	})
 	return out
@@ -345,7 +348,7 @@ const readBufferBytes = 64 << 10
 // readChunk reads whole lines from R, which stands at FROM, until a chunk's
 // worth, the end of its last whole line, or a record at or after UNTIL; DONE
 // reports that the file holds nothing more for this pass.
-func readChunk(ctx context.Context, r *bufio.Reader, from int64, deploys []time.Time, until time.Time,
+func readChunk(ctx context.Context, r *bufio.Reader, from int64, bounds wsm.LogSiteBoundaries, until time.Time,
 	report *Report, malformed, malformedAt *int64) (chunkTally, bool, error) {
 	c := chunkTally{to: from, rows: map[countKey]*wsm.LogSiteCount{}}
 	for c.to-from < ChunkBytes {
@@ -394,24 +397,24 @@ func readChunk(ctx context.Context, r *bufio.Reader, from int64, deploys []time.
 		case rec.site == "":
 			report.Unkeyed++
 		default:
-			deploy, ok := deployAt(deploys, rec.at)
+			deploy, ok := latestAtOrBefore(bounds.Deploys, rec.at)
 			if !ok {
 				report.Earlier++
 				break
 			}
-			c.add(deploy, rec)
+			c.add(deploy, bucketOf(bounds.Marks, rec.at), rec)
 		}
 		c.to += int64(len(line))
 	}
 	return c, false, nil
 }
 
-// add counts REC in the chunk's row for DEPLOY.
-func (c *chunkTally) add(deploy time.Time, rec record) {
-	key := countKey{deploy: deploy, site: rec.site, level: rec.level, hour: rec.at.Truncate(time.Hour)}
+// add counts REC in the chunk's row for DEPLOY and BUCKET.
+func (c *chunkTally) add(deploy, bucket time.Time, rec record) {
+	key := countKey{deploy: deploy, site: rec.site, level: rec.level, bucket: bucket}
 	n, ok := c.rows[key]
 	if !ok {
-		n = &wsm.LogSiteCount{Deploy: deploy, Site: rec.site, Level: rec.level, Hour: key.hour, FirstSeen: rec.at}
+		n = &wsm.LogSiteCount{Deploy: deploy, Site: rec.site, Level: rec.level, Bucket: bucket, FirstSeen: rec.at}
 		c.rows[key] = n
 	}
 	n.Count++
@@ -426,14 +429,25 @@ func (c *chunkTally) add(deploy time.Time, rec record) {
 	c.records++
 }
 
-// deployAt answers the deploy serving at AT: the latest of DEPLOYS (oldest
-// first) that began at or before it, and false when AT predates them all.
-func deployAt(deploys []time.Time, at time.Time) (time.Time, bool) {
-	i := sort.Search(len(deploys), func(i int) bool { return deploys[i].After(at) })
+// latestAtOrBefore answers the latest of INSTANTS (oldest first) at or
+// before AT, and false when AT predates them all: of the deploys, the one
+// serving at AT; of the marks, the last one AT is past.
+func latestAtOrBefore(instants []time.Time, at time.Time) (time.Time, bool) {
+	i := sort.Search(len(instants), func(i int) bool { return instants[i].After(at) })
 	if i == 0 {
 		return time.Time{}, false
 	}
-	return deploys[i-1], true
+	return instants[i-1], true
+}
+
+// bucketOf answers the start of the bucket a record at AT is counted in: the
+// later of AT's hour and the latest of MARKS (oldest first) at or before it.
+func bucketOf(marks []time.Time, at time.Time) time.Time {
+	bucket := at.Truncate(time.Hour)
+	if mark, ok := latestAtOrBefore(marks, at); ok && mark.After(bucket) {
+		return mark
+	}
+	return bucket
 }
 
 // record is the part of a log record the tally reads.
@@ -503,17 +517,20 @@ func decode(raw []byte) (record, bool) {
 
 // DeployBegan records that a deploy began now, prunes the deploys no longer
 // kept, and runs a pass off the caller's goroutine so the deploy before is
-// read whole soon. A deploy that cannot be recorded is recorded at ERROR.
-func (t *Tallier) DeployBegan(ctx context.Context, spawn func(func())) {
+// read whole soon. It answers the instant the deploy was recorded at, and
+// true; a deploy that cannot be recorded is recorded at ERROR and answers
+// false.
+func (t *Tallier) DeployBegan(ctx context.Context, spawn func(func())) (time.Time, bool) {
 	const op = "daemon.logsites.deploy_began"
 	at, err := t.store.RecordLogSiteDeploy(ctx, t.now)
 	if err != nil {
 		t.log.Error(op, "could not record the deploy that began, so its log sites are credited to the deploy before", dlog.Context{"cause": err.Error()})
-		return
+		return time.Time{}, false
 	}
 	t.log.Info(op, "a deploy began; its log sites are tallied apart from the deploy before", dlog.Context{"deploy_at": at})
 	spawn(func() {
 		// A failed pass is recorded by Pass.
 		_, _ = t.Pass(ctx, "deploy_began")
 	})
+	return at, true
 }

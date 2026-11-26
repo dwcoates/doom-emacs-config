@@ -84,7 +84,7 @@ func TestAMediationHookCarriesBothEdgesOnceBound(t *testing.T) {
 	h.bind(o)
 
 	// Act
-	h.began()
+	h.began(h.now())
 	h.ended(deployprogress.EndedFinished)
 
 	// Assert
@@ -96,13 +96,36 @@ func TestAMediationHookCarriesBothEdgesOnceBound(t *testing.T) {
 	}
 }
 
+func TestDeployStartedAtIsTheTallysStartWhenItRecordedOne(t *testing.T) {
+	tally, now := time.Date(2026, 11, 13, 21, 0, 0, 0, time.UTC), time.Date(2026, 11, 13, 21, 0, 1, 0, time.UTC)
+	tests := []struct {
+		name     string
+		recorded bool
+		want     time.Time
+	}{
+		{name: "the tally recorded the deploy", recorded: true, want: tally},
+		{name: "the tally could not record it", recorded: false, want: now},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := deployStartedAt(tally, tt.recorded, func() time.Time { return now })
+
+			// Assert
+			if !got.Equal(tt.want) {
+				t.Fatalf("deployStartedAt = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnEdgeBeforeTheBindingIsRecordedAtError(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	h := &mediationHook{ctx: context.Background(), now: time.Now, log: log}
 
 	// Act
-	h.began()
+	h.began(h.now())
 
 	// Assert
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opMediationHook}); !ok {
@@ -177,7 +200,7 @@ func TestADeployThatChangedNothingReleasesItsChecksBeforeTheRounds(t *testing.T)
 			h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: log}
 			h.bind(o)
 			if tt.began {
-				h.began()
+				h.began(h.now())
 			}
 
 			// Act
@@ -226,7 +249,7 @@ func TestADeployThatStoppedShortRecordsItsEndingBeforeTheRounds(t *testing.T) {
 	o := &mediationOrchestrator{mediated: make(chan struct{})}
 	h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: dlog.NewTestLogger()}
 	h.bind(o)
-	h.began()
+	h.began(h.now())
 
 	// Act
 	h.ended(deployprogress.EndedStoppedShort)
@@ -260,7 +283,7 @@ func TestADeploysEndingIsRecordedByWhereItBegan(t *testing.T) {
 			h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: log}
 			h.bind(o)
 			if tt.began {
-				h.began()
+				h.began(h.now())
 			}
 
 			// Act

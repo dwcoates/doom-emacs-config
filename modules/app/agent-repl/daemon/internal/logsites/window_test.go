@@ -51,30 +51,36 @@ func TestWindowAnswersTheSitesThatFiredInItsHours(t *testing.T) {
 		wantFrom    time.Time
 		wantTo      time.Time
 		wantPartial bool
+		wantWidened bool
 	}{
 		{
 			name: "errors first, then the most often fired", since: t0, until: t0.Add(30 * time.Minute),
 			wantSites: []string{siteB + "/error/1", siteA + "/info/3", siteC + "/warn/1"},
-			wantFrom:  t0, wantTo: t0.Add(time.Hour),
+			wantFrom:  t0, wantTo: t0.Add(time.Hour), wantWidened: true,
 		},
 		{
-			name: "a window widens to its whole hours and sums them", since: t0.Add(30 * time.Minute), until: t0.Add(80 * time.Minute),
-			wantSites: []string{siteB + "/error/1", siteA + "/info/4", siteC + "/warn/1"},
-			wantFrom:  t0, wantTo: t0.Add(2 * time.Hour),
+			name: "a widened edge leaves out the rows wholly past it", since: t0.Add(30 * time.Minute), until: t0.Add(80 * time.Minute),
+			wantSites: []string{siteA + "/info/1"},
+			wantFrom:  t0, wantTo: t0.Add(2 * time.Hour), wantWidened: true,
 		},
 		{
 			name: "a minimum level leaves out the levels below it", since: t0, until: t0.Add(30 * time.Minute), minimum: "warn",
 			wantSites: []string{siteB + "/error/1", siteC + "/warn/1"},
-			wantFrom:  t0, wantTo: t0.Add(time.Hour),
+			wantFrom:  t0, wantTo: t0.Add(time.Hour), wantWidened: true,
 		},
 		{
 			name: "a window older than the kept rows is answered from their oldest hour", since: t0.Add(-5 * time.Hour), until: t0.Add(30 * time.Minute),
 			wantSites: []string{siteB + "/error/1", siteA + "/info/3", siteC + "/warn/1"},
-			wantFrom:  t0, wantTo: t0.Add(time.Hour), wantPartial: true,
+			wantFrom:  t0, wantTo: t0.Add(time.Hour), wantPartial: true, wantWidened: true,
 		},
 		{
 			name: "a window in which nothing fired answers no site", since: t0.Add(2 * time.Hour), until: t0.Add(150 * time.Minute),
-			wantFrom: t0.Add(2 * time.Hour), wantTo: t0.Add(3 * time.Hour),
+			wantFrom: t0.Add(2 * time.Hour), wantTo: t0.Add(3 * time.Hour), wantWidened: true,
+		},
+		{
+			name: "a window of whole hours is read exactly", since: t0, until: t0.Add(time.Hour),
+			wantSites: []string{siteB + "/error/1", siteA + "/info/3", siteC + "/warn/1"},
+			wantFrom:  t0, wantTo: t0.Add(time.Hour),
 		},
 	}
 	for _, tt := range tests {
@@ -92,10 +98,92 @@ func TestWindowAnswersTheSitesThatFiredInItsHours(t *testing.T) {
 			if got := keysOf(answer.Sites); !reflect.DeepEqual(got, tt.wantSites) {
 				t.Errorf("sites = %v, want %v", got, tt.wantSites)
 			}
-			if !answer.From.Equal(tt.wantFrom) || !answer.To.Equal(tt.wantTo) || answer.Partial != tt.wantPartial {
-				t.Errorf("covered [%v, %v) partial %v, want [%v, %v) partial %v", answer.From, answer.To, answer.Partial, tt.wantFrom, tt.wantTo, tt.wantPartial)
+			if !answer.From.Equal(tt.wantFrom) || !answer.To.Equal(tt.wantTo) || answer.Partial != tt.wantPartial || answer.Widened != tt.wantWidened {
+				t.Errorf("covered [%v, %v) partial %v widened %v, want [%v, %v) partial %v widened %v", answer.From, answer.To, answer.Partial, answer.Widened,
+					tt.wantFrom, tt.wantTo, tt.wantPartial, tt.wantWidened)
 			}
 		})
+	}
+}
+
+// TestWindowReadsAnEdgeTheTallySplitsAtExactly pins that a window from or to
+// a mark or a deploy's start holds no record from past it, inside one hour.
+func TestWindowReadsAnEdgeTheTallySplitsAtExactly(t *testing.T) {
+	edge := t0.Add(3*time.Minute + 30*time.Second)
+	tests := []struct {
+		name      string
+		record    func(f *fixture) error
+		since     time.Time
+		until     time.Time
+		wantSites []string
+	}{
+		{name: "to a mark", since: t0, until: edge, wantSites: []string{siteA + "/info/3"},
+			record: func(f *fixture) error { _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge }); return err }},
+		{name: "from a mark", since: edge, until: t0.Add(2 * time.Hour), wantSites: []string{siteB + "/error/1", siteC + "/warn/1", siteA + "/info/1"},
+			record: func(f *fixture) error { _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge }); return err }},
+		{name: "to a deploy's start", since: t0, until: edge, wantSites: []string{siteA + "/info/3"},
+			record: func(f *fixture) error { _, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge }); return err }},
+		{name: "from a deploy's start", since: edge, until: t0.Add(2 * time.Hour), wantSites: []string{siteB + "/error/1", siteC + "/warn/1", siteA + "/info/1"},
+			record: func(f *fixture) error { _, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge }); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := windowFixture(t)
+			if err := tt.record(f); err != nil {
+				t.Fatalf("record the edge: %v", err)
+			}
+
+			// Act
+			answer, err := f.t.Window(context.Background(), tt.since, tt.until, "")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Window: %v", err)
+			}
+			if got := keysOf(answer.Sites); !reflect.DeepEqual(got, tt.wantSites) {
+				t.Errorf("sites = %v, want %v", got, tt.wantSites)
+			}
+			if !answer.From.Equal(tt.since) || !answer.To.Equal(tt.until) || answer.Widened {
+				t.Errorf("covered [%v, %v) widened %v, want exactly [%v, %v)", answer.From, answer.To, answer.Widened, tt.since, tt.until)
+			}
+		})
+	}
+}
+
+// TestWindowOfTheSpanBeforeHoldsNoSiteThatFiredAfterIt pins the 2026-11-25
+// production finding: two spans inside one hour, a site first firing between
+// them. Read from marks, the span before holds no record of the site, so the
+// production check sees it as new.
+func TestWindowOfTheSpanBeforeHoldsNoSiteThatFiredAfterIt(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.now = t0.Add(2 * time.Hour)
+	marks := []time.Time{t0.Add(5 * time.Minute), t0.Add(15 * time.Minute), t0.Add(25 * time.Minute), t0.Add(45 * time.Minute)}
+	for _, m := range marks {
+		if _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return m }); err != nil {
+			t.Fatalf("RecordLogSiteMark: %v", err)
+		}
+	}
+	f.write(t, "daemon.run.log",
+		keyed(t0.Add(10*time.Minute), "warn", "pkg.C", "slow {what}", "slow 1")+
+			keyed(t0.Add(20*time.Minute), "error", "pkg.B", "failed {what}", "failed 1")+
+			keyed(t0.Add(30*time.Minute), "error", "pkg.B", "failed {what}", "failed 2")+
+			keyed(t0.Add(50*time.Minute), "warn", "pkg.C", "slow {what}", "slow 2"))
+
+	// Act
+	before, errBefore := f.t.Window(context.Background(), marks[0], marks[1], "warn")
+	span, errSpan := f.t.Window(context.Background(), marks[2], marks[3], "warn")
+
+	// Assert
+	if errBefore != nil || errSpan != nil {
+		t.Fatalf("Window = (%v, %v)", errBefore, errSpan)
+	}
+	if got := keysOf(before.Sites); !reflect.DeepEqual(got, []string{siteC + "/warn/1"}) {
+		t.Errorf("the span before's sites = %v, want only siteC's record inside it", got)
+	}
+	if got := keysOf(span.Sites); !reflect.DeepEqual(got, []string{siteB + "/error/1"}) {
+		t.Errorf("the span's sites = %v, want only siteB's record inside it", got)
 	}
 }
 

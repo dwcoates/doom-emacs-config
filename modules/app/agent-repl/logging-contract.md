@@ -406,9 +406,16 @@ fired before. Change a template only when it is really necessary.
 ### Sites are tallied per deploy, independently of the logs
 
 The daemon tallies every record of every sink into (deploy, site, level,
-hour) rows in its store, crediting each record to the deploy serving when it
-was written. `ListLogSites` answers a window of time from those rows, not
-from the logs (`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
+bucket) rows in its store, crediting each record to the deploy serving when it
+was written. A bucket is an hour, split at every mark inside it: an instant a
+window is later read from or to, recorded as it is taken (a landing's start,
+the end of what a deploy check read). `ListLogSites` and the production checks
+answer a window of time from those rows, not from the logs
+(`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
+
+- A WINDOW IS READ EXACTLY AT AN EDGE THE ROWS SPLIT AT: a whole hour, a mark,
+  or a deploy's start. Any other edge widens to its whole hour, and the answer
+  says so; a row whose records all lie past that edge is still left out.
 
 - ONE PASS reads every JSONL log under the state root's `logs/` directory
   and the cache root's `log/` directory from each file's own cursor, to the
@@ -424,8 +431,9 @@ from the logs (`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
   together only while the cursor stands where the chunk was read, so two
   daemons never count the same bytes.
 - A pass credits only records written before the instant it read the
-  deploys at; a later record waits for the next pass, so no record is
-  credited to a deploy that did not serve it.
+  deploys and marks at; a later record waits for the next pass, so no record
+  is credited to a deploy that did not serve it or to a bucket on the wrong
+  side of a mark.
 - A record that names no site (one written before its runtime keyed its
   sites) is counted apart and credited to no site.
 - The files Emacs, the store and the sidecar remove themselves are read by

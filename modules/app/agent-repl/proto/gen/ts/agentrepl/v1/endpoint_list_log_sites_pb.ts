@@ -201,8 +201,11 @@ export type ListLogSitesSuccess = Message<"agentrepl.v1.ListLogSitesSuccess"> & 
   sites: LogSite[];
 
   /**
-   * The hours the answer covers: the window widened outward to whole hours,
-   * and narrowed to the rows the store still keeps.
+   * The span the answer covers: the window, each edge widened outward to its
+   * whole hour unless the store splits its rows there (a whole hour, a mark,
+   * a deploy's start), and narrowed to the rows the store still keeps. A site
+   * whose every record lies outside the window is left out, even in a
+   * widened hour.
    *
    * @generated from field: agentrepl.v1.ListLogSitesCovered covered = 2;
    */

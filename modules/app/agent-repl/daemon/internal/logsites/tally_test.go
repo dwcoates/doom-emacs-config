@@ -58,7 +58,7 @@ func TestDecodeReadsTheRecordsTheTallyCounts(t *testing.T) {
 	}
 }
 
-func TestDeployAtAnswersTheDeployServingAtAnInstant(t *testing.T) {
+func TestLatestAtOrBeforeAnswersTheDeployServingAtAnInstant(t *testing.T) {
 	deploys := []time.Time{t0, t0.Add(time.Hour)}
 	tests := []struct {
 		name   string
@@ -74,13 +74,61 @@ func TestDeployAtAnswersTheDeployServingAtAnInstant(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, ok := deployAt(deploys, tt.at)
+			got, ok := latestAtOrBefore(deploys, tt.at)
 
 			// Assert
 			if ok != tt.wantOK || !got.Equal(tt.want) {
-				t.Fatalf("deployAt(%v) = (%v, %v), want (%v, %v)", tt.at, got, ok, tt.want, tt.wantOK)
+				t.Fatalf("latestAtOrBefore(%v) = (%v, %v), want (%v, %v)", tt.at, got, ok, tt.want, tt.wantOK)
 			}
 		})
+	}
+}
+
+func TestBucketOfAnswersTheLaterOfTheHourAndTheLatestMark(t *testing.T) {
+	marks := []time.Time{t0.Add(-10 * time.Minute), t0.Add(20 * time.Minute)}
+	tests := []struct {
+		name string
+		at   time.Time
+		want time.Time
+	}{
+		{name: "a mark in an earlier hour leaves the hour", at: t0.Add(5 * time.Minute), want: t0},
+		{name: "at a mark", at: t0.Add(20 * time.Minute), want: t0.Add(20 * time.Minute)},
+		{name: "past a mark in the hour", at: t0.Add(40 * time.Minute), want: t0.Add(20 * time.Minute)},
+		{name: "the next hour starts a bucket", at: t0.Add(70 * time.Minute), want: t0.Add(time.Hour)},
+		{name: "no mark at or before it", at: t0.Add(-30 * time.Minute), want: t0.Add(-time.Hour)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := bucketOf(marks, tt.at)
+
+			// Assert
+			if !got.Equal(tt.want) {
+				t.Fatalf("bucketOf(%v) = %v, want %v", tt.at, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPassSplitsARowAtAMark(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	mark := t0.Add(2*time.Minute + 30*time.Second)
+	if _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return mark }); err != nil {
+		t.Fatalf("RecordLogSiteMark: %v", err)
+	}
+	f.write(t, "daemon.run.log",
+		keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x")+
+			keyed(t0.Add(2*time.Minute), "info", "pkg.A", "said {what}", "said y")+
+			keyed(t0.Add(3*time.Minute), "info", "pkg.A", "said {what}", "said z"))
+
+	// Act
+	f.pass(t)
+
+	// Assert
+	rows := f.rows(t)
+	if len(rows) != 2 || !rows[0].Bucket.Equal(t0) || rows[0].Count != 2 || !rows[1].Bucket.Equal(mark) || rows[1].Count != 1 {
+		t.Fatalf("rows = %+v, want two before the mark in the hour's bucket and one in the mark's", rows)
 	}
 }
 
@@ -106,7 +154,7 @@ func TestAPassTalliesEveryKeyedRecordAndCountsTheRest(t *testing.T) {
 		t.Errorf("rows = %v, want %v", got, want)
 	}
 	for _, r := range rows {
-		if r.Site == siteA && (r.SampleMessage != "said y" || !r.FirstSeen.Equal(t0.Add(time.Minute)) || !r.Hour.Equal(t0)) {
+		if r.Site == siteA && (r.SampleMessage != "said y" || !r.FirstSeen.Equal(t0.Add(time.Minute)) || !r.Bucket.Equal(t0)) {
 			t.Errorf("row %+v, want its latest sample, its first sighting and its hour", r)
 		}
 	}
@@ -285,8 +333,8 @@ func TestAPassCreditsEachRecordToTheDeployServingAtIt(t *testing.T) {
 func TestAPassCountsARecordBeforeEveryKeptDeployApart(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	f.store.snapshot = func(context.Context, func() time.Time) ([]time.Time, time.Time, error) {
-		return []time.Time{t0.Add(30 * time.Minute)}, f.now, nil
+	f.store.snapshot = func(context.Context, func() time.Time) (wsm.LogSiteBoundaries, time.Time, error) {
+		return wsm.LogSiteBoundaries{Deploys: []time.Time{t0.Add(30 * time.Minute)}}, f.now, nil
 	}
 	f.write(t, "daemon.run.log", keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x"))
 
@@ -383,8 +431,8 @@ func TestAPassFailsOnAFileItCannotTallyAndReadsTheRest(t *testing.T) {
 func TestAPassThatCannotSnapshotTheDeploysTalliesNothing(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	f.store.snapshot = func(context.Context, func() time.Time) ([]time.Time, time.Time, error) {
-		return nil, time.Time{}, errors.New("database is locked")
+	f.store.snapshot = func(context.Context, func() time.Time) (wsm.LogSiteBoundaries, time.Time, error) {
+		return wsm.LogSiteBoundaries{}, time.Time{}, errors.New("database is locked")
 	}
 	f.write(t, "daemon.run.log", keyed(t0.Add(time.Minute), "info", "pkg.A", "said {what}", "said x"))
 
@@ -425,12 +473,15 @@ func TestDeployBeganRecordsTheDeployAndRunsAPass(t *testing.T) {
 	spawned := 0
 
 	// Act
-	f.t.DeployBegan(context.Background(), func(run func()) { spawned++; run() })
+	at, recorded := f.t.DeployBegan(context.Background(), func(run func()) { spawned++; run() })
 
 	// Assert
-	deploys, _, err := f.store.LogSiteSnapshot(context.Background(), time.Now)
-	if err != nil || len(deploys) != 2 || !deploys[1].Equal(f.now) {
-		t.Fatalf("deploys = (%v, %v), want the deploy at %v recorded", deploys, err, f.now)
+	bounds, _, err := f.store.LogSiteSnapshot(context.Background(), time.Now)
+	if err != nil || len(bounds.Deploys) != 2 || !bounds.Deploys[1].Equal(f.now) {
+		t.Fatalf("deploys = (%v, %v), want the deploy at %v recorded", bounds.Deploys, err, f.now)
+	}
+	if !recorded || !at.Equal(f.now) {
+		t.Fatalf("DeployBegan = (%v, %v), want the recorded instant %v", at, recorded, f.now)
 	}
 	if spawned != 1 || len(f.rows(t)) != 1 {
 		t.Fatalf("spawned %d passes, rows %v; want one pass that tallied the file", spawned, counts(f.rows(t)))
@@ -449,11 +500,11 @@ func TestDeployBeganThatCannotRecordTheDeployRunsNoPass(t *testing.T) {
 	spawned := 0
 
 	// Act
-	f.t.DeployBegan(context.Background(), func(func()) { spawned++ })
+	_, recorded := f.t.DeployBegan(context.Background(), func(func()) { spawned++ })
 
 	// Assert
 	rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.logsites.deploy_began"})
-	if !ok || rec.Context["cause"] != "database is locked" || spawned != 0 {
+	if !ok || rec.Context["cause"] != "database is locked" || spawned != 0 || recorded {
 		t.Fatalf("records = %+v, spawned %d; want the failure at ERROR with its cause and no pass", f.log.Records(), spawned)
 	}
 }

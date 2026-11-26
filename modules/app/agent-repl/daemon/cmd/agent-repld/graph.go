@@ -574,8 +574,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		_, _ = logSites.Pass(ctx, reason)
 	})
 	deployBegan := func() {
-		mediation.began()
-		logSites.DeployBegan(ctx, inflight.Go)
+		// THE DEPLOY'S MEDIATIONS ARE OWED AT ITS TALLY START, a boundary
+		// the tally splits its rows at. A deploy the tally could not record
+		// (recorded at ERROR) is owed at now: a span ending there is read
+		// widened, and says so.
+		at, recorded := logSites.DeployBegan(ctx, inflight.Go)
+		mediation.began(deployStartedAt(at, recorded, time.Now))
 	}
 	deployEdges := deployprogress.NewEdges(footerResolver, deployBegan, mediation.ended)
 	// THE DAEMON'S WORKSPACE WARNINGS AND ERRORS REACH THE STRIP through ONE

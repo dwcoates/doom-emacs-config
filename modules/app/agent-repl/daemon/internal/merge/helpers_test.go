@@ -156,6 +156,8 @@ type fakeDB struct {
 	// MediationWindowOf.
 	windowErr     error
 	windowReadErr error
+	// markErr fails RecordLogSiteMark.
+	markErr error
 	// promptMarkErr fails MarkMediationPrompted, and mediationReleaseErr
 	// ReleaseMediation.
 	promptMarkErr       error
@@ -851,6 +853,16 @@ func (f *fakeDB) RecordMediationWindow(ctx context.Context, repo wsm.RepoKey, ow
 		return false, err
 	}
 	return f.checks.RecordMediationWindow(ctx, repo, owed, w)
+}
+
+func (f *fakeDB) RecordLogSiteMark(ctx context.Context, now func() time.Time) (time.Time, error) {
+	f.mu.Lock()
+	err := f.markErr
+	f.mu.Unlock()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return f.checks.RecordLogSiteMark(ctx, now)
 }
 
 func (f *fakeDB) MediationWindowOf(ctx context.Context, repo wsm.RepoKey) (wsm.CheckWindow, bool, error) {

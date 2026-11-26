@@ -608,11 +608,13 @@ type ProductionSites struct {
 	Ignored int
 	// Baseline says what the span was compared against.
 	Baseline string
-	// From and To are the hours the tally's answer covered, and Partial
-	// that the span began before its oldest kept row, so nothing before
-	// From was read (logsites.Answer).
+	// From and To are the span the tally's answer covered, Partial that the
+	// span began before its oldest kept row, so nothing before From was
+	// read, and Widened that an edge of the span splits no tally row, so
+	// that edge's whole hour was read (logsites.Answer).
 	From, To time.Time
 	Partial  bool
+	Widened  bool
 	// Unrecorded is that the span ended before the tally's oldest kept row
 	// (OldestKept), so none of it was read: it lists no site, and the
 	// mediator is told to read the span from the raw logs.
@@ -662,7 +664,7 @@ func (o *orchestrator) productionSites(ctx context.Context, q checkedQueue, c ws
 			return ProductionSites{}, fmt.Errorf("merge: read the span before's log sites: %w", err)
 		default:
 			before = &answer
-			baseline = fmt.Sprintf("the span before, %s to %s", prev.Since.UTC().Format(time.RFC3339), prev.Until.UTC().Format(time.RFC3339))
+			baseline = spanBeforeBaseline(prev, answer)
 		}
 	}
 	owned, err := o.deps.DB.OwnedSites(ctx, q.key)
@@ -680,6 +682,19 @@ func (o *orchestrator) productionSites(ctx context.Context, q checkedQueue, c ws
 	out := DiffProductionSites(span, c.Until, before, owned, fixed, kinds)
 	out.Baseline = baseline
 	return out, nil
+}
+
+// spanBeforeBaseline says what span C's sites were compared against: PREV,
+// the span before, as the tally answered it (ANSWER). A span before read
+// widened says what was read, since a site that fired in its widened hours
+// only outside it counts as seen.
+func spanBeforeBaseline(prev wsm.ProductionCheck, answer logsites.Answer) string {
+	out := fmt.Sprintf("the span before, %s to %s", prev.Since.UTC().Format(time.RFC3339), prev.Until.UTC().Format(time.RFC3339))
+	if answer.Widened {
+		out += fmt.Sprintf(" (read as %s to %s: an edge of it splits no tally row, so a site that fired in those hours only outside it counts as seen)",
+			answer.From.UTC().Format(time.RFC3339), answer.To.UTC().Format(time.RFC3339))
+	}
+	return out
 }
 
 // DiffProductionSites is the one comparison of a span's sites (SPAN, the
@@ -700,7 +715,7 @@ func DiffProductionSites(span logsites.Answer, until time.Time, before *logsites
 	for _, f := range fixed {
 		fixes[f.Site] = f
 	}
-	out := ProductionSites{From: span.From, To: span.To, Partial: span.Partial}
+	out := ProductionSites{From: span.From, To: span.To, Partial: span.Partial, Widened: span.Widened}
 	for _, site := range span.Sites {
 		if _, held := owned[site.Key]; held {
 			out.Owned++
@@ -751,6 +766,9 @@ func RenderProductionSites(sites ProductionSites, c wsm.ProductionCheck) string 
 	case sites.Partial:
 		b.WriteString(fmt.Sprintf("PARTIAL: the tally keeps no row before %s, so it read only %s to %s; what fired before then is unknown, not absent.\n",
 			sites.From.UTC().Format(time.RFC3339), sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
+	case sites.Widened:
+		b.WriteString(fmt.Sprintf("WIDENED: an edge of the span splits no tally row, so it read %s to %s; a site listed may have fired in those hours only outside the span, and its counts may hold records from outside it.\n",
+			sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
 	default:
 		b.WriteString(fmt.Sprintf("Read whole from the tally: %s to %s.\n", sites.From.UTC().Format(time.RFC3339), sites.To.UTC().Format(time.RFC3339)))
 	}

@@ -1525,14 +1525,22 @@ func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey)
 // recordUnreadWindow records the window of check M of queue Q, whose brief
 // could not be composed, as read from where the last check read to through
 // now, holding no groups: the mediator approved the deploy from its own
-// reading of it. The next check's window then starts here.
+// reading of it. The next check's window then starts here, at a log site
+// mark.
 func (o *orchestrator) recordUnreadWindow(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) error {
 	since, err := o.windowStart(ctx, q.key, m)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read where the window of a check that could not run starts; the approval is not recorded and the queue stays held", withField(fields, "error", err.Error()))
 		return err
 	}
-	window := wsm.CheckWindow{Start: since, Through: o.deps.Now()}
+	// THE WINDOW'S END IS A LOG SITE MARK, as a told window's is
+	// (intakeBrief).
+	through, err := o.deps.DB.RecordLogSiteMark(ctx, o.deps.Now)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not mark where the window of a check that could not run ends; the approval is not recorded and the queue stays held", withField(fields, "error", err.Error()))
+		return err
+	}
+	window := wsm.CheckWindow{Start: since, Through: through}
 	fields = withField(withField(fields, "window_started", window.Start.UTC().Format(time.RFC3339Nano)), "window_through", window.Through.UTC().Format(time.RFC3339Nano))
 	if _, err := o.deps.DB.RecordMediationWindow(ctx, q.key, m.OwedAt, window); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the window of a check that could not run could not be recorded as read; the approval is not recorded and the queue stays held", withField(fields, "error", err.Error()))
