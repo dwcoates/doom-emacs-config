@@ -1346,9 +1346,12 @@ describe("the removed amber async border", () => {
       /border-color:\s*var\(--async\)/.test(r.declarations),
     );
 
-    // Assert — no rule paints an amber border on any .bubble selector.
+    // Assert — no rule paints an amber border on any .bubble selector, except
+    // the status-colored frame (bubble-frame.ts), where yellow is the child's
+    // canonical status color and not the async border.
     for (const rule of amberBorders) {
       for (const selector of rule.selectors) {
+        if (selector.includes('[data-frame-tone="yellow"]')) continue;
         expect(selector).not.toContain(".bubble");
       }
     }
