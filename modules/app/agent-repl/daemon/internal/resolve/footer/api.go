@@ -391,6 +391,10 @@ type Submission struct {
 // Resolver is the footer's whole surface.
 type Resolver interface {
 	sessionwatcher.FooterSink
+	// SetOpenChildren installs PARENT's open children WHOLE, in the order
+	// they were created (children.go). Its sole producer is the children
+	// tracker (internal/children).
+	SetOpenChildren(parent ids.WorkspaceID, children []OpenChild)
 	// Sink is the ONE entry point a deploy's progress reaches the footer
 	// through: the update line, stood on every workspace's strip (update.go).
 	deployprogress.Sink
