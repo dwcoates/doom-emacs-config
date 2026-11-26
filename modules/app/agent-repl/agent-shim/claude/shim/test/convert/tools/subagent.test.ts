@@ -320,6 +320,37 @@ describe("subagentConverter.settle", () => {
     expect(success.totals?.usage.case).toBeUndefined();
   });
 
+  const THINKING_DETAILS: [string, Record<string, unknown>, bigint][] = [
+    ["thinking_tokens, the vendor's current name", { thinking_tokens: 209 }, 209n],
+    ["reasoning_tokens, the name the earlier harvest modeled", { reasoning_tokens: 7 }, 7n],
+  ];
+
+  for (const [name, details, expected] of THINKING_DETAILS) {
+    it(`reads the subagent's thinking tokens from ${name}`, () => {
+      // Arrange.
+      const structured = toolUseResult("agent");
+      const usage = { ...(structured["usage"] as Record<string, unknown>), output_tokens_details: details };
+
+      // Act.
+      const success = successOf(
+        subagentConverter.settle(call({ prompt: "p" }), outcome({ ...structured, usage })),
+      );
+
+      // Assert.
+      expect((success.totals?.usage.value as conversationv1.TokenUsage).outputThinkingTokens).toBe(expected);
+    });
+  }
+
+  it("leaves the subagent's usage settled, because a tool result's totals are final figures", () => {
+    // Arrange, Act.
+    const success = successOf(
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
+    );
+
+    // Assert.
+    expect((success.totals?.usage.value as conversationv1.TokenUsage).provisional).toBe(false);
+  });
+
   it("carries the corpus tool-stat breakdown", () => {
     // Arrange, Act.
     const success = successOf(

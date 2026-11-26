@@ -71,6 +71,7 @@ import { bookFor, spawningCallOf, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { noticeSubjectOf, synthesizedNotice } from "./notice-subject.js";
 import { residueEntry, residueForMessage } from "./residue.js";
+import { thinkingTokens } from "./thinking-tokens.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
 
 const LOGGER = bindLog("shim.convert.stream-events", { component: "shim-convert-stream", operation: "shim.convert.stream" });
@@ -451,36 +452,6 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
     outputTokens: count("output_tokens"),
     outputThinkingTokens: thinkingTokens(normalized.outputTokensDetails),
   });
-}
-
-/** A non-negative whole token count, or undefined when the value is not one. */
-function tokenCount(value: unknown): bigint | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? BigInt(Math.trunc(value))
-    : undefined;
-}
-
-/**
- * The thinking tokens out of the vendor's output-token details.
- *
- * THE VENDOR WRITES `thinking_tokens` (a real record on 2026-11-26:
- * `output_tokens_details: { thinking_tokens: 209 }`); `reasoning_tokens` is the
- * name the earlier harvest modeled and is still read. Both present and
- * differing is a vendor contradiction: it is warned and `thinking_tokens`, the
- * vendor's current name, is taken. No details at all means no thinking: 0.
- */
-function thinkingTokens(details: Record<string, unknown> | undefined): bigint {
-  if (details === undefined) return 0n;
-  const thinking = tokenCount(details.thinking_tokens);
-  const reasoning = tokenCount(details.reasoning_tokens);
-  if (thinking !== undefined && reasoning !== undefined && thinking !== reasoning) {
-    // warn: a defect because the vendor contradicted itself about one response's thinking tokens.
-    LOGGER.warn(
-      { thinking_tokens: Number(thinking), reasoning_tokens: Number(reasoning) },
-      "the vendor's output-token details name two different thinking counts; taking thinking_tokens",
-    );
-  }
-  return thinking ?? reasoning ?? 0n;
 }
 
 // ---------------------------------------------------------------------------

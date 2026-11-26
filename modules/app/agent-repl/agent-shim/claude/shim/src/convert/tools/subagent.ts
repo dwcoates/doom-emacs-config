@@ -36,6 +36,7 @@ import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { prose, settledAt, startedAt } from "../entries.js";
 import { subagentId } from "../ids.js";
+import { thinkingTokens } from "../thinking-tokens.js";
 import type { PendingCall, ToolConverter } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, num, obj, str, uint } from "./support.js";
 
@@ -187,7 +188,7 @@ function usageOf(structured: Record<string, unknown>): conversationv1.TokenUsage
       unwritten: BigInt(uint(usage, "input_tokens") ?? 0),
     }),
     outputTokens: BigInt(uint(usage, "output_tokens") ?? 0),
-    outputThinkingTokens: BigInt(uint(details, "reasoning_tokens") ?? 0),
+    outputThinkingTokens: thinkingTokens(details),
   });
 }
 
