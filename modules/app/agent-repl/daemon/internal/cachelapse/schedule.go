@@ -186,6 +186,10 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if why, capped := k.runCapped(ctx, log, ws, record, queued); capped {
 		return none(noBeatCold, why)
 	}
+	// A SMALL CONTEXT IS NOT KEPT WARM (smallcontext.go), a merge queued or not.
+	if why, small := k.smallContext(ws); small {
+		return none(noBeatCold, why)
+	}
 	// A COLLAPSED SECTION WITHHOLDS NO KEEP-ALIVE (wsm.Workspace.KeptWarm).
 	if !record.KeptWarm(queued) {
 		return none(noBeatCold, "it is backlogged, so it runs no session")

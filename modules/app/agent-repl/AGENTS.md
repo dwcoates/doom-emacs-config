@@ -3602,6 +3602,11 @@ pids, the views told, the roster republished):
   shim judging a beat's cache lapsed, mark the row (`cache_cold_turn_at`,
   `wsm.Workspace.CacheKnownCold`), and no keep-alive is owed until a real
   turn closes after the mark.
+  A SMALL CONTEXT IS NOT KEPT WARM (owner request, 2026-11-26): a workspace
+  whose context, as the topbar chip states it, is at or below 80k tokens
+  (`cachelapse.SmallContextTokens`) owes no keep-alive, since the rewrite a beat
+  protects against costs less than the beat; zero means none reported, which
+  is kept warm.
 - A SETTINGS VISIT: the switch away from a model, permission-mode or effort
   pick that started a shim (`drain.Controller.VisitDown`).
 - A WITHHELD WORKSPACE: backlogged, collapsed or closed (`drain/withheld.go`).

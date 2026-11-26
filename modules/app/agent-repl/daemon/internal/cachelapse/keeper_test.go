@@ -448,6 +448,9 @@ type harness struct {
 	// from it is served by none.
 	shims   map[ids.WorkspaceID]*fakeShim
 	serving bool
+	// contextTokens is the context every workspace's chip states; zero in a
+	// literal harness is replaced by a context above SmallContextTokens.
+	contextTokens int64
 	// gate, when set, is the cold facts of the workspace's standing cold gate.
 	gate       *conversationv1.SessionCold
 	standDowns *fakeStandDowns
@@ -565,6 +568,8 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		telemetry:  &fakeTelemetry{},
 		faults:     &fakeFaults{},
 		why:        sessionwhy.NewTable(),
+		// A context well above the small-context line: every other case keeps warm.
+		contextTokens: 2 * SmallContextTokens,
 	}
 	keeper, err := New(Deps{
 		DB:  h.db,
@@ -582,6 +587,8 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		ColdGate: func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 			return h.gate, h.gate != nil
 		},
+		ContextTokens: func(ids.WorkspaceID) int64 { return h.contextTokens },
+		SmallContext:  SmallContextTokens,
 		Hold: func(ws ids.WorkspaceID) wsm.ShimHold {
 			if h.hold != nil {
 				return h.hold(ws)
