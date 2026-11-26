@@ -121,6 +121,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		if armChanged {
 			r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 			r.noteStatusChange(rec.ID, s, !mirrored)
+			if r.armChanges != nil {
+				r.pendingArms = append(r.pendingArms, armChange{ws: rec.ID, arm: armName, tone: r.colors.RosterStatus[armName]})
+			}
 			if departureArm(armName) {
 				r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
 			}

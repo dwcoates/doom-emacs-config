@@ -518,6 +518,12 @@ type ViewedSink func(ws ids.WorkspaceID, arm string)
 // in the same report, and returns at once just as the ResultSink does.
 type StatusChangeSink func(ws ids.WorkspaceID, at time.Time)
 
+// ArmSink is told every move of a workspace's published status arm, with the
+// arm's canonical color name (render-colors.json's `roster_status`). It is
+// called off the resolver's lock, in the same report as the StatusChangeSink,
+// and returns at once.
+type ArmSink func(ws ids.WorkspaceID, arm, tone string)
+
 // Option adjusts the resolver.
 type Option func(*resolver)
 
@@ -541,6 +547,11 @@ func WithQuiet(g *viewquiet.Gate) Option {
 // WithViewedSink installs the sink the resolver tells its viewed changes.
 func WithViewedSink(sink ViewedSink) Option {
 	return func(r *resolver) { r.viewedChanges = sink }
+}
+
+// WithArmSink installs the sink the resolver tells every arm move.
+func WithArmSink(sink ArmSink) Option {
+	return func(r *resolver) { r.armChanges = sink }
 }
 
 // WithStatusChangeSink installs the sink the resolver tells its status changes.

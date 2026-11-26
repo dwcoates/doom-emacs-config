@@ -38,14 +38,18 @@ func at(d time.Duration) *time.Time {
 
 // testColors is the render-colors double: every roster_status arm painted and
 // every merge arm glyphed, which is exactly what the resolver asserts. The
-// values are irrelevant — the resolver reads the tables' KEYS, never a color —
-// and the keys are read off the proto's own oneof, so the double never keeps a
-// second list of the arms.
+// resolver draws no color itself; it hands each arm's color, unread, to the
+// arm sink (WithArmSink), so each arm is painted its own testTone and a
+// test sees exactly which color was handed. The keys are read off the proto's
+// own oneof, so the double never keeps a second list of the arms.
+// testTone is the color the double paints ARM.
+func testTone(arm string) string { return "tone-of-" + arm }
+
 func testColors() vocab.RenderColors {
 	status := map[string]string{}
 	glyphs := map[string]string{}
 	for _, arm := range vocab.RosterStatusArms() {
-		status[arm] = "grey"
+		status[arm] = testTone(arm)
 		if vocab.IsMergeArm(arm) {
 			glyphs[arm] = "merge"
 		}

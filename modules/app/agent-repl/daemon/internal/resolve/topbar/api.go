@@ -25,6 +25,7 @@
 package topbar
 
 import (
+	workspacev1 "agentrepl/proto/workspace/v1"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -208,6 +209,13 @@ type Resolver interface {
 	// summary retracts it. Its sole producer is the summary keeper
 	// (wssummary.Keeper).
 	SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary)
+	// SetClosedChildren installs PARENT's children that are NOT open WHOLE,
+	// the one that stopped being open most recently first: the menu a click
+	// on the summary drops (TopbarTitle.child_menu). Empty retracts the
+	// menu. Its sole producer is the children tracker (internal/children),
+	// which hands every open child to the footer instead, so a child is
+	// drawn in exactly one of the two.
+	SetClosedChildren(parent ids.WorkspaceID, children []ClosedChild)
 	// SetLinks installs the links the workspace name's menu shows, most
 	// recently set first, which the name carries for a click to open
 	// (TopbarWorkspaceName.links). Empty clears them. Its sole producer is the
@@ -387,4 +395,18 @@ type Link struct {
 	// (wsm.WorkspaceLink.Subscribed). A menu row draws it as its
 	// "subscribed" badge.
 	Subscribed bool
+}
+
+// ClosedChild is one child of a parent that is not open, as the summary's
+// click menu draws it.
+type ClosedChild struct {
+	// Ref is the child, echoed on a click that selects (and reopens) it.
+	Ref *workspacev1.WorkspaceRef
+	// Name is the child's workspace name.
+	Name string
+	// ShortSummary is the child's short summary, empty when it never set one.
+	ShortSummary string
+	// Merged reports that the child landed; it closed without landing
+	// otherwise.
+	Merged bool
 }

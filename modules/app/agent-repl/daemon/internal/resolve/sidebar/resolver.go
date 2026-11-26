@@ -94,6 +94,14 @@ type core struct {
 	// the lock is released.
 	pendingStatusChanges []statusChange
 
+	// armChanges is told every move of a workspace's published status arm,
+	// with the arm's canonical color, so the children tracker draws a child
+	// exactly as its row (internal/children). nil tells nobody.
+	armChanges ArmSink
+	// pendingArms are the arm moves a render found, reported after the lock
+	// is released.
+	pendingArms []armChange
+
 	// visibilities is told every change of a workspace's visibility, so the
 	// daemon keeps it durable (wsm.SetVisibilities). nil tells nobody.
 	visibilities VisibilitySink
@@ -196,6 +204,14 @@ type departure struct {
 type statusChange struct {
 	ws ids.WorkspaceID
 	at time.Time
+}
+
+// armChange is one move of a workspace's published status arm, with its
+// canonical color.
+type armChange struct {
+	ws   ids.WorkspaceID
+	arm  string
+	tone string
 }
 
 // newResolver builds the resolver, asserting the render-colors tables against
@@ -460,12 +476,14 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 		results:       r.pendingResults,
 		viewed:        r.pendingViewed,
 		statusChanges: r.pendingStatusChanges,
+		arms:          r.pendingArms,
 		visibilities:  r.pendingVisibilities,
 		shimHolds:     r.pendingShimHolds,
 	}
 	r.pendingResults = nil
 	r.pendingViewed = nil
 	r.pendingStatusChanges = nil
+	r.pendingArms = nil
 	r.pendingVisibilities = nil
 	r.pendingShimHolds = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
@@ -538,6 +556,11 @@ func (r *resolver) report(batch []*mutation, out batchOutcome) {
 	}
 	for _, change := range out.statusChanges {
 		r.statusChanges(change.ws, change.at)
+	}
+	if r.armChanges != nil {
+		for _, change := range out.arms {
+			r.armChanges(change.ws, change.arm, change.tone)
+		}
 	}
 	if len(out.visibilities) > 0 {
 		r.visibilities(out.visibilities)

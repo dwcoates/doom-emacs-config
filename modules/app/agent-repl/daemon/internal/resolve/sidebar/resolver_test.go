@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1354,5 +1355,62 @@ func TestTheCurrentWorkspaceStatesItsDepartureLanding(t *testing.T) {
 				t.Fatalf("departure landing = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// armReport is one move the arm sink was told.
+type armReport struct {
+	ws        ids.WorkspaceID
+	arm, tone string
+}
+
+// armSinkResolver builds a live resolver of one ready workspace whose arm
+// moves it records, the bring-up's own dropped.
+func armSinkResolver(t *testing.T) (sidebar.Resolver, func() []armReport) {
+	t.Helper()
+	var mu sync.Mutex
+	var reports []armReport
+	r, _ := newResolver(t, sidebar.WithArmSink(func(ws ids.WorkspaceID, arm, tone string) {
+		mu.Lock()
+		defer mu.Unlock()
+		reports = append(reports, armReport{ws: ws, arm: arm, tone: tone})
+	}))
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	mu.Lock()
+	reports = nil
+	mu.Unlock()
+	return r, func() []armReport {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]armReport(nil), reports...)
+	}
+}
+
+func TestTheArmSinkIsToldEachArmMoveWithItsCanonicalColor(t *testing.T) {
+	// Arrange.
+	r, reports := armSinkResolver(t)
+
+	// Act: the arm moves from ready to submitting.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert.
+	want := armReport{ws: theWS, arm: "submitting", tone: testTone("submitting")}
+	if got := reports(); len(got) != 1 || got[0] != want {
+		t.Fatalf("reports = %+v, want the one move %+v", got, want)
+	}
+}
+
+func TestTheArmSinkIsToldNothingWhenNoArmMoves(t *testing.T) {
+	// Arrange.
+	r, reports := armSinkResolver(t)
+
+	// Act: a change that moves no arm.
+	r.SetSummary(theWS, "a summary line")
+
+	// Assert.
+	if got := reports(); len(got) != 0 {
+		t.Fatalf("reports = %+v, want none", got)
 	}
 }
