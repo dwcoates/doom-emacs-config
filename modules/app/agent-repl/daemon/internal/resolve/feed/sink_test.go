@@ -1,11 +1,13 @@
 package feed
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 )
 
@@ -346,4 +348,101 @@ func TestARowOwedByADeadTurnKeepsThatTurnsStamp(t *testing.T) {
 		return
 	}
 	t.Fatalf("rows = %+v, want the denied ask's row", h.rows(rootFeed()))
+}
+
+// TestANamingOfTheMainAgentIsRecordedByWhyItChanged pins that a new main agent
+// on a NEW conversation (NoteFreshBook) is an expected replacement recorded at
+// INFO, and that only a change on the same conversation is a rename at WARN.
+// The harness has already named agent-main.
+func TestANamingOfTheMainAgentIsRecordedByWhyItChanged(t *testing.T) {
+	agent := func(id string) *conversationv1.AgentId { return &conversationv1.AgentId{Value: id} }
+	tests := []struct {
+		name          string
+		arrange       func(h *harness)
+		named         *conversationv1.AgentId
+		wantLevel     string
+		wantOperation string
+		wantContext   map[string]any
+	}{
+		{
+			name:          "the same agent named again is a naming",
+			named:         mainAgent(),
+			wantLevel:     "debug",
+			wantOperation: "daemon.feed.main_agent",
+			wantContext:   map[string]any{"agent": "agent-main"},
+		},
+		{
+			name:          "a new conversation's new agent replaces the standing one",
+			arrange:       func(h *harness) { h.resolver.NoteFreshBook(testWorkspace) },
+			named:         agent("agent-fresh"),
+			wantLevel:     "info",
+			wantOperation: "daemon.feed.main_agent_new_conversation",
+			wantContext:   map[string]any{"agent": "agent-fresh", "previous_agent": "agent-main"},
+		},
+		{
+			name:          "a different agent on the same conversation is a rename",
+			named:         agent("agent-other"),
+			wantLevel:     "warn",
+			wantOperation: "daemon.feed.main_agent_renamed",
+			wantContext:   map[string]any{"agent": "agent-other", "previous_agent": "agent-main", "new_conversation": false},
+		},
+		{
+			name: "a new conversation accounts for one naming only",
+			arrange: func(h *harness) {
+				h.resolver.NoteFreshBook(testWorkspace)
+				h.resolver.OnMainAgent(testWorkspace, agent("agent-fresh"))
+			},
+			named:         agent("agent-other"),
+			wantLevel:     "warn",
+			wantOperation: "daemon.feed.main_agent_renamed",
+			wantContext:   map[string]any{"agent": "agent-other", "previous_agent": "agent-fresh"},
+		},
+		{
+			name: "a new conversation renaming the same agent spends its account",
+			arrange: func(h *harness) {
+				h.resolver.NoteFreshBook(testWorkspace)
+				h.resolver.OnMainAgent(testWorkspace, mainAgent())
+			},
+			named:         agent("agent-other"),
+			wantLevel:     "warn",
+			wantOperation: "daemon.feed.main_agent_renamed",
+			wantContext:   map[string]any{"agent": "agent-other", "previous_agent": "agent-main"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tc.arrange != nil {
+				tc.arrange(h)
+			}
+			before := len(h.records())
+
+			// Act.
+			h.resolver.OnMainAgent(testWorkspace, tc.named)
+
+			// Assert.
+			var records []dlog.Record
+			for _, record := range h.records()[before:] {
+				if strings.HasPrefix(record.Operation, "daemon.feed.main_agent") {
+					records = append(records, record)
+				}
+			}
+			if len(records) != 1 {
+				t.Fatalf("records = %+v, want one naming record", records)
+			}
+			got := records[0]
+			if got.Level != tc.wantLevel || got.Operation != tc.wantOperation {
+				t.Fatalf("record = %s %s, want %s %s", got.Level, got.Operation, tc.wantLevel, tc.wantOperation)
+			}
+			for key, want := range tc.wantContext {
+				if got.Context[key] != want {
+					t.Fatalf("context[%q] = %v, want %v (record %+v)", key, got.Context[key], want, got)
+				}
+			}
+			if gotMain := h.resolver.mainAgentID(testWorkspace).GetValue(); gotMain != tc.named.GetValue() {
+				t.Fatalf("main agent = %q, want %q", gotMain, tc.named.GetValue())
+			}
+		})
+	}
 }

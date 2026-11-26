@@ -398,20 +398,31 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 
 // OnMainAgent records the session's main agent: the one agent whose rows are
 // the root feed's. It draws nothing.
+//
+// A NEW CONVERSATION'S NAMING REPLACES THE STANDING MAIN AGENT AS EXPECTED: a
+// fresh start or a fork (NoteFreshBook) is a new conversation, and its main
+// agent is a new one. Only a different main agent named on the SAME
+// conversation is a rename, which nothing in the daemon accounts for.
 func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId) {
 	r.prime(ws)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	if s.mainAgent != "" && s.mainAgent != agent.GetValue() {
-		r.logger(ws).Warn("daemon.feed.main_agent_renamed",
-			"the session's main agent was renamed; the root feed now holds the new agent's rows",
-			dlog.Context{"previous_agent": s.mainAgent, "agent": agent.GetValue()})
-	} else {
+	switch {
+	case s.mainAgent == "" || s.mainAgent == agent.GetValue():
 		r.logger(ws).Debug("daemon.feed.main_agent",
 			"the session's main agent was named for the root feed",
-			dlog.Context{"agent": agent.GetValue()})
+			dlog.Context{"agent": agent.GetValue(), "new_conversation": s.newConversation})
+	case s.newConversation:
+		r.logger(ws).Info("daemon.feed.main_agent_new_conversation",
+			"the session came up on a new conversation, so the root feed now holds its new main agent's rows",
+			dlog.Context{"previous_agent": s.mainAgent, "agent": agent.GetValue()})
+	default:
+		r.logger(ws).Warn("daemon.feed.main_agent_renamed",
+			"the session's main agent was renamed with no new conversation noted; the root feed now holds the new agent's rows",
+			dlog.Context{"previous_agent": s.mainAgent, "agent": agent.GetValue(), "new_conversation": false})
 	}
+	s.newConversation = false
 	s.mainAgent = agent.GetValue()
 	// A SESSION THE STORE NAMED AS AN END OF A CROSS-SESSION MESSAGE is now
 	// known to be this workspace, so every row waiting to name it is drawn

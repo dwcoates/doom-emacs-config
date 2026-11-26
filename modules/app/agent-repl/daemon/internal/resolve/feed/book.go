@@ -580,6 +580,7 @@ func (r *resolver) NoteFreshBook(ws ids.WorkspaceID) {
 	f.book.after = nil
 	f.book.gapAfter, f.book.gapFloor = nil, ""
 	f.book.awaitingSource = false
+	s.newConversation = true
 	r.logger(ws).Info("daemon.feed.fresh_book",
 		"the session comes up on a new conversation; its book is known empty, so no reader's open asks the store for it",
 		dlog.Context{"feed": f.key})
