@@ -117,3 +117,46 @@ E2E: one scenario where a workspace creates a one-shot child from its own
 branch, and the child lands. The parent's feed shows the child bubble going
 from an open border to merged with no border, its footer panel empties, and
 its summary menu lists the child.
+
+## Progress notes
+
+These notes are for whoever picks this up after a compaction. Read the git
+log of the branch first.
+
+- Done, compiling
+  - A1, the CLI and server, except `internal/server/*` callers
+  - `internal/wsm`
+    - `wsm.LandingEffects` replaces `wsm.MergeOrigin`, as `Workspace.Effects`
+      and `RegisterFacts.Effects`. Its columns are `landing_close_after`,
+      `landing_cleanup_dir`, `landing_compact_requester` and
+      `landing_profile_gate`.
+    - Layout 221, `retiredasyncmerges.go`, drops the async tables and
+      columns and the stored rows' retired fields.
+    - `MergeSource` lost every `Detach*`, `Pick*`, `CompactAfter`,
+      `CloseOnLanding`, `Cleanup*` and `Hooks` field.
+    - The historical DDL constants stay in their old files for the
+      migrations.
+  - The feed resolver (turn mirror gone), the footer (the merges panel is
+    replaced by `footer.SetOpenChildren` in `children.go`), and the sidebar
+    (async marker and queue mode gone, and `QueueEntry` has no
+    `Credited`/`Async`).
+  - The prompt queue's turn mirror is gone.
+- In progress: `internal/merge`
+  - `asyncrequests.go` and `pick.go` are deleted, and `request.go` is
+    cleaned.
+  - Still to do: `api.go` (`DetachedRun`, `Names.ClaimMergeName`,
+    `DetachedMerges`, `RevealMergeWorkspace`), `orchestrator.go` (asyncWaits,
+    picks), `queue.go`, `terminal.go`, `rosterqueue.go`, `offqueue.go` and
+    `tabs.go`.
+- The decision on `internal/mergeworkspace`
+  - The package is deleted.
+  - The in-place handback, a failed one-shot telling itself, moves to a new
+    small package.
+  - A one-shot child's landing reaches its parent through the existing
+    child "one update" (the `landed` workspace event, `wsm.ParentFollowedEvents`
+    and the `workspace-child-notice.md` brief). That notice becomes one
+    line (B2).
+  - `compact_requester_after` is submitted right after that notice is
+    delivered, in the workspace-notice path.
+  - `close_after` and `cleanup_source_worktree` run in the merge terminal,
+    read off the landing workspace's `wsm.LandingEffects`.
