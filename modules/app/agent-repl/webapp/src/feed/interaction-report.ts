@@ -22,6 +22,14 @@
  *
  * A REFUSAL IS RECORDED and changes nothing here: the reader's next gesture
  * reports again. A transport failure is recorded by `callUnary`.
+ *
+ * A HANDOVER ARM IS RECORDED AT INFO, never as a refusal. While a handover
+ * moves the workspace, a report can reach a daemon that does not serve it yet
+ * (`not_yet_adopted`): that is the handover's lifecycle state, which the page
+ * draws on its own (sidebar/handover.ts, `standsAsHandover`), and the
+ * reader's next gesture reports again to whichever daemon serves it then. A
+ * workspace page's `transferring_away` is no quiet state but its terminal
+ * "this workspace moved" notice (rpc/moved.ts), so it stays a refusal.
  */
 import { create } from "@bufbuild/protobuf";
 import {
@@ -32,6 +40,7 @@ import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { callUnary } from "../rpc/unary.js";
 import { READER_INPUTS } from "../scroll.js";
+import { standsAsHandover } from "../sidebar/handover.js";
 
 const log = createLogger("webapp.feed.interaction-report");
 
@@ -44,7 +53,7 @@ const log = createLogger("webapp.feed.interaction-report");
 export const INTERACTION_REPORT_SPACING_MS = 2000;
 
 /** The slice of the page the reporter needs. */
-export type InteractionReportContext = Pick<AppContext, "client" | "failures" | "isQuiesced" | "workspace" | "ticker">;
+export type InteractionReportContext = Pick<AppContext, "client" | "clientAt" | "failures" | "isQuiesced" | "workspace" | "ticker">;
 
 /**
  * Report the reader's input on BOX, the workspace's feed scroll box, as their
@@ -76,11 +85,18 @@ export function installFeedInteractionReport(ctx: InteractionReportContext, box:
         });
         return;
       }
-      const refusal = result.case === "error" ? result.value.cause.case : undefined;
+      const arm = result.case === "error" ? result.value.cause.case : undefined;
+      if (arm !== undefined && standsAsHandover(arm, ctx)) {
+        log.info("the reader's interaction waits on a handover: no daemon serves the workspace yet; the next gesture reports again", {
+          operation: "feed.interaction-handover",
+          context: { input: kind, arm },
+        });
+        return;
+      }
       log.error("the daemon refused the reader's interaction: {refusal}", {
         operation: "feed.interaction-refused",
         context: { input: kind },
-      }, { refusal: String(refusal) });
+      }, { refusal: String(arm) });
     } catch (err) {
       // callUnary owns the failure's record; this notes that the next
       // gesture reports again.
