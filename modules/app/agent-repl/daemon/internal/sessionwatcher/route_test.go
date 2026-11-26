@@ -1708,6 +1708,37 @@ func TestDetachedSubagentSettlesOutOfTheLiveSet(t *testing.T) {
 	}
 }
 
+// TestDetachedSubagentSettledOnItsOwnStreamSettlesOutOfTheLiveSet covers the
+// settle a detached run gets on its OWN stream, under a unit id of that book's
+// own minting (nothing joins it to the spawn unit). The run's terminal empties
+// the live set and the footer is told an empty agent set.
+//
+// The frame REAPS the stream it arrives on, so it is bounded by the stream's
+// end (routeReaping). Routing it with route would send a sentinel into a
+// stream the reap is closing, and that send races the close: it is the
+// "watcher never received the frame" failure this test first showed.
+func TestDetachedSubagentSettledOnItsOwnStreamSettlesOutOfTheLiveSet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("sub-1", subagentWork("sub-1")))})
+	open := h.client.NextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	got := h.routeReaping(open.Stream, entryFrame(frameUpdate("sub-1", activityUpdate(settledSubagentActivity("sub-unit-9", false)))))
+
+	// Assert.
+	if live := h.w.LiveWork(); len(live.Agents) != 0 {
+		t.Fatalf("live work = %v, want no agents once the run settled on its own stream", live.Agents)
+	}
+	told, ok := find(got, "footer.OnLiveWorkChanged")
+	if !ok {
+		t.Fatalf("events = %v, want footer.OnLiveWorkChanged", names(got))
+	}
+	if len(told.live.Agents) != 0 {
+		t.Fatalf("footer was told live agents %v, want an empty set", told.live.Agents)
+	}
+}
+
 // TestFailedDetachedSubagentSettlesOutOfTheLiveSet covers the other terminal
 // arm: a run that ended without reporting is just as settled as one that
 // reported, and holding it live would keep the workspace unfree over work that
