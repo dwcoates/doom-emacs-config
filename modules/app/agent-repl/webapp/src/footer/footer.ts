@@ -38,6 +38,11 @@
  * handed null. It is the reader's, like the open panel, and never reaches the
  * daemon.
  *
+ * THE WORKSPACE'S MOVE STANDS OVER EVERY ACTIVITY LINE (owner request,
+ * 2026-11-25). When the page goes quiet because its workspace moved to a
+ * daemon serving another webapp build, the activity cell says where it went
+ * (src/footer/moved.ts), over the hover stamp too: nothing updates after it.
+ *
  * `onStatus` EXISTS FOR THE COMPOSERS. R7 disables a bubble composer while the
  * footer reads merging, closing or disconnected, and the footer's stream is the
  * one place that fact arrives — so the status ARM is published to subscribers
@@ -89,6 +94,7 @@ import {
 } from "./strip.js";
 import { createStopControls } from "./stop.js";
 import { overlayHoverStamp } from "./hover-stamp.js";
+import { drawMovedActivity, overlayMoved, type WorkspaceMove } from "./moved.js";
 
 const log = createLogger("webapp.footer.footer");
 
@@ -104,6 +110,8 @@ export interface FooterDeps {
   readonly presence: Pick<Presence, "shown" | "onChange" | "embedded">;
   /** The editor's composer notices, drawn as transient lines (editor-notice.ts). */
   readonly editorNotices: Pick<EditorNotices, "current" | "subscribe">;
+  /** Where the workspace moved, drawn as the standing activity line (moved.ts). */
+  readonly workspaceMove: Pick<WorkspaceMove, "current" | "subscribe">;
 }
 
 export interface FooterHandle extends Handle {
@@ -192,6 +200,11 @@ export function mountFooter(
   const unsubscribeFromEditorNotices = deps.editorNotices.subscribe(() => {
     redraw("footer.editor-notice-redraw-undecodable");
   });
+  // THE MOVE ARRIVES WHILE THE PAGE GOES QUIET: no push follows it, so the
+  // move itself redraws.
+  const unsubscribeFromMove = deps.workspaceMove.subscribe(() => {
+    redraw("footer.moved-redraw-undecodable");
+  });
   // THE FIFTH: the hovered bubble's stamp, standing in for the activity
   // line while the pointer is on its bubble (`showHoverStamp`).
   let hovered: HoverStamp | null = null;
@@ -244,6 +257,7 @@ export function mountFooter(
       unsubscribeFromVerdict();
       unsubscribeFromPresence();
       unsubscribeFromEditorNotices();
+      unsubscribeFromMove();
       expiry.cancel();
       watch.cancel();
       // The page's compaction line belongs to the stream that just stopped.
@@ -297,24 +311,34 @@ export function mountFooter(
     // different calls -- so the verdict is lifted by `clearClientFailures`,
     // never by a redraw. See `src/rpc/link.ts`.
     const verdict = standingClientFailure();
+    const movedTo = deps.workspaceMove.current();
     if (view === null) {
       // NOTHING PUSHED YET. With a verdict standing the strip is the client's
-      // three cells alone; without one there is nothing to draw at all.
-      if (verdict === null) return;
+      // three cells alone, and a move alone is its activity cell alone;
+      // without either there is nothing to draw at all.
+      let row: HTMLElement;
+      if (verdict !== null) {
+        row = drawClientDisconnectedStrip(verdict.substatus, verdictActivity(verdict.activity));
+        if (movedTo !== null) overlayMoved(row, movedTo);
+      } else if (movedTo !== null) {
+        row = document.createElement("div");
+        row.className = "pfooter-cells footer-strip";
+        row.appendChild(drawMovedActivity(movedTo));
+      } else {
+        return;
+      }
       const bare = document.createElement("div");
       bare.className = "pfooter";
       bare.setAttribute("role", "status");
       bare.setAttribute("aria-live", "polite");
-      bare.setAttribute("data-client-verdict", verdict.kind);
-      bare.appendChild(
-        drawClientDisconnectedStrip(verdict.substatus, verdictActivity(verdict.activity)),
-      );
+      if (verdict !== null) bare.setAttribute("data-client-verdict", verdict.kind);
+      bare.appendChild(row);
       stopTicking(host);
       host.replaceChildren(bare);
       dock = null;
       section = null;
       shown = null;
-      drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
+      if (verdict !== null) drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
       return;
     }
     const strip = requireMessage(view.strip, "FooterView.strip");
@@ -357,7 +381,8 @@ export function mountFooter(
             strip,
             deps: stripDeps,
           });
-    if (hovered !== null) overlayHoverStamp(stripEl, hovered, ctx.ticker);
+    if (movedTo !== null) overlayMoved(stripEl, movedTo);
+    else if (hovered !== null) overlayHoverStamp(stripEl, hovered, ctx.ticker);
 
     const target = dock ?? createDock();
     if (verdict !== null)

@@ -24,8 +24,8 @@
  * address (the handover's promotion), and the page attaches once, there, and
  * resumes its feed (docs/protobuf-design/feed-resume.md). Re-homing at the
  * adoption instead moved every stream twice, and redrew the feed twice. On a
- * daemon serving another build it draws the standing "workspace moved" notice
- * and quiesces, because that daemon's frames carry fields this build has no
+ * daemon serving another build it hands the move to the footer, whose activity
+ * line says "workspace moved to <address>" (src/footer/moved.ts), and quiesces, because that daemon's frames carry fields this build has no
  * descriptor for; the deploy's one host reload then brings the page onto that
  * build.
  *
@@ -36,11 +36,12 @@
  * rendezvous and is retried with backoff; every other arm is a boot failure,
  * because a page that cannot be adopted cannot honestly show a workspace.
  *
- * THE BANNER IS ONE HOST WITH THREE STANDING NOTICES, in precedence order:
- * moved (terminal — nothing follows it), restarting (an announced outage), and
- * the scheduled drain. They share a host because they are the same sentence to
- * the reader — "this page's daemon is going away" — at three distances, and two
- * of them stacked would read as two separate restarts.
+ * THE BANNER IS ONE HOST WITH TWO STANDING NOTICES, in precedence order:
+ * restarting (an announced outage) and the scheduled drain. They share a host
+ * because they are the same sentence to the reader — "this page's daemon is
+ * going away" — at two distances, and the two stacked would read as two
+ * separate restarts. THE MOVE IS NOT A BANNER (owner request, 2026-11-25): it
+ * is the footer's activity line, and a page gone quiet draws no banner at all.
  *
  * THE PAGE'S LOG IDENTITY COMES FROM THE LINK STREAM (landing 15). A browser
  * has no durable sink, so every diagnostic this page raises is written by the
@@ -82,6 +83,7 @@ import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
 import type { RevealRelay } from "./reveal-relay.js";
 import type { PromptEcho } from "../prompt-echo.js";
+import type { WorkspaceMove } from "../footer/moved.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 import { readWebappBuild } from "../webapp-build.js";
@@ -107,6 +109,8 @@ export interface LifecycleDeps {
    * flight (`data-deploying`, styles.css). A deploy draws no banner.
    */
   deployPulseHost: HTMLElement;
+  /** Where a move to another webapp build is drawn: the footer's activity line. */
+  workspaceMove: Pick<WorkspaceMove, "moved">;
 }
 
 /** The adoption retry shape, injected by tests running on fake timers. */
@@ -179,10 +183,11 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   // refusal that says the same thing start one adoption between them.
   let moving = false;
   const goQuiet = (address: string): void => {
-    // THE TERMINAL STATE. The notice goes up first, so the reader has the
-    // successor's address in front of them before every stream on the page
-    // stops; quiescing after it means nothing can redraw over it.
-    banner.showMoved(address);
+    // THE TERMINAL STATE. The footer's line goes up first, so the reader has
+    // the successor's address in front of them before every stream on the
+    // page stops; the banner's notices come down, since nothing follows them.
+    deps.workspaceMove.moved(address);
+    banner.goQuiet();
     ctx.quiesce();
   };
   const onMoved = (address: string): void => {
@@ -400,8 +405,8 @@ export function quietWindowMs(announced: DaemonShutdownAnnounced, nowMs: number)
 // ---------------------------------------------------------------------------
 
 export interface BannerHandle {
-  /** The terminal notice: this workspace lives on ADDRESS now. */
-  showMoved(address: string): void;
+  /** The terminal state: the page went quiet, so no notice and no pulse stand. */
+  goQuiet(): void;
   /** An announced outage, expected to end at UNTILMS. */
   showRestarting(announced: DaemonShutdownAnnounced, untilMs: number): void;
   /** Take the restarting notice down (the daemon is answering again). */
@@ -416,16 +421,16 @@ export interface BannerHandle {
 /**
  * The banner host, owning at most one notice.
  *
- * Precedence is fixed rather than last-write-wins: `moved` is terminal and
- * nothing may draw over it, and an announced restart is nearer than a schedule
- * that has not fired.
+ * Precedence is fixed rather than last-write-wins: a quiet page draws nothing
+ * ever again, and an announced restart is nearer than a schedule that has not
+ * fired.
  */
 export function mountBanner(
   host: HTMLElement,
   ctx: AppContext,
   onDeploying: (deploying: boolean) => void = () => {},
 ): BannerHandle {
-  let moved: string | null = null;
+  let quiet = false;
   let restarting: { announced: DaemonShutdownAnnounced; untilMs: number } | null = null;
   let drain: DaemonDrainScheduled | null = null;
   /** The ticker subscription the CURRENT notice owns. */
@@ -435,15 +440,15 @@ export function mountBanner(
     untick?.();
     untick = null;
     // A DEPLOY DRAWS NO BANNER: the sidebar title's pulse says it instead, for
-    // exactly as long as the deploy's restart or drain stands. `moved` is
-    // terminal and the page is going away, so the pulse stops with it.
+    // exactly as long as the deploy's restart or drain stands. A quiet page is
+    // going away, so the pulse stops with it.
     const deploying =
-      moved === null &&
+      !quiet &&
       ((restarting !== null && isDeployShutdown(restarting.announced)) ||
         (drain !== null && isDeployDrain(drain)));
     onDeploying(deploying);
-    if (moved !== null) {
-      host.replaceChildren(drawMovedNotice(moved));
+    if (quiet) {
+      host.replaceChildren();
       return;
     }
     if (restarting !== null && !isDeployShutdown(restarting.announced)) {
@@ -466,8 +471,8 @@ export function mountBanner(
   redraw();
 
   return {
-    showMoved(address: string): void {
-      moved = address;
+    goQuiet(): void {
+      quiet = true;
       redraw();
     },
     showRestarting(announced: DaemonShutdownAnnounced, untilMs: number): void {
@@ -497,7 +502,7 @@ export function mountBanner(
     dispose(): void {
       untick?.();
       untick = null;
-      moved = null;
+      quiet = false;
       restarting = null;
       drain = null;
       host.replaceChildren();
@@ -534,29 +539,14 @@ export function isDeployShutdown(announced: DaemonShutdownAnnounced): boolean {
   }
 }
 
-/** The base element every notice wears, so the three read as one register. */
+/** The base element every notice wears, so the two read as one register. */
 function notice(): HTMLElement {
   const element = document.createElement("div");
   element.className = "lifecycle-banner";
   element.setAttribute("role", "status");
   // Every notice in this host says a restart is in play, near or far, so the
-  // integration suite's one marker covers all three.
+  // integration suite's one marker covers both.
   element.setAttribute("data-restarting", "");
-  return element;
-}
-
-/**
- * "workspace moved to 127.0.0.1:8123" — the terminal notice.
- *
- * The address is drawn because it is the ONE fact the reader may need: if the
- * host does not reload the view, this is what tells them (or whoever debugs it)
- * where the workspace actually went.
- */
-export function drawMovedNotice(address: string): HTMLElement {
-  const element = notice();
-  element.classList.add("lifecycle-moved");
-  element.setAttribute("data-moved", address);
-  element.textContent = `workspace moved to ${address}`;
   return element;
 }
 

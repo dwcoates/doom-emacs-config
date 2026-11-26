@@ -41,7 +41,6 @@ import {
   classifyAdoptionRefusal,
   drainReasonText,
   drawDrainNotice,
-  drawMovedNotice,
   drawRestartingNotice,
   mountBanner,
   quietWindowMs,
@@ -52,6 +51,7 @@ import {
   type LifecycleDeps,
 } from "../../src/lifecycle/lifecycle.js";
 import type { PromptEcho } from "../../src/prompt-echo.js";
+import { createWorkspaceMove, type WorkspaceMove } from "../../src/footer/moved.js";
 import { WebWorkspaceSessionIdentitySchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { createLogger } from "../../src/log.js";
 import { captureLogRecords, forwardedRecords, recordFor } from "../log-capture.js";
@@ -217,22 +217,6 @@ describe("quietWindowMs", () => {
       mintedAtMs: NOW,
     });
     expect(quietWindowMs(a, NOW + 20_000)).toBe(0);
-  });
-});
-
-describe("drawMovedNotice", () => {
-  it("names the successor's address, the one fact the reader may need", () => {
-    expect(drawMovedNotice("127.0.0.1:8123").textContent).toBe(
-      "workspace moved to 127.0.0.1:8123",
-    );
-  });
-
-  it("carries the address as a hook", () => {
-    expect(drawMovedNotice("127.0.0.1:8123").getAttribute("data-moved")).toBe("127.0.0.1:8123");
-  });
-
-  it("wears the standing-restart marker", () => {
-    expect(drawMovedNotice("a:1").hasAttribute("data-restarting")).toBe(true);
   });
 });
 
@@ -405,10 +389,10 @@ describe("mountBanner: a deploy draws no banner, it pulses the sidebar title", (
     expect(states.at(-1)).toBe(false);
   });
 
-  it("stops pulsing once the workspace has moved", () => {
+  it("stops pulsing once the page went quiet", () => {
     const banner = mount();
     banner.showDrain(drain(NOW + 60_000, reason("deploy")));
-    banner.showMoved("127.0.0.1:9");
+    banner.goQuiet();
     expect(states.at(-1)).toBe(false);
   });
 });
@@ -474,11 +458,18 @@ describe("mountBanner", () => {
     expect(host.textContent).toContain("daemon restart scheduled");
   });
 
-  it("lets the moved notice win over everything, since nothing follows it", () => {
+  it("draws no notice once the page went quiet, since nothing follows it", () => {
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showMoved("127.0.0.1:9");
+    banner.goQuiet();
     banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
-    expect(host.textContent).toBe("workspace moved to 127.0.0.1:9");
+    expect(host.children.length).toBe(0);
+  });
+
+  it("takes a standing notice down when the page goes quiet", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showDrain(drain(NOW + 60_000, reason("maintenance")));
+    banner.goQuiet();
+    expect(host.children.length).toBe(0);
   });
 
   it("unsubscribes the previous notice's clock on dispose", () => {
@@ -557,9 +548,9 @@ const NO_DIGEST: Pick<NewsDigestHandle, "apply"> = { apply: () => undefined };
 /** A prompt echo timing that times nothing: these tests are not about it. */
 const NO_ECHO: Pick<PromptEcho, "echoed"> = { echoed: () => undefined };
 
-/** The deps a lifecycle needs, drawing on HOST, with none of them observed. */
-function lifecycleDeps(host: HTMLElement): LifecycleDeps {
-  return { drainBannerHost: host, deployPulseHost: document.createElement("div"), newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO };
+/** The deps a lifecycle needs, drawing on HOST, recording a move on MOVE. */
+function lifecycleDeps(host: HTMLElement, move: WorkspaceMove = createWorkspaceMove()): LifecycleDeps {
+  return { drainBannerHost: host, deployPulseHost: document.createElement("div"), newsDigest: NO_DIGEST, reveals: createRevealRelay(), promptEcho: NO_ECHO, workspaceMove: move };
 }
 
 /** Let the transport's zero-delay frames land without moving the clock. */
@@ -694,7 +685,21 @@ describe("startLifecycle: the handover", () => {
     expect((await forwardedRecords(h)).map((r) => r.operation)).toContain("lifecycle.adopted-in-place");
   });
 
-  it("draws the moved notice naming the successor when the adopting daemon serves another build", async () => {
+  it("hands the move naming the successor to the footer's line when the adopting daemon serves another build", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const move = createWorkspaceMove();
+    const { client } = lifecycleClient({ web: transferred, adopt: adoptedOn("another-build") });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host, move));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(move.current()).toBe("127.0.0.1:8123");
+  });
+
+  it("draws no banner for the move when the adopting daemon serves another build", async () => {
     // ARRANGE
     const host = document.createElement("div");
     const { client } = lifecycleClient({ web: transferred, adopt: adoptedOn("another-build") });
@@ -702,9 +707,23 @@ describe("startLifecycle: the handover", () => {
     // ACT
     const handle = startLifecycle(ctx, lifecycleDeps(host));
     await settle();
-    // ASSERT (before dispose: disposing takes the banner down by design)
-    expect(host.textContent).toBe("workspace moved to 127.0.0.1:8123");
+    // ASSERT (before dispose: disposing empties the banner by design)
+    expect(host.children.length).toBe(0);
     handle.dispose();
+  });
+
+  it("records no move while the adopting daemon serves this page's build", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const move = createWorkspaceMove();
+    const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(host, move));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(move.current()).toBeNull();
   });
 
   it("records the other build at info", async () => {
@@ -1598,11 +1617,14 @@ describe("isDeployHandover", () => {
 });
 
 describe("mountBanner: cancelling what never stood", () => {
-  it("leaves the terminal notice's own element in place when no drain is standing", () => {
+  it("leaves the restart notice's own element in place when no drain is standing", () => {
     // ARRANGE
     const host = document.createElement("div");
     const banner = mountBanner(host, bannerContext(fakeTicker()));
-    banner.showMoved("127.0.0.1:9");
+    banner.showRestarting(
+      announced({ cause: { kind: { case: "selfMergeRollout", value: {} } }, outageMs: 8000, mintedAtMs: NOW }),
+      NOW + 8000,
+    );
     const drawn = host.firstElementChild;
     // ACT: no schedule was ever shown, so this must not redraw the host.
     banner.clearDrain();

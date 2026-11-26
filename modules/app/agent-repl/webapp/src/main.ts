@@ -81,6 +81,7 @@ import { installTextAffordances, startPageRuntime } from "./document-runtime.js"
 import { watchShownEdge } from "./host/shown-edge.js";
 import { createEditorIngressView } from "./held/editor-ingress.js";
 import { createEditorNotices, type EditorNotices } from "./footer/editor-notice.js";
+import { createWorkspaceMove, type WorkspaceMove } from "./footer/moved.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { pageQuiet } from "./quiet.js";
@@ -301,7 +302,10 @@ export async function boot(): Promise<void> {
     // merge's bubble here) can arrive before the feed below is mounted; the
     // relay holds it until the feed binds its reveal.
     const reveals = createRevealRelay();
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals, promptEcho });
+    // WHERE THE WORKSPACE MOVED, which the lifecycle records and the footer
+    // draws as its activity line (footer/moved.ts).
+    const workspaceMove = createWorkspaceMove();
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, deployPulseHost: shell.sidebar, newsDigest, reveals, promptEcho, workspaceMove });
 
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
@@ -409,7 +413,7 @@ export async function boot(): Promise<void> {
       shell.footer.hidden = true;
       log.info("a chat thread's page mounts no footer", { operation: "main.thread-no-footer" });
     } else {
-      mountWorkspaceFooter(shell, ctx, workspaceFeed, gate, editorNotices);
+      mountWorkspaceFooter(shell, ctx, workspaceFeed, gate, editorNotices, workspaceMove);
       // A WORKSPACE'S NAME IN A RESPONSE'S TREE SWITCHES TO IT
       // (feed/workspace-mentions.ts): the daemon serves the names, every push
       // re-links the response trees already drawn, and a click selects.
@@ -444,11 +448,13 @@ function mountWorkspaceFooter(
   feed: { selectDetachedWork(id: FeedId): Promise<boolean> },
   gate: ReturnType<typeof createComposerGate>,
   editorNotices: EditorNotices,
+  workspaceMove: WorkspaceMove,
 ): void {
   const footer = mountFooter(shell.footer, ctx, {
     selectDetachedWork: (id) => feed.selectDetachedWork(id),
     presence: pagePresence(),
     editorNotices,
+    workspaceMove,
   });
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
   // 2026-10-25): the bubble draws no figure of its own, and the footer's

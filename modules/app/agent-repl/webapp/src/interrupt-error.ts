@@ -18,7 +18,7 @@
  * THAT DELEGATION IS LOAD-BEARING, NOT TIDINESS. This file used to spell those
  * four out itself, in the same words, which made it the second implementation
  * the one-hook rule exists to prevent: the hook is also what RAISES the
- * page-wide "workspace moved" notice on `transferring_away`, so a stop refused
+ * "workspace moved" footer line on `transferring_away`, so a stop refused
  * with that arm drew a sentence beside the stop button and left the rest of the
  * page looking live while nothing it showed could still be true. Whether the
  * reader learned their workspace had moved depended on which button they
