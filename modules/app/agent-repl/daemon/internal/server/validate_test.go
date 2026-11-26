@@ -597,26 +597,6 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 					Prompt: workspace.SaidText("fix the feed"), Relationship: peerRelationship(), Context: &agentreplv1.CreateWorkspaceOneShotContext{}}}
 			}))
 		}, field: "one_shot.context.workspace"},
-		{name: "an async merge the user asks for", check: func() *connect.Error {
-			req := validAsyncMerge(nil)
-			req.Requester = userRequester()
-			return validateCreateWorkspaceRequest(req)
-		}, field: "requester"},
-		{name: "an async merge naming a model", check: func() *connect.Error {
-			req := validAsyncMerge(nil)
-			req.Model = strPtr("opus")
-			return validateCreateWorkspaceRequest(req)
-		}, field: "model"},
-		{name: "an async merge naming a slack origin", check: func() *connect.Error {
-			req := validAsyncMerge(nil)
-			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}
-			return validateCreateWorkspaceRequest(req)
-		}, field: "slack_origin"},
-		{name: "an async merge asking to be born backlogged", check: func() *connect.Error {
-			req := validAsyncMerge(nil)
-			req.Backlogged = boolPtr(true)
-			return validateCreateWorkspaceRequest(req)
-		}, field: "backlogged"},
 		{name: "create with a placement naming no target", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Placement = &agentreplv1.CreateWorkspacePlacement{}
@@ -635,11 +615,6 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 		}, field: "originator"},
 		{name: "an emoji-ack create naming no slack message", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Originator = emojiAckOriginator() }))
-		}, field: "originator.emoji_ack"},
-		{name: "an emoji-ack async merge", check: func() *connect.Error {
-			req := validAsyncMerge(nil)
-			req.Originator = emojiAckOriginator()
-			return validateCreateWorkspaceRequest(req)
 		}, field: "originator.emoji_ack"},
 		{name: "create with a builtin deploy hook", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
@@ -660,34 +635,6 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 				r.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1"}
 			}))
 		}, field: "slack_origin.thread_url"},
-		{name: "an async merge with no name", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Name = " " }))
-		}, field: "async_merge.name"},
-		{name: "an async merge with no branch", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Source.Branch = "" }))
-		}, field: "async_merge.source.branch"},
-		{name: "an async merge with no maker", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Source.Maker = nil }))
-		}, field: "async_merge.source.maker"},
-		{name: "an async merge of a subagent naming none", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) {
-				a.Source.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{}}}
-			}))
-		}, field: "async_merge.source.maker.subagent.agent_id"},
-		{name: "an async merge with no target", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Target = nil }))
-		}, field: "async_merge.target"},
-		{name: "an async merge with a blank instruction", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Instruction = strPtr(" ") }))
-		}, field: "async_merge.instruction"},
-		{name: "an async merge closing a workspace with no ref", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) {
-				a.CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{}
-			}))
-		}, field: "async_merge.close_after.workspace"},
-		{name: "an async merge with no placement", check: func() *connect.Error {
-			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Placement = nil }))
-		}, field: "async_merge.placement"},
 		{
 			name: "set priority with no workspace",
 			check: func() *connect.Error {
@@ -945,7 +892,6 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{Id: "ws-other"})
 			}))
 		}},
-		{name: "create an async merge", check: func() *connect.Error { return validateCreateWorkspaceRequest(validAsyncMerge(nil)) }},
 		{name: "create with a prompt post-deploy hook", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.GetStandard().DeployHooks = &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: []*repoconfigv1.Hook{{Hook: &repoconfigv1.Hook_Prompt{Prompt: &repoconfigv1.HookPrompt{Text: "announce the deploy"}}}}}

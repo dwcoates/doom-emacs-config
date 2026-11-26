@@ -33,7 +33,7 @@ func aQueue() merge.QueueStatus {
 	return merge.QueueStatus{
 		Repository: wsm.Repository{ID: "repo-1", Dir: "/repo"},
 		Queue: merge.QueueSnapshot{Paused: true, Members: []merge.QueueMember{
-			{Workspace: "ws-merge", Name: "merge", Branch: "agent/merge", Started: true, Requester: "ws-asker", Step: footer.StepTesting},
+			{Workspace: "ws-merge", Name: "merge", Branch: "agent/merge", Started: true, Step: footer.StepTesting},
 			{Workspace: "ws-own", Name: "own", Branch: "agent/own", Front: true},
 		}},
 	}
@@ -60,11 +60,11 @@ func TestGetMergeQueueStatusRendersEachQueue(t *testing.T) {
 		t.Fatalf("entries = %v, want two", entries)
 	}
 	running, waiting := entries[0], entries[1]
-	if running.GetKind().GetAsyncMerge().GetRequester().GetId() != "ws-asker" || running.GetStage().GetRunning().GetStepDescription() != footer.StepTesting.Words() {
-		t.Errorf("running entry = %v, want an async merge of ws-asker at its testing step", running)
+	if running.GetName() != "merge" || running.GetStage().GetRunning().GetStepDescription() != footer.StepTesting.Words() {
+		t.Errorf("running entry = %v, want the merge at its testing step", running)
 	}
-	if waiting.GetKind().GetOwnBranch() == nil || waiting.GetStage().GetWaiting() == nil || !waiting.GetPlacedAtFront() {
-		t.Errorf("waiting entry = %v, want an own-branch merge waiting at the front", waiting)
+	if waiting.GetName() != "own" || waiting.GetStage().GetWaiting() == nil || !waiting.GetPlacedAtFront() {
+		t.Errorf("waiting entry = %v, want the merge waiting at the front", waiting)
 	}
 	if len(h.Merge.statusScopes) != 1 || h.Merge.statusScopes[0] != nil {
 		t.Errorf("scopes = %v, want one unscoped read", h.Merge.statusScopes)

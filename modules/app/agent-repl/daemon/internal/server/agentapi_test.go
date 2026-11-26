@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,7 +18,6 @@ import (
 	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
@@ -140,137 +138,6 @@ func TestCreateWorkspaceMapsTheSuppliedNameOntoTheSpecInEitherForm(t *testing.T)
 }
 
 // ---- CreateWorkspace: the async merge form -----------------------------------
-
-// asyncHarness is a harness whose workspace is a workspace of repo-1, and
-// whose repository is registered.
-func asyncHarness(t *testing.T) (*harness, *agentreplv1.CreateWorkspaceRequest) {
-	t.Helper()
-	h := newHarness(t)
-	repoRef := registeredRepoRef(h)
-	ws := h.DB.workspaces[testWorkspaceID]
-	ws.Repo = "repo-1"
-	h.DB.workspaces[testWorkspaceID] = ws
-	req := validAsyncMerge(nil)
-	req.Repository = repoRef
-	return h, req
-}
-
-func TestAnAsyncMergeIsEnqueuedWithItsMakerAndAnsweredWithItsBranch(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	async := req.GetAsyncMerge()
-	async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Maker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeTargetMaker{}}}
-	async.Placement = frontPlacement()
-	async.Instruction = strPtr(" rebase it ")
-	async.Source.Branch = " agent-1/fix "
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetAsyncMergeAccepted().GetMergeWorkspaceBranch() != "agent/reconnect-fix" {
-		t.Fatalf("CreateWorkspace = %v, %v; want the async merge accepted under its branch", resp, err)
-	}
-	got := h.Merge.requests[0]
-	want := merge.Request{Workspace: testWorkspaceID, By: merge.RequestedByAgent, Asker: testWorkspaceID,
-		Source:   wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true},
-		Detached: merge.NewDetachedRun("reconnect-fix", "rebase it", false, "", false, wsm.DeployHooks{}, testWorkspaceID, true)}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("request = %+v, want %+v", got, want)
-	}
-}
-
-func TestAnAsyncMergeOfASubagentForksItsSpawner(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	h.Makers.spawners = map[string]wsm.Workspace{"a6e95de7": {ID: testWorkspaceID}}
-	req.GetAsyncMerge().Source.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{
-		Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{AgentId: "a6e95de7"}}}
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetAsyncMergeAccepted() == nil {
-		t.Fatalf("CreateWorkspace = %v, %v; want accepted", resp, err)
-	}
-	if got := h.Merge.requests[0].Detached.Maker; got != testWorkspaceID {
-		t.Fatalf("maker = %q, want the spawning workspace", got)
-	}
-}
-
-func TestAnAsyncMergeIsRefused(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(h *harness, req *agentreplv1.CreateWorkspaceRequest)
-		got     func(*agentreplv1.CreateWorkspaceError) bool
-	}{
-		{name: "an op id beside it", arrange: func(_ *harness, req *agentreplv1.CreateWorkspaceRequest) { req.OpId = strPtr("op-1") },
-			got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetOpIdWithAsyncMerge() != nil }},
-		{name: "a requester the registry does not hold", arrange: func(_ *harness, req *agentreplv1.CreateWorkspaceRequest) {
-			req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: "ws-none"})
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
-			return e.GetUnknownRequester().GetWorkspace().GetId() == "ws-none"
-		}},
-		{name: "a requester of another repository", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
-			ws := h.DB.workspaces[testWorkspaceID]
-			ws.Repo = "repo-9"
-			h.DB.workspaces[testWorkspaceID] = ws
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetUnknownRequester() != nil }},
-		{name: "a subagent no session holds", arrange: func(_ *harness, req *agentreplv1.CreateWorkspaceRequest) {
-			req.GetAsyncMerge().Source.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{
-				Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{AgentId: "ghost"}}}
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
-			return e.GetAsyncMergeUnknownSubagent().GetAgentId() == "ghost"
-		}},
-		{name: "a context that is not the maker's", arrange: func(_ *harness, req *agentreplv1.CreateWorkspaceRequest) {
-			req.ContextOrigin = freshContext()
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
-			return e.GetAsyncMergeContextNotMaker().GetMaker().GetId() == string(testWorkspaceID)
-		}},
-		{name: "a requester whose own merge runs", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
-			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "merging"}
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeRequesterMerging() != nil }},
-		{name: "a branch that failed its rule suites", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
-			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmRuleChecksFailed, Reason: "failed",
-				Fields: map[string]any{"worktree": "/w/a", "suites": []string{"repo-scans"}, "failing_tests": "- TestX", "log": "/s/rule_check-1-0.log"}}
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
-			r := e.GetAsyncMergeRuleChecksFailed()
-			return r.GetWorktree() == "/w/a" && slices.Equal(r.GetSuites(), []string{"repo-scans"}) && r.GetFailingTests() == "- TestX" && r.GetLog() == "/s/rule_check-1-0.log"
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h, req := asyncHarness(t)
-			tt.arrange(h, req)
-
-			// Act
-			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-			// Assert
-			if err != nil || !tt.got(resp.Msg.GetError()) {
-				t.Fatalf("CreateWorkspace = %v, %v; want the refusal", resp, err)
-			}
-		})
-	}
-}
-
-func TestAnAsyncMergeWhoseSpawnerCannotBeReadFails(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	h.Makers.err = errors.New("disk gone")
-	req.GetAsyncMerge().Source.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{
-		Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{AgentId: "a6e95de7"}}}
-
-	// Act
-	_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err == nil || len(h.Merge.requests) != 0 {
-		t.Fatalf("CreateWorkspace = %v, requests %+v; want a failure and nothing enqueued", err, h.Merge.requests)
-	}
-}
 
 // ---- CloseWorkspace: who asked -----------------------------------------------
 
@@ -1320,70 +1187,6 @@ func TestAnAgentSentPromptNeitherQuotesNorEndsTheUsersSelection(t *testing.T) {
 	}
 	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-1-old" {
 		t.Fatalf("selected = %q, want resp-1-old (the user's selection survived)", got)
-	}
-}
-
-func TestAnAsyncMergeCarriesABehindPlacement(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	req.GetAsyncMerge().Placement = behindPlacement("two")
-
-	// Act
-	_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || len(h.Merge.requests) != 1 || h.Merge.requests[0].PlaceBehind != "two" {
-		t.Fatalf("CreateWorkspace = %v, requests %+v; want the async merge placed behind two", err, h.Merge.requests)
-	}
-}
-
-func TestAnAsyncMergeNamesTheWorkspaceItClosesOnLanding(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	req.GetAsyncMerge().CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{Workspace: &workspacev1.WorkspaceRef{Id: "ws-closed"}}
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetAsyncMergeAccepted() == nil {
-		t.Fatalf("CreateWorkspace = %v, %v; want accepted", resp, err)
-	}
-	if got := h.Merge.requests[0].Detached.CloseOnLanding; got != "ws-closed" {
-		t.Fatalf("closes on landing %q, want ws-closed", got)
-	}
-}
-
-func TestAnAsyncMergeCarriesWhetherItsGateProfiles(t *testing.T) {
-	for _, asked := range []bool{true, false} {
-		t.Run(map[bool]string{true: "asked", false: "not asked"}[asked], func(t *testing.T) {
-			// Arrange
-			h, req := asyncHarness(t)
-			req.GetAsyncMerge().ProfileGate = asked
-
-			// Act
-			_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-			// Assert
-			if err != nil || len(h.Merge.requests) != 1 || h.Merge.requests[0].Source.ProfileGate != asked {
-				t.Fatalf("CreateWorkspace = %v, requests %+v; want ProfileGate %v", err, h.Merge.requests, asked)
-			}
-		})
-	}
-}
-
-func TestAnAsyncMergePlacedBehindAMergeNotInLineIsRefused(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	req.GetAsyncMerge().Placement = behindPlacement("two")
-	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none", Fields: map[string]any{"behind": "two"}}
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetError().GetPlacementBehindNotInLine().GetBehind() != "two" {
-		t.Fatalf("CreateWorkspace = %v, %v; want the placement_behind_not_in_line arm", resp, err)
 	}
 }
 

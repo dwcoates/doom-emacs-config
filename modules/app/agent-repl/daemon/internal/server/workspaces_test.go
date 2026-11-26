@@ -1871,7 +1871,7 @@ func TestFinishWorkspaceMapsTheRequest(t *testing.T) {
 				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
 			}
 			got := h.Merge.requests[0]
-			if got.By != tt.wantBy || got.Asker != tt.wantAsker || got.Detached != nil {
+			if got.By != tt.wantBy || got.Asker != tt.wantAsker {
 				t.Fatalf("request = %+v, want asked by %v (%q) in place", got, tt.wantBy, tt.wantAsker)
 			}
 		})
@@ -4069,23 +4069,6 @@ func TestCreateWorkspaceMapsBackloggedAndPlacementToTheSpec(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceRefusesAPlacementOnAnAsyncMergeOnItsArm(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	req.Placement = &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}}
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetError().GetPlacementOnMergeWorkspace() == nil {
-		t.Fatalf("CreateWorkspace = (%v, %v), want the placement_on_merge_workspace arm", resp, err)
-	}
-	if len(h.Merge.requests) != 0 {
-		t.Fatalf("merge requests = %+v, want none enqueued", h.Merge.requests)
-	}
-}
-
 // TestSaidPartsSplitsWordsFromImages pins how a creation prompt reaches the
 // creation spec: every text block joined by a newline, and every image kept
 // in composed order, wherever it stood among the words.
@@ -4219,11 +4202,6 @@ func TestCreateWorkspaceRefusesEveryFormTheDeployMediatorRequests(t *testing.T) 
 		{name: "a standard create", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
 			req := standardCreate(registeredRepoRef(h), "")
 			req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(testWorkspaceID)})
-			return req
-		}},
-		{name: "an async merge", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
-			req := validAsyncMerge(nil)
-			req.Repository = registeredRepoRef(h)
 			return req
 		}},
 	}

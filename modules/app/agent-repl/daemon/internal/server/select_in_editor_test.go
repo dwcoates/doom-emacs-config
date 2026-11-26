@@ -13,7 +13,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/workspace"
-	"agent-repld/internal/wsm"
 )
 
 // holdHostStream opens the workspace's host stream and waits for its opening
@@ -89,23 +88,6 @@ func TestSelectInEditorWithAnEditorSelectsNothingItself(t *testing.T) {
 	// Assert: the editor makes the switch, so the daemon stamps nothing.
 	if got := h.Verbs.selects.Load(); got != 0 {
 		t.Fatalf("selects = %d, want none on the relayed route", got)
-	}
-}
-
-func TestSelectInEditorWithAnEditorRevealsNoMergeWorkspace(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	record := h.DB.workspaces[testWorkspaceID]
-	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
-	h.DB.workspaces[testWorkspaceID] = record
-	holdEditor(h)
-
-	// Act.
-	selectInEditor(t, h)
-
-	// Assert: the reveal belongs to the select the editor then makes.
-	if len(h.Merge.reveals) != 0 {
-		t.Fatalf("reveals = %v, want none on the relayed route", h.Merge.reveals)
 	}
 }
 
@@ -256,9 +238,6 @@ func TestTheDaemonsSelectIsOneSelectForBothRpcs(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			h.Deps.Sidebar.(*fakeSidebar).revision = 7
-			record := h.DB.workspaces[testWorkspaceID]
-			record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
-			h.DB.workspaces[testWorkspaceID] = record
 
 			// Act.
 			revision, err := tt.call(h)
@@ -269,9 +248,6 @@ func TestTheDaemonsSelectIsOneSelectForBothRpcs(t *testing.T) {
 			}
 			if revision != 7 {
 				t.Fatalf("roster_revision = %d, want the sidebar's 7", revision)
-			}
-			if len(h.Merge.reveals) != 1 || h.Merge.reveals[0] != testWorkspaceID {
-				t.Fatalf("reveals = %v, want the merge workspace revealed", h.Merge.reveals)
 			}
 			if got := h.Banners.forgotten(); len(got) != 1 || got[0] != "a workspace was selected" {
 				t.Fatalf("forgets = %q, want the selection to let every banner go", got)

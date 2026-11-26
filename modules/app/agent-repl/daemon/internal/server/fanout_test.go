@@ -52,12 +52,6 @@ func TestFanOutAdmit(t *testing.T) {
 				t.Cleanup(func() { sender.Parent = nil })
 				sendToStrangers(t, f, sender, fanOutCap, start)
 			}, at: start, want: true},
-		{name: "a merge's requester never counts", recipient: fanOutWorkspace("requester"),
-			arrange: func(t *testing.T, f *fanOut) {
-				sender.MergeOf = &wsm.MergeOrigin{Requester: "requester"}
-				t.Cleanup(func() { sender.MergeOf = nil })
-				sendToStrangers(t, f, sender, fanOutCap, start)
-			}, at: start, want: true},
 		{name: "a reply to a correspondent never counts", recipient: fanOutWorkspace("asker"),
 			arrange: func(t *testing.T, f *fanOut) {
 				if !f.admit(fanOutWorkspace("asker"), sender, false, start) {

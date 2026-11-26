@@ -122,21 +122,3 @@ func TestAOneShotMarkWhoseStandingCannotBeReadFails(t *testing.T) {
 		t.Fatalf("err %v, marks %+v; want the read's failure and no mark", err, h.Verbs.api.oneShots)
 	}
 }
-
-func TestAnAsyncMergeAskedWhileHoldingTheBypassModeIsAccepted(t *testing.T) {
-	// Arrange
-	h, req := asyncHarness(t)
-	holdingBypass(h)
-	async := req.GetAsyncMerge()
-	async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Maker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeTargetMaker{}}}
-	async.Placement = frontPlacement()
-	async.Source.Branch = "agent-1/fix"
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert
-	if err != nil || resp.Msg.GetAsyncMergeAccepted() == nil || len(h.Merge.requests) != 1 {
-		t.Fatalf("CreateWorkspace = %v, %v; want the async merge accepted", resp, err)
-	}
-}

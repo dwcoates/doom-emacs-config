@@ -11,7 +11,6 @@ import (
 
 	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
-	"agent-repld/internal/wsm"
 )
 
 // requeueRequest is the user's requeue of the harness workspace's merge at
@@ -104,10 +103,8 @@ func TestRequeueMergeAnswersEachRefusalAsItsArm(t *testing.T) {
 		{arm: merge.ArmStillQueued, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetStillQueued() != nil }},
 		{arm: merge.ArmBranchGone, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetBranchGone().GetBranch() == "feature" }},
 		{arm: merge.ArmAlreadyLanded, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetAlreadyLanded() != nil }},
-		{arm: merge.ArmVersionAlreadyRecorded, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetVersionAlreadyRecorded() != nil }},
 		{arm: merge.ArmWorkspaceClosed, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetWorkspaceClosed() != nil }},
 		{arm: merge.ArmColdGated, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetColdGated() != nil }},
-		{arm: merge.ArmVersionIncrementRequired, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetVersionIncrementRequired() != nil }},
 		{arm: merge.ArmPlacementBehindNotInLine, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetPlacementBehindNotInLine() != nil }},
 	}
 	for _, tc := range cases {
@@ -142,40 +139,6 @@ func TestRequeueMergeRefusesAMissingPlacement(t *testing.T) {
 	}
 }
 
-func TestDiscardMergeClosesAnAsyncMergesWorkspaceAsTheAskerDoes(t *testing.T) {
-	cases := []struct {
-		name      string
-		requester *agentreplv1.WorkspaceRequester
-		discarded merge.Discarded
-		wantClose []wsm.CloseCause
-	}{
-		{name: "a workspace's own merge closes nothing", requester: userRequester()},
-		{name: "the user's async discard closes as the user", requester: userRequester(), discarded: merge.Discarded{Async: true, CleanupWorktreeRemoved: true}, wantClose: []wsm.CloseCause{wsm.CloseByUser}},
-		{name: "an agent's async discard closes as the agent", requester: agent(), discarded: merge.Discarded{Async: true}, wantClose: []wsm.CloseCause{wsm.CloseByAgent}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			h.Merge.discarded = tc.discarded
-
-			// Act.
-			resp, err := h.Client.DiscardMerge(context.Background(), connect.NewRequest(&agentreplv1.DiscardMergeRequest{Workspace: ref(), Requester: tc.requester}))
-
-			// Assert.
-			if err != nil || resp.Msg.GetSuccess() == nil {
-				t.Fatalf("DiscardMerge = %v, %v; want success", resp, err)
-			}
-			if got := resp.Msg.GetSuccess().GetAsyncMerge(); (got != nil) != tc.discarded.Async || got.GetCleanupWorktreeRemoved() != tc.discarded.CleanupWorktreeRemoved {
-				t.Fatalf("success = %v, want async %v removed %v", resp.Msg.GetSuccess(), tc.discarded.Async, tc.discarded.CleanupWorktreeRemoved)
-			}
-			if len(h.Verbs.closedBy) != len(tc.wantClose) || (len(tc.wantClose) == 1 && h.Verbs.closedBy[0] != tc.wantClose[0]) {
-				t.Fatalf("closes = %v, want %v", h.Verbs.closedBy, tc.wantClose)
-			}
-		})
-	}
-}
-
 func TestDiscardMergeAnswersEachRefusalAsItsArm(t *testing.T) {
 	cases := []struct {
 		arm  string
@@ -203,13 +166,13 @@ func TestDiscardMergeAnswersEachRefusalAsItsArm(t *testing.T) {
 
 func TestStatusListsTheMergesOffTheQueueUnderTheirCause(t *testing.T) {
 	// Arrange.
-	status := merge.QueueStatus{OffQueue: []merge.OffQueueMember{{Workspace: "ws-m", Name: "fix", Branch: "fix", Requester: "ws-r", Cause: string(merge.CauseUserDrop)}}}
+	status := merge.QueueStatus{OffQueue: []merge.OffQueueMember{{Workspace: "ws-m", Name: "fix", Branch: "fix", Cause: string(merge.CauseUserDrop)}}}
 
 	// Act.
 	got := mergeQueueStatusOf(status).GetOffQueue()
 
 	// Assert.
-	if len(got) != 1 || got[0].GetName() != "fix" || got[0].GetCause().GetEvicted() == nil || got[0].GetKind().GetAsyncMerge().GetRequester().GetId() != "ws-r" {
-		t.Fatalf("off queue = %v, want the evicted async merge", got)
+	if len(got) != 1 || got[0].GetName() != "fix" || got[0].GetCause().GetEvicted() == nil {
+		t.Fatalf("off queue = %v, want the evicted merge", got)
 	}
 }
