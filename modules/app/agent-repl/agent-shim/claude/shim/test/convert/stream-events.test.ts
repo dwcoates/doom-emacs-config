@@ -363,10 +363,30 @@ describe("the vendor's usage block", () => {
     expect(carried?.outputTokens).toBe(30n);
   });
 
-  it("reads the reasoning count out of the vendor's output-token details", () => {
+  it("marks an assistant message's usage provisional: the file plane's report settles it", () => {
+    expect(usageOf(USAGE)?.provisional).toBe(true);
+  });
+
+  it("reads thinking_tokens, the transcript's name, out of the output-token details", () => {
+    const carried = usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 209 } });
+
+    expect(carried?.outputThinkingTokens).toBe(209n);
+  });
+
+  it("reads reasoning_tokens, the SDK stream's name, out of the output-token details", () => {
     const carried = usageOf({ ...USAGE, output_tokens_details: { reasoning_tokens: 7 } });
 
     expect(carried?.outputThinkingTokens).toBe(7n);
+  });
+
+  it("takes thinking_tokens when the two names disagree", () => {
+    const carried = usageOf({ ...USAGE, output_tokens_details: { thinking_tokens: 209, reasoning_tokens: 7 } });
+
+    expect(carried?.outputThinkingTokens).toBe(209n);
+  });
+
+  it("counts no thinking when the vendor wrote no output-token details", () => {
+    expect(usageOf(USAGE)?.outputThinkingTokens).toBe(0n);
   });
 });
 

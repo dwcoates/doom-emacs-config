@@ -1989,14 +1989,20 @@ func TestAUsageContradictionIsRecordedAtWarn(t *testing.T) {
 		name          string
 		act           func(h *harness)
 		contradiction string
+		taken         bool
+		wantOutput    int64
 	}{
 		{name: "a unit reporting two usages", act: func(h *harness) {
 			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 0)))
 			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 5, 0)))
-		}, contradiction: "it reported two different usages"},
+		}, contradiction: "it reported two different usages", taken: true, wantOutput: 5},
 		{name: "more thinking than output", act: func(h *harness) {
 			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 9)))
-		}, contradiction: "it reports more thinking tokens than output tokens"},
+		}, contradiction: "it reports more thinking tokens than output tokens", taken: true, wantOutput: 4},
+		{name: "a provisional usage with more thinking than output after a settled one", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 50, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", provisionalUsage(1, 2, 3, 4, 9)))
+		}, contradiction: "it reports more thinking tokens than output tokens", taken: false, wantOutput: 50},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2011,11 +2017,52 @@ func TestAUsageContradictionIsRecordedAtWarn(t *testing.T) {
 			var found bool
 			for _, record := range h.log.Records() {
 				if record.Operation == "daemon.topbar.usage_contradiction" {
-					found = record.Level == "warn" && record.Context["contradiction"] == tt.contradiction && record.Context["activity_id"] == "u1"
+					found = record.Level == "warn" && record.Context["contradiction"] == tt.contradiction &&
+						record.Context["activity_id"] == "u1" && record.Context["taken"] == tt.taken
 				}
 			}
 			if !found {
-				t.Fatalf("records = %+v, want one warn naming %q for u1", h.log.Records(), tt.contradiction)
+				t.Fatalf("records = %+v, want one warn naming %q for u1 with taken=%v", h.log.Records(), tt.contradiction, tt.taken)
+			}
+			if got := rowByLabel(sections(t, h)[0], "output").GetTokens(); got != tt.wantOutput {
+				t.Fatalf("output = %d, want %d", got, tt.wantOutput)
+			}
+		})
+	}
+}
+
+func TestAProvisionalUsageIsNoContradiction(t *testing.T) {
+	tests := []struct {
+		name       string
+		act        func(h *harness)
+		wantOutput int64
+	}{
+		{name: "a settled usage supersedes a differing provisional one", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", provisionalUsage(1, 2, 3, 4, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 50, 0)))
+		}, wantOutput: 50},
+		{name: "a provisional usage after a settled one leaves the settled one standing", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 50, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", provisionalUsage(1, 2, 3, 4, 0)))
+		}, wantOutput: 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			for _, record := range h.log.Records() {
+				if record.Operation == "daemon.topbar.usage_contradiction" {
+					t.Fatalf("record = %+v, want no contradiction", record)
+				}
+			}
+			if got := rowByLabel(sections(t, h)[0], "output").GetTokens(); got != tt.wantOutput {
+				t.Fatalf("output = %d, want the settled %d alone", got, tt.wantOutput)
 			}
 		})
 	}

@@ -71,6 +71,7 @@ import { bookFor, spawningCallOf, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { noticeSubjectOf, synthesizedNotice } from "./notice-subject.js";
 import { residueEntry, residueForMessage } from "./residue.js";
+import { thinkingTokens } from "./thinking-tokens.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
 
 const LOGGER = bindLog("shim.convert.stream-events", { component: "shim-convert-stream", operation: "shim.convert.stream" });
@@ -432,9 +433,12 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
       ? BigInt(Math.trunc(value))
       : 0n;
   };
-  const details = normalized.outputTokensDetails;
-  const reasoning = details === undefined ? undefined : details.reasoning_tokens;
   return create(conversationv1.TokenUsageSchema, {
+    // ALWAYS PROVISIONAL: the stream plane reads the SDK's assistant message
+    // while the response is still streaming, so its figures are the in-flight
+    // snapshot; the sidecar's file plane writes the settled usage from the
+    // record the vendor itself wrote, and that report supersedes this one.
+    provisional: true,
     // ORGANIZED BY ECONOMICS, not by the vendor's field names: the cache READ is
     // the only cheap bucket, and both miss buckets together are the expensive
     // sum — which is why the nesting exists.
@@ -446,10 +450,7 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
       unwritten: count("input_tokens"),
     }),
     outputTokens: count("output_tokens"),
-    outputThinkingTokens:
-      typeof reasoning === "number" && Number.isFinite(reasoning) && reasoning > 0
-        ? BigInt(Math.trunc(reasoning))
-        : 0n,
+    outputThinkingTokens: thinkingTokens(normalized.outputTokensDetails),
   });
 }
 

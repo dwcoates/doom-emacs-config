@@ -316,6 +316,21 @@ message TokenUsage {
 
   // Tags 5-6 are RETIRED: the refusal-fallback credit and the cache-miss
   // diagnostics are deferred.
+
+  // TRUE WHEN THIS IS THE VENDOR'S IN-FLIGHT SNAPSHOT of a response that is
+  // still streaming, which the shim's stream plane writes from the SDK's
+  // assistant message as each block lands; false for the SETTLED usage the
+  // sidecar's file plane writes from the record the vendor itself wrote.
+  //
+  // THE TWO PLANES REPORT THE SAME UNIT'S USAGE TWICE BY DESIGN, and the
+  // settled report supersedes the provisional one: a consumer replaces a
+  // provisional usage with whatever follows and never counts the replacement
+  // a contradiction, keeps a settled usage over a provisional one that arrives
+  // after it (the planes carry no ordering), and treats two settled usages
+  // that differ as the producer contradiction they are (2026-11-26: the
+  // topbar warned "two different usages" on every streamed response because
+  // the wire could not say which report was which).
+  bool provisional = 7;
 }
 
 // The prompt input this request did not have to process, because the prompt

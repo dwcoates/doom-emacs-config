@@ -65,6 +65,10 @@ func settledAt(ms, startMs int64) *conversationv1.AgentActivitySettledAt {
 //
 // Returns nil when the response carried no usage at all, so absence stays
 // absence.
+//
+// PROVISIONAL STAYS FALSE: the file plane reads the record the vendor itself
+// wrote once the response settled, so its usage is the settled one, and it
+// supersedes the stream plane's in-flight snapshot of the same unit.
 func readUsage(usage map[string]any) *conversationv1.TokenUsage {
 	if usage == nil {
 		return nil
@@ -78,8 +82,23 @@ func readUsage(usage map[string]any) *conversationv1.TokenUsage {
 			Unwritten: uint64(number(usage["input_tokens"])),
 		},
 		OutputTokens:         uint64(number(usage["output_tokens"])),
-		OutputThinkingTokens: uint64(number(usage["output_thinking_tokens"])),
+		OutputThinkingTokens: thinkingTokens(obj(usage["output_tokens_details"])),
 	}
+}
+
+// thinkingTokens reads the thinking tokens out of the vendor's output-token
+// details.
+//
+// Each producer writes its own name: the vendor's transcript on disk, which
+// this plane reads, writes output_tokens_details.thinking_tokens, and the SDK's
+// stream writes output_tokens_details.reasoning_tokens. No producer writes both
+// in one usage block, so thinking_tokens is read when present, else
+// reasoning_tokens. No details at all means no thinking: 0.
+func thinkingTokens(details map[string]any) uint64 {
+	if thinking, ok := details["thinking_tokens"].(float64); ok {
+		return uint64(thinking)
+	}
+	return uint64(number(details["reasoning_tokens"]))
 }
 
 // readModel reads the model the vendor says answered a response, nil when it

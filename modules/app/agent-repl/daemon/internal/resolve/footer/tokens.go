@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/figures"
 	"agent-repld/internal/freshinput"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/tokenusage"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
@@ -342,28 +343,29 @@ func (t *tokenState) forgetAgent(agent string) {
 	}
 }
 
-// observeUsage records one unit's usage, replacing whatever that unit reported
-// before, and files the agent that produced it so reset can carry a live
+// observeUsage records one unit's usage as tokenusage.Reconcile decides —
+// replacing what the unit reported before when the decision takes the new
+// report, keeping it when a late provisional report arrives after a settled
+// one — and files the agent that produced it so reset can carry a live
 // detached agent's units across the turn boundary and the panel can draw the
-// unit under its agent. A unit whose usage CHANGES between frames is a producer
-// contradiction and is recorded as one rather than silently taking the later
-// value.
+// unit under its agent. Every contradiction the report makes (two differing
+// SETTLED usages, more thinking than output) is recorded rather than silently
+// taken.
 func (t *tokenState) observeUsage(unit string, agent usageAgent, u *conversationv1.TokenUsage) {
 	if u == nil {
 		return
 	}
-	if _, seen := t.usage[unit]; !seen && !t.turnOpen() {
+	previous, seen := t.usage[unit]
+	if !seen && !t.turnOpen() {
 		t.outside[unit] = struct{}{}
 	}
-	if prev, ok := t.usage[unit]; ok && !sameUsage(prev, u) {
-		t.contradictions = append(t.contradictions,
-			fmt.Sprintf("unit %s reported two different usages", unit))
+	decision := tokenusage.Reconcile(previous, u)
+	for _, contradiction := range decision.Contradictions {
+		t.contradictions = append(t.contradictions, fmt.Sprintf("unit %s %s", unit, contradiction))
 	}
-	if u.GetOutputThinkingTokens() > u.GetOutputTokens() {
-		t.contradictions = append(t.contradictions,
-			fmt.Sprintf("unit %s reports more thinking tokens than output tokens", unit))
+	if decision.Take {
+		t.usage[unit] = u
 	}
-	t.usage[unit] = u
 	if agent.id != "" {
 		t.unitAgent[unit] = agent.id
 	}
@@ -374,15 +376,6 @@ func (t *tokenState) observeUsage(unit string, agent usageAgent, u *conversation
 	}
 	t.groups[agent.group] = &tokenGroup{label: agent.label, order: t.nextGroup}
 	t.nextGroup++
-}
-
-// sameUsage compares two usage records field for field.
-func sameUsage(a, b *conversationv1.TokenUsage) bool {
-	return a.GetInputHits().GetRead() == b.GetInputHits().GetRead() &&
-		a.GetInputMisses().GetWritten() == b.GetInputMisses().GetWritten() &&
-		a.GetInputMisses().GetUnwritten() == b.GetInputMisses().GetUnwritten() &&
-		a.GetOutputTokens() == b.GetOutputTokens() &&
-		a.GetOutputThinkingTokens() == b.GetOutputThinkingTokens()
 }
 
 // totals are the turn's summed figures.

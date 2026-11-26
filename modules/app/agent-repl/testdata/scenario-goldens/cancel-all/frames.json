@@ -222,7 +222,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
@@ -467,7 +469,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
@@ -547,7 +551,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
@@ -792,7 +798,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
@@ -872,7 +880,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
@@ -1107,7 +1117,9 @@
                 "written": "3224",
                 "unwritten": "10"
               },
-              "outputTokens": "36"
+              "outputTokens": "36",
+              "outputThinkingTokens": "30",
+              "provisional": true
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {

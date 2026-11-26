@@ -89,3 +89,41 @@ Its brief names this file, and it is the mediator's to write.
   settled with no record at info (2026-11-23 20:30:59). The settles that were
   at debug are now at info for a merge-scoped park; the next failure's tail
   names the gate or the session state it read.
+- Emacs unary timeouts at a handover (`elisp.connect.unary-timeout`,
+  `elisp.host.page-state-failed`, `elisp.host.evaluation-answer-failed`, all
+  "timed out after 10s" against the successor at 127.0.0.1:49152) and the
+  sidecar's `workspace-locate-failed` (LocateWorkspace deadline exceeded) are
+  one problem: the successor's one state-database connection is starved while
+  it adopts a hundred workspaces. `daemon.wsm.conn_pressure` at info names the
+  holders; on the 2026-11-25 23:57 handover the heaviest was
+  `daemon.wsm.list_workspaces<-server.(*server).LocateWorkspace 12×1170ms`: the
+  sidecar's own locate calls, each reading every workspace row, held the
+  connection for most of the second and starved each other out to their
+  deadline. The Emacs side of the group was first logged before 2026-11-25
+  12:00Z (`conn.go` dates it to 2026-10-24), so it is older than the
+  three-deploy window; the sidecar locate is owned by
+  `sidecar-locate-times-out-at-handover` (prod-mediator's one-shot child,
+  2026-11-25). Read `conn_pressure` first when either recurs.
+- `daemon.topbar.usage_contradiction` "it reported two different usages"
+  (2026-11-26): before `TokenUsage.provisional` landed, every streamed
+  response logged it once, because the stream plane's in-flight snapshot and
+  the file plane's settled usage of the same unit looked like two reports.
+  After the landing, a record of it means two SETTLED reports of one unit
+  differ, which is a real producer defect: read the unit's write ledger
+  (`sqlite3 ~/.cache/agent-repl/store/events.db "select * from write_ledger
+  where upsert_key='activity:<unit>'"`) to see which producer wrote each.
+  "it reports more thinking tokens than output tokens" with `taken: false`
+  is a provisional report arriving after the settled one, not a change to the
+  breakdown.
+- Scenario goldens (2026-11-26): the shim's writer
+  (`AGENT_REPL_SCENARIO_GOLDENS_WRITE=1` on `test/fake/goldens.test.ts`, run
+  under `bin/background.sh`) removes each golden's directory whole, so it
+  deletes the daemon's `feed.json` halves; those are rewritten by the same
+  switch on `daemon/internal/scenariogolden` (`TestEveryScenarioGoldenProjectsToItsFeedGolden`).
+  `agent-repld test run` does not pass the switch through, so both rewrites
+  run by hand. The in-process writer and the real daemon disagree on
+  `compact-failed`: the writer leaves `daemon.footer.on_context_cut` out of
+  the feed golden's warnings while `TestScenarioGoldensRouteThroughARealDaemon`
+  sees the daemon record it, so that file was kept at its committed version;
+  the drift between the in-process projection and the daemon is a harness
+  defect still to fix.

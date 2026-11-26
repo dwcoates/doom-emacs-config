@@ -10,13 +10,13 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// usageFingerprint is one unit's reported usage, kept so a re-report can be
-// recognized as the SAME usage rather than counted twice.
+// usageFingerprint is a usage's figures, the operand of the session totals'
+// arithmetic.
 //
 // USAGE IS STAMPED ON EXACTLY ONE UNIT PER API RESPONSE and a unit's frames
 // UPSERT, so the same usage arrives again on every later frame of that unit.
-// The session totals are therefore a sum over units, and a unit whose
-// fingerprint CHANGES is a producer contradiction rather than more spend.
+// The session totals are therefore a sum over units, each unit counted with
+// the report tokenusage.Reconcile last took for it.
 type usageFingerprint struct {
 	// read is what the prompt cache served.
 	read uint64
@@ -183,8 +183,8 @@ type wsState struct {
 	bankedTokens int64
 
 	// counted is every unit whose usage has been folded into the session
-	// totals, with what it reported.
-	counted map[string]usageFingerprint
+	// totals, with the report counted for it.
+	counted map[string]*conversationv1.TokenUsage
 	// totals are the session's summed figures.
 	totals usageFingerprint
 	// perModel is each model's share of the spend, by model name.
@@ -203,7 +203,7 @@ type wsState struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
-		counted:  map[string]usageFingerprint{},
+		counted:  map[string]*conversationv1.TokenUsage{},
 		perModel: map[string]*modelTotals{},
 	}
 }

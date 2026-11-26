@@ -25,6 +25,13 @@ func usage(read, written, unwritten, output, thinking uint64) *conversationv1.To
 	}
 }
 
+// provisionalUsage builds the stream plane's in-flight snapshot of a usage.
+func provisionalUsage(read, written, unwritten, output, thinking uint64) *conversationv1.TokenUsage {
+	u := usage(read, written, unwritten, output, thinking)
+	u.Provisional = true
+	return u
+}
+
 // responseFrame is one frame of a response unit, optionally carrying the
 // response's usage.
 func responseFrame(unit, stage string, u *conversationv1.TokenUsage) *conversationv1.AgentActivity {
@@ -269,6 +276,41 @@ func TestAUnitReportingTwoDifferentUsagesReconcilesInvalid(t *testing.T) {
 	line := h.view(t).GetExpanded().GetTokens().GetVerdict().GetInvalid()
 	if line == nil || line.GetText() == "" {
 		t.Fatalf("verdict = %+v, want invalid with the problem named", line)
+	}
+}
+
+func TestAProvisionalUsageReconcilesCompleteWithTheSettledFigures(t *testing.T) {
+	tests := []struct {
+		name          string
+		first, second *conversationv1.TokenUsage
+	}{
+		{name: "a settled usage supersedes a differing provisional one",
+			first: provisionalUsage(0, 100, 0, 0, 0), second: usage(0, 900, 0, 0, 0)},
+		{name: "a provisional usage after a settled one leaves the settled one standing",
+			first: usage(0, 900, 0, 0, 0), second: provisionalUsage(0, 100, 0, 0, 0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			turn := testTurnID
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "update", tt.first))
+
+			// Act
+			h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", tt.second))
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+			// Assert
+			if h.view(t).GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+				t.Fatalf("verdict = %+v, want complete: a provisional usage never contradicts",
+					h.view(t).GetExpanded().GetTokens().GetVerdict())
+			}
+			if got := panelInput(t, h); got != "900" {
+				t.Fatalf("panel input = %q, want the settled 900", got)
+			}
+		})
 	}
 }
 
