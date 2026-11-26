@@ -71,6 +71,16 @@ func TestLoadRenderColorsReadsTheContract(t *testing.T) {
 	}
 }
 
+func TestTheMergeHeadGlyphIsTheContractsName(t *testing.T) {
+	// Act.
+	c := loadColors(t)
+
+	// Assert.
+	if c.FeedMergeHeadGlyph != MergeHeadGlyph {
+		t.Fatalf("feed_merge_head_glyph = %q, but MergeHeadGlyph = %q", c.FeedMergeHeadGlyph, MergeHeadGlyph)
+	}
+}
+
 func TestLoadRenderColorsFailsOnAMissingFile(t *testing.T) {
 	// Act.
 	_, err := LoadRenderColors(t.TempDir())

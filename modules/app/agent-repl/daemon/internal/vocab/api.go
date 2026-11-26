@@ -159,6 +159,13 @@ type paintClassesJSON struct {
 	ANSIPrecedence []string `json:"ansi_precedence"`
 }
 
+// MergeHeadGlyph is the glyph NAME every merge-styled head carries
+// (frontend.v1.FeedMergeGlyph.icon, frontend.v1.FeedChildGlyph.icon): a merge
+// bubble's head and a child bubble's, so the two draw one glyph. It is
+// render-colors.json's feed_merge_head_glyph (RenderColors.FeedMergeHeadGlyph),
+// which a test holds equal.
+const MergeHeadGlyph = "merge"
+
 // LoadRenderColors reads render-colors.json from the vocab directory. A file
 // that does not parse, or a table with a missing row, is an error: the daemon
 // refuses to serve an unpainted state.
