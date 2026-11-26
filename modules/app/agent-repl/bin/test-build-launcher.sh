@@ -105,7 +105,9 @@ test_a_run_that_does_not_produce_a_product_fails_loudly() {
 }
 
 test_the_script_asks_swift_for_no_single_product() {
-  if grep -vE '^[[:space:]]*#' "$MODULE_DIR/bin/build-launcher.sh" | grep -q -- '--product'; then
+  local code
+  code="$(grep -vE '^[[:space:]]*#' "$MODULE_DIR/bin/build-launcher.sh")"
+  if grep -q -- '--product' <<<"$code"; then
     fail "build-launcher.sh passes --product to swift build, which builds only the last one named"
   else pass "build-launcher.sh runs one plain release build, naming no --product"; fi
 }
