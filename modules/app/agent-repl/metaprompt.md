@@ -335,9 +335,9 @@
   - Only when no such workspace owns the code being fixed is the fix dispatched to a new child, as follows.
 - The fix is implemented by a one-shot child of this workspace, which lands into its repository's main branch.
   - The fix belongs in a repository, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
-  - When that is this workspace's own repository, the child forks this workspace: `agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.
-  - When it is another repository, the child starts fresh, because a fork never crosses repositories: `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`.
-    - Its prompt carries everything the fix needs: the root cause, the log records, and the change to make.
+  - The child starts fresh, never forking this workspace's conversation, because its prompt carries everything the fix needs: the root cause, the log records, and the change to make.
+  - When that is this workspace's own repository: `agent-repld workspace create -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`.
+  - When it is another repository, the child names it: `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`.
   - The rest of the verb's flags are `/agent-repl-workspaces`'.
 - The workspace then reports the root cause, the records, and the child it dispatched, by name.
 - A fix that genuinely turns on a decision that is mine to make is the one exception.
