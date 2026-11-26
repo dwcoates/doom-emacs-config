@@ -2678,6 +2678,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // way and for the same reason: only a start states a kind, and a
       // notification after a restart or a keep-alive rewind follows no start
       // this process saw. Asked BEFORE the agent, whose ask needs the kind.
+      // A NOTIFICATION NAMES NO CALL, and one whose start only a predecessor
+      // process saw is joined to its unit by the store, asked before the kind
+      // (whose ask needs the call) and the agent.
+      const awaitingCall = deps.fold.taskAwaitingCall(message, foldContext(attribution, verdict.turn));
+      if (awaitingCall !== undefined) await callFromStore(awaitingCall);
       const awaitingKind = deps.fold.taskAwaitingKind(message, foldContext(attribution, verdict.turn));
       if (awaitingKind !== undefined) await kindFromStore(awaitingKind.taskId, awaitingKind.unit);
       const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
@@ -7018,6 +7023,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       "the store named no agent for a vendor task this process cannot name itself",
     );
     return undefined;
+  }
+
+  /**
+   * THE CALL A TASK NOTIFICATION SETTLES, as the store's pairing of the task's
+   * locator with its agent names it (convert/detached.ts `taskAwaitingCall`).
+   *
+   * THE ANSWER IS HANDED TO THE FOLD whatever it is. This is the ONE record of
+   * the lookup: INFO when the store named the call, and when it holds none (the
+   * fold then refuses the notification at WARN, unsettled), ERROR when the
+   * store could not answer.
+   */
+  async function callFromStore(taskId: string): Promise<void> {
+    const answer = await deps.persistence.agentByVendorTask(requireIdentity().agentId, taskId);
+    deps.fold.learnTaskCall(taskId, answer);
+    if (answer.kind === "failed") {
+      LOGGER.error(
+        { task_id: taskId, detail: describeVendorTaskAnswer(answer) },
+        "the store could not state the originating call of a task notification this process cannot join itself",
+      );
+      return;
+    }
+    LOGGER.info(
+      { task_id: taskId, answer: describeVendorTaskAnswer(answer) },
+      answer.kind === "found"
+        ? "the store stated the originating call of a task notification this process cannot join itself"
+        : "the store holds no originating call for a task notification this process cannot join itself",
+    );
   }
 
   /**

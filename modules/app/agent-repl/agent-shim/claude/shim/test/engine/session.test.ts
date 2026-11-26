@@ -20713,3 +20713,98 @@ describe("the liveness bound", () => {
     expect(liveSignalBound(25_000, 5, 3)).toBe(25_000);
   });
 });
+
+/**
+ * A TASK NOTIFICATION WHOSE START ONLY THE PREDECESSOR SHIM SAW (2026-11-25,
+ * workspace hash ca544ff6): it states no originating call, so the engine asks
+ * the store for the task's call before the fold, and hands back whatever it
+ * answers.
+ */
+describe("a task notification whose originating call this process never learned", () => {
+  const TASK = "ae5578ba696980988";
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+  const notification = {
+    type: "system",
+    subtype: "task_notification",
+    task_id: TASK,
+    status: "completed",
+    uuid: "00000000-0000-4000-8000-0000000000e1",
+    session_id: "s",
+  } as never as SdkMessage;
+
+  async function callHarness(): Promise<Harness> {
+    const h = harness();
+    h.fold.awaitingCallFor = (message) => (message === notification ? TASK : undefined);
+    await started(h);
+    return h;
+  }
+
+  it("hands the fold the call the store named, joined from the store", async () => {
+    // Arrange.
+    const h = await callHarness();
+    h.persistence.vendorTasks.set(TASK, { kind: "found", agent: SPAWN, commission: undefined });
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(notification);
+
+    // Assert.
+    expect(h.fold.learnedCalls).toEqual([{ taskId: TASK, answer: { kind: "found", agent: SPAWN, commission: undefined } }]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message.startsWith("the store stated the originating call"))
+        .map((record) => [record.level, record.context.task_id]),
+    ).toEqual([["info", TASK]]);
+  });
+
+  it("hands the fold the store's miss when it holds no record, at INFO", async () => {
+    // Arrange.
+    const h = await callHarness();
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(notification);
+
+    // Assert.
+    expect(h.fold.learnedCalls.map((learned) => learned.answer.kind)).toEqual(["not_found"]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message.startsWith("the store holds no originating call"))
+        .map((record) => [record.level, record.context.task_id]),
+    ).toEqual([["info", TASK]]);
+  });
+
+  it("records an unavailable store at ERROR with the task id, and still folds the message", async () => {
+    // Arrange.
+    const h = await callHarness();
+    h.persistence.vendorTasks.set(TASK, { kind: "failed", detail: "store_unavailable: down" });
+    let folded = false;
+    h.fold.entriesFor = (message) => {
+      if (message === notification) folded = true;
+      return [];
+    };
+    const before = logSinkMark();
+
+    // Act.
+    await h.engine.onSdkMessage(notification);
+
+    // Assert.
+    expect(folded).toBe(true);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message.startsWith("the store could not state the originating call"))
+        .map((record) => [record.level, record.context.task_id, record.context.detail]),
+    ).toEqual([["error", TASK, "failed: store_unavailable: down"]]);
+  });
+
+  it("asks the store nothing for a message no notification awaits", async () => {
+    // Arrange.
+    const h = await callHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000e2"));
+
+    // Assert.
+    expect(h.persistence.vendorTaskLookups).toEqual([]);
+  });
+});

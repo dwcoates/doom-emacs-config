@@ -895,6 +895,19 @@ export class RecordingFold implements EngineFold {
     this.commissionsAwaited.push(taskId);
   }
 
+  /** The task whose originating call a message awaits the store for; none unless a suite says so. */
+  awaitingCallFor: (message: SdkMessage) => string | undefined = () => undefined;
+  /** Every call answer the engine handed back, in order. */
+  readonly learnedCalls: { taskId: string; answer: VendorTaskAnswer }[] = [];
+
+  taskAwaitingCall(message: SdkMessage): string | undefined {
+    return this.awaitingCallFor(message);
+  }
+
+  learnTaskCall(taskId: string, answer: VendorTaskAnswer): void {
+    this.learnedCalls.push({ taskId, answer });
+  }
+
   /** The task whose kind a message awaits the store for; none unless a suite says so. */
   awaitingKindFor: (message: SdkMessage) => TaskAwaitingKind | undefined = () => undefined;
   /** Every kind answer the engine handed back, in order. */
