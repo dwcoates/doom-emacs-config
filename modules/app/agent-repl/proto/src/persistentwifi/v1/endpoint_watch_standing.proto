@@ -1,0 +1,24 @@
+// endpoint_watch_standing.proto — WatchStanding: the persistent-wifi
+// standing, current value first, then every change.
+
+syntax = "proto3";
+
+package persistentwifi.v1;
+
+import "agentrepl/v1/persistent_wifi.proto";
+
+option go_package = "agentrepl/proto/persistentwifi/v1;persistentwifiv1";
+
+// Opens the standing watch. It carries nothing: the standing is the machine's,
+// never a caller's.
+message WatchStandingRequest {}
+
+// One publication of the standing.
+message WatchStandingResponse {
+  // The standing as the service last read it. The first message of a stream
+  // is the current standing, and each later one is a change from the last.
+  // The lid-closed quiet state is `standing.quiet`: the daemon follows it to
+  // stop and resume its own views, and a service that is not yet reading the
+  // lid publishes a standing whose lid is unassigned, never a quiet one.
+  agentrepl.v1.PersistentWifiState standing = 1;
+}

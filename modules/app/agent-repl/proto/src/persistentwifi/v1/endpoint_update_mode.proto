@@ -1,0 +1,26 @@
+// endpoint_update_mode.proto — UpdateMode: the topbar's persistent-wifi
+// change, passed through the daemon to the service that owns it.
+
+syntax = "proto3";
+
+package persistentwifi.v1;
+
+import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
+
+option go_package = "agentrepl/proto/persistentwifi/v1;persistentwifiv1";
+
+// One persistent-wifi mode change, exactly as the daemon's
+// agentrepl.v1.UpdatePersistentWifiModeRequest carries it.
+message UpdateModeRequest {
+  // The validated request the daemon received from the topbar. The daemon
+  // refuses an invalid one before it reaches the service.
+  agentrepl.v1.UpdatePersistentWifiModeRequest request = 1;
+}
+
+// What the change left standing, or why it was refused, exactly as the
+// agentrepl.v1.UpdatePersistentWifiModeResponse the daemon answers.
+message UpdateModeResponse {
+  // The service's whole answer. The daemon returns it to the topbar
+  // unchanged, so no outcome is respelled between the two.
+  agentrepl.v1.UpdatePersistentWifiModeResponse response = 1;
+}

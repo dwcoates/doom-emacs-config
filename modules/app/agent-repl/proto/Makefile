@@ -55,7 +55,7 @@ BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 # the surface roots under it, and the unguarded `find` reported one "No such
 # file or directory" per root on every such run. The set comes out identical in
 # the real tree; the guard only stops the empty case from saying so.
-PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace launcher shim store storeread repoconfig testrun testservice zettel; do \
+PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace launcher shim store storeread repoconfig testrun testservice persistentwifi zettel; do \
 	  [ -d "$$root" ] && find "$$root" -name '*.proto'; \
 	done | sort)
 
