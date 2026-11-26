@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/internal/cores"
 )
 
 func TestConfinedEnvKeepsOnlyWhatTheKeyCoversOrTheRunOwns(t *testing.T) {
@@ -197,5 +199,40 @@ func TestProbeSandbox(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestConfinedEnvKeepsEveryMarkTheRunnerTagsAUnitWith pins that a keyed unit's
+// processes stay findable by the readers of their CPU: the runner sets these
+// marks as it starts the unit, after the confine line's keep list was
+// written, so the scrub must keep them itself.
+func TestConfinedEnvKeepsEveryMarkTheRunnerTagsAUnitWith(t *testing.T) {
+	marks := []string{cores.NestedEnv, cores.UnitEnv}
+	for _, name := range marks {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			environ := []string{"HOME=/h", "SECRET=x", name + "=42/unit#01"}
+
+			// Act
+			got := ConfinedEnv(environ, nil)
+
+			// Assert
+			if !slices.Contains(got, name+"=42/unit#01") {
+				t.Fatalf("ConfinedEnv = %v, dropped %s", got, name)
+			}
+			if slices.Contains(got, "SECRET=x") {
+				t.Fatalf("ConfinedEnv = %v, kept an unlisted variable", got)
+			}
+		})
+	}
+}
+
+func TestKeyedEnvDoesNotKeyTheUnitTag(t *testing.T) {
+	// Act
+	got := KeyedEnv([]string{cores.UnitEnv + "=42/unit#01", cores.NestedEnv + "=42"})
+
+	// Assert
+	if want := KeyedEnv(nil); !maps.Equal(got, want) {
+		t.Fatalf("KeyedEnv = %v, want %v: a run's own tag must not change a unit's key", got, want)
 	}
 }
