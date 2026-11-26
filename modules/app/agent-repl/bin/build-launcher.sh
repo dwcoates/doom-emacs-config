@@ -48,8 +48,20 @@ LABEL="app.zettel.launcher"
 echo "[build-launcher] building the release products..."
 # ONE SwiftPM run for both products: each run resolves and plans the package
 # again (measured 2026-11-23, two runs that compiled nothing cost 10.0s and 7.7s).
-( cd "$LAUNCHER" && swift build -c release --product Zettel --product ZettelIcon )
+# No --product: it takes ONE value and keeps the last, so naming both built only
+# ZettelIcon. A plain release build produces every product of the package.
 BIN="$(cd "$LAUNCHER" && swift build -c release --show-bin-path)"
+# The products are removed first, so a binary left by an earlier build is never
+# there to be copied: what exists afterwards was produced by this run.
+PRODUCTS=(Zettel ZettelIcon)
+for product in "${PRODUCTS[@]}"; do rm -f "$BIN/$product"; done
+( cd "$LAUNCHER" && swift build -c release )
+for product in "${PRODUCTS[@]}"; do
+    if [ ! -x "$BIN/$product" ]; then
+        echo "build-launcher.sh: swift build -c release did not produce $BIN/$product" >&2
+        exit 1
+    fi
+done
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/zettel-bundle.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
