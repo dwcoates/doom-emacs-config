@@ -252,6 +252,7 @@ func TestEachChildIsInExactlyOneOfTheFooterAndTheMenu(t *testing.T) {
 	open := child("ws-d", "working", 3*time.Minute)
 
 	// Act
+	f.t.SetArm("ws-c", "ready", "turquoise")
 	f.t.SetRegistry(registry(open, mergedChild, closedChild, reopened))
 	f.t.SetArm("ws-d", "permission", "green")
 
@@ -272,6 +273,7 @@ func TestEachChildIsInExactlyOneOfTheFooterAndTheMenu(t *testing.T) {
 func TestAChildRetargetedAwayRedrawsItsOldParent(t *testing.T) {
 	// Arrange
 	f := newFixture()
+	f.t.SetArm(childA, "thinking", "red")
 	f.t.SetRegistry(registry(child(childA, "fix-a", 0)))
 
 	// Act: it is no longer the parent's child.
@@ -413,6 +415,7 @@ func TestAReopenedParentIsDrawnAfresh(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture()
+			f.t.SetArm(childB, "thinking", "red")
 			f.t.SetRegistry(tt.first())
 			f.t.SetRegistry(closedRegistry(closedAndOpenChildren()...))
 			before := f.handed()
@@ -434,5 +437,78 @@ func TestAReopenedParentIsDrawnAfresh(t *testing.T) {
 				t.Fatalf("menu = %+v, want the abandoned child", menu)
 			}
 		})
+	}
+}
+
+func TestAChildWhoseArmIsUndecidedIsNotListedInTheFooter(t *testing.T) {
+	tests := []struct {
+		name      string
+		children  []wsm.Workspace
+		arms      map[ids.WorkspaceID]string
+		wantSets  int
+		wantNames []string
+	}{
+		{name: "the only child, with no arm, hands the footer nothing",
+			children: []wsm.Workspace{child(childA, "fix-a", 0)}},
+		{name: "of two children only the armed one is listed",
+			children: []wsm.Workspace{child(childA, "fix-a", 0), child(childB, "fix-b", time.Minute)},
+			arms:     map[ids.WorkspaceID]string{childB: "thinking"}, wantSets: 1, wantNames: []string{"fix-b"}},
+		{name: "the armed children stay in creation order around an unarmed one",
+			children: []wsm.Workspace{child(childA, "fix-a", 0), child(childB, "fix-b", time.Minute), child("ws-c", "fix-c", 2*time.Minute)},
+			arms:     map[ids.WorkspaceID]string{childA: "ready", "ws-c": "thinking"}, wantSets: 1, wantNames: []string{"fix-a", "fix-c"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			for ws, name := range tt.arms {
+				f.t.SetArm(ws, name, "red")
+			}
+
+			// Act
+			f.t.SetRegistry(registry(tt.children...))
+
+			// Assert
+			if len(f.footer.sets) != tt.wantSets || !slices.Equal(names(f.footer.last()), tt.wantNames) {
+				t.Fatalf("footer sets = %+v, want %d set listing %v", f.footer.sets, tt.wantSets, tt.wantNames)
+			}
+			for _, c := range f.footer.last() {
+				if c.Status == "" || c.Tone == "" {
+					t.Fatalf("footer child = %+v, want its status word and tone", c)
+				}
+			}
+		})
+	}
+}
+
+func TestAnArmsArrivalListsTheChildWithItsStatusAndTone(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.t.SetRegistry(registry(child(childA, "fix-a", 0)))
+
+	// Act
+	f.t.SetArm(childA, "merge_queued", "purple")
+
+	// Assert
+	got := f.footer.last()
+	if len(f.footer.sets) != 1 || len(got) != 1 || got[0].Name != "fix-a" || got[0].Status != "merge queued" || got[0].Tone != "purple" {
+		t.Fatalf("footer sets = %+v, want one list carrying the child, merge queued and purple", f.footer.sets)
+	}
+}
+
+func TestAChildWhoseArmIsUndecidedStillHasItsBubbleWithNoBorder(t *testing.T) {
+	// Arrange
+	f := newFixture()
+
+	// Act
+	f.t.SetRegistry(registry(child(childA, "fix-a", 0)))
+
+	// Assert
+	b := f.feed.bubble(childA)
+	if b == nil || b.GetHead().GetName().GetText() != "fix-a" || b.GetHead().GetStanding().GetOpen() == nil {
+		t.Fatalf("bubble = %v, want the open child's bubble in the parent's feed", b)
+	}
+	if b.GetBorder() != nil {
+		t.Fatalf("border = %v, want none while no arm is decided", b.GetBorder())
 	}
 }

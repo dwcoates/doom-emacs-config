@@ -20,6 +20,14 @@
 //
 // A CHILD IS DRAWN ONLY WHILE ITS PARENT IS OPEN, and a parent's reopen
 // redraws its children afresh.
+//
+// THE FOOTER LISTS A CHILD ONCE THE SIDEBAR HAS DECIDED ITS ARM. The registry
+// arrives before any render decides arms (resolver.SetRegistry tells the
+// registry sink first), so at the daemon's boot and whenever a child first
+// appears the tracker holds no arm for it, and a footer row then would carry
+// no status word and no color (2026-11-26: the webapp refused every such
+// WatchFooter push). The arm's arrival (SetArm) hands the list with the child.
+// Its bubble is drawn meanwhile, with no border.
 package children
 
 import (
@@ -253,7 +261,12 @@ func (t *Tracker) redrawLocked(parent ids.WorkspaceID) {
 		switch {
 		case removed:
 		case !child.Closed:
-			open = append(open, t.openChildLocked(child))
+			row, ok := t.openChildLocked(child)
+			if !ok {
+				t.deps.Log.Debug(op, "withheld a child from its parent's footer until the sidebar decides its arm", dlog.Context{"parent": string(parent), "child": string(child.ID)})
+				break
+			}
+			open = append(open, row)
 		default:
 			closed = append(closed, ended{child: topbar.ClosedChild{Ref: child.Ref(), Name: child.Name,
 				ShortSummary: t.summaries[child.ID].Short, Merged: child.MergedAt != nil}, at: endedAt(child)})
@@ -294,11 +307,17 @@ func endedAt(child wsm.Workspace) time.Time {
 	return time.Time{}
 }
 
-// openChildLocked is CHILD as the parent's footer panel lists it.
-func (t *Tracker) openChildLocked(child wsm.Workspace) footer.OpenChild {
-	a := t.arms[child.ID]
+// openChildLocked is CHILD as the parent's footer panel lists it. False while
+// the sidebar has decided no arm for it: the footer lists a child only once
+// its arm is decided, since the registry arrives before any render decides
+// arms.
+func (t *Tracker) openChildLocked(child wsm.Workspace) (footer.OpenChild, bool) {
+	a, ok := t.arms[child.ID]
+	if !ok {
+		return footer.OpenChild{}, false
+	}
 	return footer.OpenChild{Ref: child.Ref(), Name: child.Name, Status: strings.ReplaceAll(a.name, "_", " "), Tone: a.tone,
-		ShortSummary: t.summaries[child.ID].Short, WaitingOnUser: a.name == "permission" || a.name == "question"}
+		ShortSummary: t.summaries[child.ID].Short, WaitingOnUser: a.name == "permission" || a.name == "question"}, true
 }
 
 // bubbleLocked is CHILD's bubble as it stands.
