@@ -338,19 +338,24 @@ func TestTheLauncherInstallPlacesItsStampsBesideTheInstalledApp(t *testing.T) {
 	}
 }
 
-func TestTheLauncherIsStagedUnderANameMacOSDoesNotTreatAsAnApp(t *testing.T) {
+// The running daemon, built from the previous revision, hashes and installs
+// the launcher at this staged path after the next revision's
+// build-frontend.sh --out stages it there. A rename can never deploy: the
+// previous build's daemon looks under the old name and finds nothing, as the
+// deploy of 2026-11-26T09:02:38Z did.
+func TestTheStagedLauncherStandsWhereThePreviousBuildsDaemonReadsIt(t *testing.T) {
 	// Arrange
-	staged := LauncherStaged
+	s := Staged{Dir: "/s"}
 
 	// Act
-	ext := filepath.Ext(staged)
+	executable := filepath.Join(s.CacheBin(LauncherStaged), LauncherExecutable)
 
 	// Assert
-	if ext == ".app" {
-		t.Fatalf("staged launcher %q has the .app extension, so macOS would register it beside the installed one", staged)
+	if LauncherStaged != "Zettel.app" {
+		t.Fatalf("LauncherStaged = %q, want %q, the name the previous build's daemon reads", LauncherStaged, "Zettel.app")
 	}
-	if staged == LauncherBundle {
-		t.Fatalf("staged launcher %q is the installed bundle's name", staged)
+	if want := "/s/cache-bin/Zettel.app/Contents/MacOS/Zettel"; executable != want {
+		t.Fatalf("staged launcher executable = %q, want %q", executable, want)
 	}
 }
 

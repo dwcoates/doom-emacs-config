@@ -1577,10 +1577,10 @@ t_launcher_stages_without_installing_and_installs_in_place() {
     : > "$root/stub.log"
     run_script "$root" --force launcher >/dev/null
     local inplace; inplace="$(cat "$root/stub.log")"
-    if [ -f "$bin/Zettel.app.staged/Contents/MacOS/Zettel" ] &&
+    if [ -f "$bin/Zettel.app/Contents/MacOS/Zettel" ] &&
            [ "$(cat "$bin/.Zettel.app.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$bin/.Zettel.app.source-tree" 2>/dev/null)" = "$(fake_source_tree launcher)" ] &&
-           [ "$staged" = "build-launcher --out $bin/Zettel.app.staged --no-install" ] &&
+           [ "$staged" = "build-launcher --out $bin/Zettel.app --no-install" ] &&
            [ "$inplace" = "build-launcher --out $root/home/.cache/agent-repl/bin/Zettel.app.staged" ]; then
         pass "launcher: staged without installing, with its stamps; in place it installs"
     else
@@ -1881,7 +1881,7 @@ t_out_reuse_copies_the_installed_launcher() {
     out="$root/staging"
     log="$(run_script "$root" --out "$out" launcher)"
     if [ ! -s "$root/stub.log" ] &&
-           [ "$(cat "$out/cache-bin/Zettel.app.staged/Contents/MacOS/Zettel")" = installed ] &&
+           [ "$(cat "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel")" = installed ] &&
            [ "$(cat "$out/cache-bin/.Zettel.app.source-tree")" = "$(fake_source_tree launcher)" ] &&
            [ "$(outcome_of "$log" launcher)" = reused ]; then
         pass "reuse: the installed launcher is copied, with no build-launcher run"

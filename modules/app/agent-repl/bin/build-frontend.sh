@@ -100,10 +100,18 @@
 #   zettel  -> DIR/cache-bin/zettel
 #   tests   -> DIR/cache-bin/agent-repl-tests
 #              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
-#   launcher -> DIR/cache-bin/Zettel.app.staged (macOS only; + .Zettel.app.built-sha,
-#              .Zettel.app.source-tree in DIR/cache-bin/). In place, the app
-#              is also installed in ~/Applications by bin/build-launcher.sh;
-#              staged, the deploy installs it.
+#   launcher -> DIR/cache-bin/Zettel.app (macOS only; + .Zettel.app.built-sha,
+#              .Zettel.app.source-tree in DIR/cache-bin/). In place, the build
+#              stands at ~/.cache/agent-repl/bin/Zettel.app.staged (never named
+#              *.app there, or macOS lists it as a second Zettel) and is also
+#              installed in ~/Applications by bin/build-launcher.sh; staged,
+#              the deploy installs it.
+#
+# THE STAGED LAYOUT IS A CONTRACT WITH THE PREVIOUS REVISION. A deploy is run
+# by the running daemon, built from the previous revision: it stages this
+# revision's script, then hashes and installs what the script staged at the
+# paths compiled into it. So a staged path never changes; the deploy of
+# 2026-11-26T09:02:38Z failed when the launcher's did.
 #   proto   -> NOT STAGED: the bindings are sources the other targets compile
 #              from, so they are generated into the checkout's proto/gen in
 #              both modes, and proto/.source-tree and proto/.generators are
@@ -319,9 +327,16 @@ LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
 SOCKETHOLD_ARTIFACT="$CACHE_BIN/sockethold"
 ZETTEL_ARTIFACT="$CACHE_BIN/zettel"
 TESTS_ARTIFACT="$CACHE_BIN/agent-repl-tests"
-# NOT NAMED *.app: macOS registers any .app it finds, and a second Zettel beside
-# the installed one shows twice in System Settings.
-LAUNCHER_ARTIFACT="$CACHE_BIN/Zettel.app.staged"
+# Staged, the bundle keeps the name the running daemon (previous revision)
+# reads; the staging directory is transient and removed by the deploy. In
+# place, in the persistent cache bin, it is NOT NAMED *.app: macOS registers
+# any .app it finds, and a second Zettel beside the installed one shows twice
+# in System Settings.
+if [ -n "$OUT_DIR" ]; then
+    LAUNCHER_ARTIFACT="$CACHE_BIN/Zettel.app"
+else
+    LAUNCHER_ARTIFACT="$CACHE_BIN/Zettel.app.staged"
+fi
 
 # Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
 # readiness-report.sh can say which source revision the deployed artifact is
