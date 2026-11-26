@@ -2384,6 +2384,85 @@ describe("mountFeed: the root open's harder answers", () => {
   });
 });
 
+describe("mountFeed: a reveal asked before the root feed's first page", () => {
+  /**
+   * A feed whose ROOT open waits on the returned gate, as a page the daemon
+   * handed a reveal on attaching waits on its own OpenFeed. A probe (any open
+   * naming a feed) answers a root row's page: no crumbs.
+   */
+  function gatedRoot(root: (req: OpenFeedRequest) => OpenFeedResponse) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = harness({
+      openFeed: async (req) => {
+        if (req.feed !== undefined) return openSuccess(page([]), tokenFor(req));
+        await gate;
+        return root(req);
+      },
+    });
+    return { h, release };
+  }
+
+  it("reveals a root row the first page draws", async () => {
+    // Arrange: the merge head row is on the first page, still unanswered.
+    const { h, release } = gatedRoot((req) => openSuccess(page([responseRow("m1")]), tokenFor(req)));
+    const { feed } = mount(h);
+    // Act: the relay delivers the held reveal before the page answers.
+    const revealed = feed.revealRow(feedId("m1"));
+    await settle();
+    release();
+    await settle();
+    // Assert
+    expect(await revealed).toBe(true);
+  });
+
+  it("asks the daemon nothing about the row until the first page is drawn", async () => {
+    // Arrange
+    const { h, release } = gatedRoot((req) => openSuccess(page([responseRow("m1")]), tokenFor(req)));
+    const { feed } = mount(h);
+    // Act
+    const revealed = feed.revealRow(feedId("m1"));
+    await settle();
+    // Assert: only the root open was asked, and the row was drawn without a probe.
+    expect(h.calls.openFeed.filter((req) => req.feed !== undefined)).toHaveLength(0);
+    release();
+    await settle();
+    await revealed;
+    expect(h.calls.openFeed.filter((req) => req.feed !== undefined)).toHaveLength(0);
+  });
+
+  it("answers false once the root open is refused", async () => {
+    // Arrange
+    const { h, release } = gatedRoot(() =>
+      create(OpenFeedResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } },
+      }),
+    );
+    const { feed } = mount(h);
+    // Act
+    const revealed = feed.revealRow(feedId("m1"));
+    release();
+    await settle();
+    // Assert
+    expect(await revealed).toBe(false);
+  });
+
+  it("answers false when the feed is disposed before its first page", async () => {
+    // Arrange
+    const { h } = gatedRoot((req) => openSuccess(page([responseRow("m1")]), tokenFor(req)));
+    const { feed } = mount(h);
+    // Act
+    const revealed = feed.revealRow(feedId("m1"));
+    await settle();
+    feed.dispose();
+    await settle();
+    // Assert
+    expect(await revealed).toBe(false);
+  });
+});
+
 describe("mountFeed: a walk whose container will not open", () => {
   it("answers false when a breadcrumb's bubble refuses to expand", async () => {
     // Arrange: the crumb names a real bubble whose own sub-feed is refused.

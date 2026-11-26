@@ -279,6 +279,17 @@ export function mountFeed(
   });
   let watch: StreamHandle | null = null;
   let disposed = false;
+  // EVERY JUMP WAITS FOR THE ROOT FEED'S FIRST PAGE. A page the daemon asked
+  // to reveal a row while it was not listening (a selection that loads the
+  // page) is handed the ask the moment its stream attaches, before its own
+  // OpenFeed has answered: a jump made then finds no row drawn, and a root
+  // row's probe answers no crumbs to walk, so the reveal would be lost. The
+  // latch opens once the first open's answer is applied, refused, or the feed
+  // is disposed, so the jump only ever looks at the page the daemon drew.
+  let openFirstPage!: () => void;
+  const firstPage = new Promise<void>((resolve) => {
+    openFirstPage = resolve;
+  });
 
   // Click-to-expand on every capped section the cards draw, armed once for the
   // whole feed rather than per card — the existing behaviour, kept. The
@@ -607,6 +618,7 @@ export function mountFeed(
     switch (result.case) {
       case "success": {
         root.applyOpened(requireMessage(result.value.page, "OpenFeedSuccess.page"), result.value.resumed);
+        openFirstPage();
         // THE ROOT FEED'S OPEN STATES ITS HELD SECTION, as of the same pin as
         // the page: the tail then carries every later change of it.
         const section = requireMessage(result.value.held, "OpenFeedSuccess.held");
@@ -623,6 +635,7 @@ export function mountFeed(
         // Marked FIRST: a refusal whose cause cannot be read still ends the
         // wait of a tab held for this page.
         markConversationDrawn("refused");
+        openFirstPage();
         {
           const arm = requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case;
           // A WORKSPACE MOVING TO ITS SUCCESSOR IS A PLANNED MOVE, not a
@@ -800,6 +813,8 @@ export function mountFeed(
     cause: JumpCause,
     loaded = false,
   ): Promise<boolean> {
+    await firstPage;
+    if (disposed) return false;
     const here = findAcrossOpenFeeds(root, id);
     if (here !== null) {
       await land(here, id, cause);
@@ -1210,6 +1225,7 @@ export function mountFeed(
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    openFirstPage();
     watch?.cancel();
     uninstallTrim();
     unobserve?.();

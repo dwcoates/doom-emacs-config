@@ -9,7 +9,9 @@
  * mounted -- a page the selection loaded is handed it first thing -- so the
  * relay keeps the latest ask until the feed binds its reveal, and delivers it
  * then. Only the latest is kept: a second ask before the bind supersedes the
- * first, as a second click would.
+ * first, as a second click would. A bound feed's reveal itself waits for the
+ * feed's first page (feed.ts `firstPage`), so a reveal delivered at the bind
+ * looks for its row only once the daemon's page is drawn.
  */
 import { createLogger } from "../log.js";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
