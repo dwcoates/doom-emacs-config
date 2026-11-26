@@ -5792,10 +5792,10 @@ type fakeHandBacks struct {
 // handback is one HandBack the fake was handed.
 type handback struct {
 	ws      ids.WorkspaceID
-	outcome DetachedOutcome
+	outcome Ending
 }
 
-func (d *fakeHandBacks) HandBack(_ context.Context, ws ids.WorkspaceID, _ wsm.Workspace, out DetachedOutcome) error {
+func (d *fakeHandBacks) HandBack(_ context.Context, ws ids.WorkspaceID, _ wsm.Workspace, out Ending) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.handbacks = append(d.handbacks, handback{ws: ws, outcome: out})

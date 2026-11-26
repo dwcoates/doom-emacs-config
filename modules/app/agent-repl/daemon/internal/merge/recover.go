@@ -339,7 +339,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 				}, headRecover)
 		}
 		o.publish(repo, ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
-		o.ended(ctx, ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+		o.ended(ctx, ws, Ending{Kind: EndingFailed, Summary: summary})
 		return nil
 	}
 	log.Info(op, "an admitted merge left no progress record, so it never took a step; it runs again from the queue", dlog.Context{

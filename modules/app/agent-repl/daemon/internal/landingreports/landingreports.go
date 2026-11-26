@@ -75,10 +75,10 @@ func New(deps Deps) *Service {
 // feed's handback badge. Only a merge that did not land is reported: a landing
 // closed the workspace.
 //
-// A MERGE THE USER OR THE OPERATOR RELEASED (merge.DetachedOutcome.Released)
+// A MERGE THE USER OR THE OPERATOR RELEASED (merge.Ending.Released)
 // HANDS NOTHING BACK: whoever released it already knows, and its bubble shows
 // the abandoned terminal.
-func (s *Service) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, out merge.DetachedOutcome) error {
+func (s *Service) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, out merge.Ending) error {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"workspace": string(ws), "outcome": out.Kind.String(), "branch": out.Branch}
 	if out.Released() {
@@ -114,12 +114,12 @@ func (s *Service) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.W
 
 // handbackText composes the badge label and the report of a merge that did
 // not land: it ran in this very workspace, which stays open.
-func handbackText(out merge.DetachedOutcome) (string, string, error) {
+func handbackText(out merge.Ending) (string, string, error) {
 	switch out.Kind {
-	case merge.DetachedFailed:
+	case merge.EndingFailed:
 		return fmt.Sprintf("merge of %s failed", out.Branch),
 			fmt.Sprintf("It failed: %s. This workspace stays open; the merge's own record is its bubble in this feed.", out.Summary), nil
-	case merge.DetachedAbandoned:
+	case merge.EndingAbandoned:
 		return fmt.Sprintf("merge of %s did not run", out.Branch),
 			fmt.Sprintf("It did not run: %s. This workspace stays open.", out.Summary), nil
 	}

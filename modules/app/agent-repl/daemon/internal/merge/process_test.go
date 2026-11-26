@@ -1537,8 +1537,8 @@ func TestAConflictResolutionThatGivesUpHandsTheWorkspaceBackInPlace(t *testing.T
 	if len(sent) != 1 || sent[0].ws != theWorkspace {
 		t.Fatalf("handbacks = %+v, want one to the workspace itself", sent)
 	}
-	if out := sent[0].outcome; out.Kind != DetachedFailed || !out.InPlace {
-		t.Fatalf("outcome = %+v, want an in-place failure", out)
+	if out := sent[0].outcome; out.Kind != EndingFailed {
+		t.Fatalf("outcome = %+v, want a failure", out)
 	}
 	if h.leaseHeld() {
 		t.Fatal("the lease is still held after the merge gave up")

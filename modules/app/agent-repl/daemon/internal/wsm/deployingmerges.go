@@ -302,10 +302,10 @@ func scanDeployingMerge(row *sql.Row) (*DeployingMerge, error) {
 // one decoding path.
 func scanDeployingMergeRow(row interface{ Scan(...any) error }) (DeployingMerge, error) {
 	var (
-		m                       DeployingMerge
-		repo, ws, lease string
-		active, deploying       int64
-		stage                   int
+		m                 DeployingMerge
+		repo, ws, lease   string
+		active, deploying int64
+		stage             int
 	)
 	if err := row.Scan(&repo, &ws, &lease, &m.Name, &m.Branch, &m.TargetDir, &active, &deploying, &m.Timed, &stage); err != nil {
 		return DeployingMerge{}, err

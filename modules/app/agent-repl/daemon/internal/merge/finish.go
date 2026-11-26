@@ -252,5 +252,5 @@ func (o *orchestrator) withdrawFinished(ctx context.Context, ws ids.WorkspaceID,
 	delete(o.displaces, ws)
 	o.mu.Unlock()
 	log.Info(opFinishStage, "withdrew the deploy whose finish stage failed; the workspace is told", fields)
-	o.handBackInPlace(ctx, ws, DetachedOutcome{Kind: DetachedFailed, Summary: "it was withdrawn before it was put in the queue: " + failure})
+	o.handBackInPlace(ctx, ws, Ending{Kind: EndingFailed, Summary: "it was withdrawn before it was put in the queue: " + failure})
 }

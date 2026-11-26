@@ -871,7 +871,7 @@ func (f *reportsForwarder) DeployEnded(ctx context.Context, coveredOnly bool, de
 }
 
 // HandBack reaches the landing reports.
-func (f *reportsForwarder) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, out merge.DetachedOutcome) error {
+func (f *reportsForwarder) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, out merge.Ending) error {
 	target, err := f.service()
 	if err != nil {
 		return err

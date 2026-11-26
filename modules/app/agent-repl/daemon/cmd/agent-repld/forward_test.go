@@ -819,7 +819,7 @@ func TestReportsForwarderReachesNothingBeforeTheService(t *testing.T) {
 	}{
 		{name: "a cover", call: func(f *reportsForwarder) error { return f.CoverLandings(context.Background()) }},
 		{name: "a handback", call: func(f *reportsForwarder) error {
-			return f.HandBack(context.Background(), "ws-1", wsm.Workspace{ID: "ws-1"}, merge.DetachedOutcome{Kind: merge.DetachedFailed})
+			return f.HandBack(context.Background(), "ws-1", wsm.Workspace{ID: "ws-1"}, merge.Ending{Kind: merge.EndingFailed})
 		}},
 	}
 	for _, tt := range tests {
@@ -858,7 +858,7 @@ func TestReportsForwarderHandsBackThroughTheBoundService(t *testing.T) {
 
 	// Act
 	err := f.HandBack(context.Background(), "ws-1", wsm.Workspace{ID: "ws-1"},
-		merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Cause: merge.CauseUserDrop})
+		merge.Ending{Kind: merge.EndingAbandoned, Cause: merge.CauseUserDrop})
 
 	// Assert
 	if err != nil || !slices.ContainsFunc(logs.Records(), func(r dlog.Record) bool {

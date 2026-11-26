@@ -284,17 +284,17 @@ func TestAReleasedMergeIsHandedBackReleasedAndRaisesNoResolvedBanner(t *testing.
 func TestOnlyAnAbandonmentReleasedByItsCauseIsReleased(t *testing.T) {
 	tests := []struct {
 		name string
-		out  DetachedOutcome
+		out  Ending
 		want bool
 	}{
-		{name: "evicted", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDrop}, want: true},
-		{name: "dequeued", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDequeue}, want: true},
-		{name: "its workspace closed", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseWorkspaceClosed}},
-		{name: "the daemon shut down", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseDaemonShutdown}},
-		{name: "the merge ahead did not land", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAheadDidNotLand}},
-		{name: "never forked", out: DetachedOutcome{Kind: DetachedAbandoned}},
-		{name: "failed", out: DetachedOutcome{Kind: DetachedFailed}},
-		{name: "landed", out: DetachedOutcome{Kind: DetachedLanded}},
+		{name: "evicted", out: Ending{Kind: EndingAbandoned, Cause: CauseUserDrop}, want: true},
+		{name: "dequeued", out: Ending{Kind: EndingAbandoned, Cause: CauseUserDequeue}, want: true},
+		{name: "its workspace closed", out: Ending{Kind: EndingAbandoned, Cause: CauseWorkspaceClosed}},
+		{name: "the daemon shut down", out: Ending{Kind: EndingAbandoned, Cause: CauseDaemonShutdown}},
+		{name: "the merge ahead did not land", out: Ending{Kind: EndingAbandoned, Cause: CauseAheadDidNotLand}},
+		{name: "never forked", out: Ending{Kind: EndingAbandoned}},
+		{name: "failed", out: Ending{Kind: EndingFailed}},
+		{name: "landed", out: Ending{Kind: EndingLanded}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

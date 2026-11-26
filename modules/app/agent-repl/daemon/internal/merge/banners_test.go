@@ -147,13 +147,13 @@ func TestALandedMergeRaisesTheLandedBannerNamingItsTarget(t *testing.T) {
 func TestDetachedOutcomeBannerLine(t *testing.T) {
 	tests := []struct {
 		name string
-		out  DetachedOutcome
+		out  Ending
 		want string
 	}{
-		{name: "a landing names its target", out: DetachedOutcome{Kind: DetachedLanded, Summary: "it landed as commit abc", MergedInto: "master"}, want: "Merged into master"},
-		{name: "a branch already on its target keeps its summary", out: DetachedOutcome{Kind: DetachedLanded, Summary: "the branch was already on master; nothing needed merging"}, want: "the branch was already on master; nothing needed merging"},
-		{name: "a failure keeps its summary", out: DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, want: "the tests failed"},
-		{name: "an abandonment keeps its summary", out: DetachedOutcome{Kind: DetachedAbandoned, Summary: "taken off the queue"}, want: "taken off the queue"},
+		{name: "a landing names its target", out: Ending{Kind: EndingLanded, Summary: "it landed as commit abc", MergedInto: "master"}, want: "Merged into master"},
+		{name: "a branch already on its target keeps its summary", out: Ending{Kind: EndingLanded, Summary: "the branch was already on master; nothing needed merging"}, want: "the branch was already on master; nothing needed merging"},
+		{name: "a failure keeps its summary", out: Ending{Kind: EndingFailed, Summary: "the tests failed"}, want: "the tests failed"},
+		{name: "an abandonment keeps its summary", out: Ending{Kind: EndingAbandoned, Summary: "taken off the queue"}, want: "taken off the queue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -265,12 +265,12 @@ func TestQueueRequestWithNoRecordedRequestIsAnError(t *testing.T) {
 
 func TestDetachedOutcomeKindMergeEnd(t *testing.T) {
 	cases := []struct {
-		kind DetachedOutcomeKind
+		kind EndingKind
 		want desktopnotify.MergeEnd
 	}{
-		{kind: DetachedLanded, want: desktopnotify.MergeLanded},
-		{kind: DetachedFailed, want: desktopnotify.MergeFailed},
-		{kind: DetachedAbandoned, want: desktopnotify.MergeAbandoned},
+		{kind: EndingLanded, want: desktopnotify.MergeLanded},
+		{kind: EndingFailed, want: desktopnotify.MergeFailed},
+		{kind: EndingAbandoned, want: desktopnotify.MergeAbandoned},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind.String(), func(t *testing.T) {
@@ -343,7 +343,7 @@ func TestTellThenRaiseTellsBeforeItRaisesTheResolvedBanner(t *testing.T) {
 	}
 
 	// Act
-	h.o.tellThenRaise(theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "the tests failed"}, tell)
+	h.o.tellThenRaise(theWorkspace, Ending{Kind: EndingFailed, Summary: "the tests failed"}, tell)
 
 	// Assert
 	if !reflect.DeepEqual(order, []string{"told"}) {
@@ -364,7 +364,7 @@ func TestDetachedOutcomeKindMergeEndPanicsOnAnUnknownKind(t *testing.T) {
 	}()
 
 	// Act
-	DetachedOutcomeKind(9).mergeEnd()
+	EndingKind(9).mergeEnd()
 }
 
 // bannerRaised reports whether the harness raised a banner of KIND.

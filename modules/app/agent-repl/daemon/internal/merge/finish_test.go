@@ -107,7 +107,7 @@ func TestAFailedFinishPromptWithdrawsTheDeployAndHandsItBack(t *testing.T) {
 		t.Fatal("the deploy stands in the queue after its finish stage failed")
 	}
 	sent := h.handBacks.sent()
-	if len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed || !strings.Contains(sent[0].outcome.Summary, "its finish prompt hook did not complete") {
+	if len(sent) != 1 || sent[0].outcome.Kind != EndingFailed || !strings.Contains(sent[0].outcome.Summary, "its finish prompt hook did not complete") {
 		t.Fatalf("handbacks = %+v, want the failure handed back to the workspace", sent)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opFinishStage, Message: "withdrew the deploy whose finish stage failed; the workspace is told"}); !ok {

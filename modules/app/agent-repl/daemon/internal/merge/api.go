@@ -460,7 +460,7 @@ type Request struct {
 type HandBacks interface {
 	// HandBack reports how WS's own merge ended to WS's conversation. RECORD
 	// is WS's registry record.
-	HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, outcome DetachedOutcome) error
+	HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, outcome Ending) error
 }
 
 // Names resolves a merge's name as an agent may spell it: supplied, or with
@@ -476,7 +476,7 @@ type Names interface {
 // (desktopnotify.MergeBanners). A MERGE REPORTS EXACTLY ONE: Resolved as it
 // leaves the queue for good, which raises a banner only when it did not land.
 // Nothing before it -- being put in line, admission, a repair turn, the test
-// gate, a detached merge's handback -- raises one.
+// gate, a merge's handback -- raises one.
 type Banners interface {
 	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
 	// Mediated posts the notification of an escalated deploy, whose click
@@ -484,36 +484,31 @@ type Banners interface {
 	Mediated(ws ids.WorkspaceID, summary string)
 }
 
-// DetachedOutcome is how a detached merge ended, for its handback. THE KIND IS
-// THE END; Summary is its one-line account, and Branch is the requester's
-// branch the merge was asked for.
-type DetachedOutcome struct {
-	Kind    DetachedOutcomeKind
+// Ending is how a merge ended, for its handback and its resolved banner.
+// THE KIND IS THE END; Summary is its one-line account, and Branch is the
+// workspace's branch the merge was asked for.
+type Ending struct {
+	Kind    EndingKind
 	Summary string
 	Branch  string
 	// MergedInto is the branch a landing merged the source into, empty for
 	// every end that merged nothing (a branch already on its target among
 	// them). The resolved banner says it in place of Summary.
 	MergedInto string
-	// InPlace marks the end of a SYNC merge, which ran in the workspace it is
-	// handed back to rather than in a merge workspace.
-	InPlace bool
 	// Deploy is what became of a landing's deploy: the report of a landing
 	// the deploy was told of is owed until that deploy has run.
 	Deploy LandingDeploy
 	// Cause is why an abandoned merge left the queue, empty for every other
-	// end and for a detached request whose merge workspace could not be
-	// forked.
+	// end.
 	Cause AbandonCause
 }
 
 // Released reports whether the outcome is a merge the user or the operator
-// RELEASED themselves (an evict, a dequeue), queued or running, in place or
-// detached. NOBODY IS TOLD OF IT (2026-11-17): whoever released it already
+// RELEASED themselves (an evict, a dequeue), queued or running. NOBODY IS TOLD OF IT (2026-11-17): whoever released it already
 // knows, and its bubble already shows the abandoned terminal, so it hands no
 // report back to its requester and raises no resolved banner.
-func (o DetachedOutcome) Released() bool {
-	return o.Kind == DetachedAbandoned && o.Cause.releases()
+func (o Ending) Released() bool {
+	return o.Kind == EndingAbandoned && o.Cause.releases()
 }
 
 // LandingDeploy names what a deploy did about the runtime's rollout.
@@ -535,29 +530,28 @@ const (
 	LandingHoldUnread
 )
 
-// DetachedOutcomeKind names how a detached merge ended.
-type DetachedOutcomeKind int
+// EndingKind names how a merge ended.
+type EndingKind int
 
 const (
-	// DetachedLanded is a merge whose branch landed on its target.
-	DetachedLanded DetachedOutcomeKind = iota
-	// DetachedFailed is a merge that ran and gave up; the merge workspace is
-	// left open where it stopped.
-	DetachedFailed
-	// DetachedAbandoned is a merge taken off the queue before it ran, or a
-	// detached request whose merge workspace could not be forked.
-	DetachedAbandoned
+	// EndingLanded is a merge whose branch landed on its target.
+	EndingLanded EndingKind = iota
+	// EndingFailed is a merge that ran and gave up; its workspace is left
+	// open where it stopped.
+	EndingFailed
+	// EndingAbandoned is a merge taken off the queue before it ran.
+	EndingAbandoned
 )
 
 // mergeEnd is the kind's resolved banner end. A kind outside the three is a
 // defect in the caller, and panics.
-func (k DetachedOutcomeKind) mergeEnd() desktopnotify.MergeEnd {
+func (k EndingKind) mergeEnd() desktopnotify.MergeEnd {
 	switch k {
-	case DetachedLanded:
+	case EndingLanded:
 		return desktopnotify.MergeLanded
-	case DetachedFailed:
+	case EndingFailed:
 		return desktopnotify.MergeFailed
-	case DetachedAbandoned:
+	case EndingAbandoned:
 		return desktopnotify.MergeAbandoned
 	}
 	panic(fmt.Sprintf("merge: no banner end for %s", k))
@@ -565,7 +559,7 @@ func (k DetachedOutcomeKind) mergeEnd() desktopnotify.MergeEnd {
 
 // bannerLine is the outcome's line on its resolved desktop banner: where a
 // landing merged the source, and Summary for every other end.
-func (o DetachedOutcome) bannerLine() string {
+func (o Ending) bannerLine() string {
 	if o.MergedInto != "" {
 		return "Merged into " + o.MergedInto
 	}
@@ -573,16 +567,16 @@ func (o DetachedOutcome) bannerLine() string {
 }
 
 // String names the kind for the log record.
-func (k DetachedOutcomeKind) String() string {
+func (k EndingKind) String() string {
 	switch k {
-	case DetachedLanded:
+	case EndingLanded:
 		return "landed"
-	case DetachedFailed:
+	case EndingFailed:
 		return "failed"
-	case DetachedAbandoned:
+	case EndingAbandoned:
 		return "abandoned"
 	}
-	return fmt.Sprintf("DetachedOutcomeKind(%d)", int(k))
+	return fmt.Sprintf("EndingKind(%d)", int(k))
 }
 
 // Requester names who asked for a merge.

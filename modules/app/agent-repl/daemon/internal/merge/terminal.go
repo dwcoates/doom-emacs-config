@@ -108,7 +108,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
 		// Nothing landed, so the count its turns last recorded stands.
 		r.stampClosed(ctx, log, op, nil)
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
+		r.o.ended(ctx, r.ws, Ending{Kind: EndingLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
@@ -120,7 +120,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		if deploy == LandingDeployOwed {
 			r.recordUndeployed(ctx, log, out)
 		}
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: landedSummary(out), MergedInto: out.target, Deploy: deploy})
+		r.o.ended(ctx, r.ws, Ending{Kind: EndingLanded, Summary: landedSummary(out), MergedInto: out.target, Deploy: deploy})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -186,7 +186,7 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 	// prompt's own records), so this record is INFO whatever the area.
 	r.o.log(ctx, r.ws).Info("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
-	r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+	r.o.ended(ctx, r.ws, Ending{Kind: EndingFailed, Summary: summary})
 }
 
 // ended is EVERY MERGE'S RESOLUTION, however it left the queue for good:
@@ -195,7 +195,7 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 // merge's second and last desktop banner, on the workspace the merge ran in
 // (tellThenRaise). Every terminal goes through it, so no resolution goes unannounced and none is
 // announced twice.
-func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Ending) {
 	// THE BUBBLE'S HOLD IS NO LONGER REDRAWN: its merge is out of the queue.
 	if lease, ok := o.leaseOf(ws); ok {
 		o.bubbleTabs.forget(lease)
@@ -209,7 +209,7 @@ func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out Detach
 // that reaches it: it hands the outcome back (handBackInPlace). ended and a
 // merge never put in line (publishAbandonedWith) both settle through it, and
 // nothing else hands a merge's end back.
-func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+func (o *orchestrator) settle(ctx context.Context, ws ids.WorkspaceID, out Ending) {
 	o.handBackInPlace(ctx, ws, out)
 }
 
@@ -239,18 +239,18 @@ func (o *orchestrator) republishRoster(ctx context.Context, log dlog.Logger, op 
 // workspaces it is handed back to, and the resolved desktop banner and its
 // chime are raised on ws just after, in the same routine. A workspace is
 // told of a merge's end before the banner announces it, never after.
-func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out DetachedOutcome, tell func()) {
+func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out Ending, tell func()) {
 	tell()
 	o.raiseResolved(ws, out)
 }
 
 // raiseResolved raises the resolved desktop banner of a merge's outcome on ws.
 // It is the ONE place a resolved banner is raised from, so every end words it
-// the same way (DetachedOutcome.bannerLine).
+// the same way (Ending.bannerLine).
 //
-// A RELEASED MERGE RAISES NONE (DetachedOutcome.Released): the user or the
+// A RELEASED MERGE RAISES NONE (Ending.Released): the user or the
 // operator who released it is the one the banner would tell.
-func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
+func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out Ending) {
 	if out.Released() {
 		o.deps.Log.Global().Info("daemon.merge.ended", "a released merge raises no resolved banner: whoever released it already knows",
 			dlog.Context{"workspace": string(ws), "outcome": out.Kind.String(), "cause": string(out.Cause)})
@@ -268,12 +268,12 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 // A MERGE THE USER OR THE OPERATOR RELEASED (an evict, a dequeue) IS NOT
 // REPORTED BACK (owner ruling, 2026-11-17): whoever released it already
 // knows, and its bubble shows the abandoned terminal. Its owner
-// (HandBacks.HandBack) skips it on DetachedOutcome.Released.
+// (HandBacks.HandBack) skips it on Ending.Released.
 //
 // THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (HandBacks.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
-func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	if out.Kind == DetachedLanded {
+func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out Ending) {
+	if out.Kind == EndingLanded {
 		return
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
@@ -282,7 +282,6 @@ func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, 
 			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})
 		return
 	}
-	out.InPlace = true
 	out.Branch = record.Branch
 	if err := o.deps.HandBacks.HandBack(ctx, ws, record, out); err != nil {
 		o.log(ctx, ws).Debug("daemon.merge.handback", "the handback of an in-place merge failed; its owner recorded why", dlog.Context{
@@ -1241,7 +1240,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 	if ledger != "" && !o.endAbandonedBubble(ctx, ws, ledger, entry, cause, summary) {
 		return
 	}
-	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause}
+	out := Ending{Kind: EndingAbandoned, Summary: summary, Cause: cause}
 	if ledger != "" {
 		o.ended(ctx, ws, out)
 	} else {
@@ -1500,7 +1499,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		// A MERGE PUT BACK IN LINE HAS NOT ENDED: its requester is told
 		// nothing until it does.
 		if !cause.requeues() {
-			r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause})
+			r.o.ended(ctx, r.ws, Ending{Kind: EndingAbandoned, Summary: summary, Cause: cause})
 		}
 	})
 	if cause.requeues() {

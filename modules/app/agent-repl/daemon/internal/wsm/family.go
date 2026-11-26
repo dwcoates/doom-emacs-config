@@ -245,7 +245,7 @@ func isClosing(ctx context.Context, q rowQuerier, id WorkspaceID) (bool, error) 
 // parent is ErrNotFound.
 func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) error {
 	var (
-		ref                        = FamilyRef{ID: parent}
+		ref                = FamilyRef{ID: parent}
 		closed, backlogged bool
 	)
 	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.backlogged FROM workspaces w WHERE w.id = ?`, parent).
