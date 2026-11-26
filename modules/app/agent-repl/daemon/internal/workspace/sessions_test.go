@@ -5592,8 +5592,13 @@ func TestRecordEndedUnlessHeldRecordsOnlyForAWorkspaceTheFleetDoesNotHold(t *tes
 // fakeUpdateAgentTransport answers UpdateAgent with a scripted response.
 type fakeUpdateAgentTransport struct {
 	shimclient.Client
-	resp *shimv1.UpdateAgentResponse
+	// standingDown is what StandingDown answers: this daemon standing the fake down.
+	standingDown bool
+	resp         *shimv1.UpdateAgentResponse
 }
+
+// StandingDown answers the fake's stand-down latch.
+func (c *fakeUpdateAgentTransport) StandingDown() bool { return c.standingDown }
 
 func (c *fakeUpdateAgentTransport) UpdateAgent(context.Context, *shimv1.UpdateAgentRequest) (*shimv1.UpdateAgentResponse, error) {
 	return c.resp, nil

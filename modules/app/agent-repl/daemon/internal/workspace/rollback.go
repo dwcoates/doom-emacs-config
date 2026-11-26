@@ -127,6 +127,7 @@ func (a *shimAdapter) RollBackSession(ctx context.Context, turns []ids.TurnID, r
 // both the verbs' whole client and the queue's narrowed one.
 type sessionRollBacker interface {
 	RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error)
+	standingDowner
 }
 
 // rollBackSession is THE ONE BUILDER of a RollBackSession request and the one
@@ -152,7 +153,7 @@ func rollBackSession(ctx context.Context, client sessionRollBacker, turns []ids.
 		if vendor != "" {
 			detail = vendor
 		}
-		return nil, &ShimRefusal{Verb: "RollBackSession", Arm: arm, Detail: detail}
+		return nil, shimRefused(client, "RollBackSession", arm, detail)
 	}
 	return response.GetSuccess().GetFilesRestored().GetPaths(), nil
 }

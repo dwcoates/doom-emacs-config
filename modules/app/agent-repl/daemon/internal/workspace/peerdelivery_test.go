@@ -15,10 +15,15 @@ import (
 // fakePeerDeliveryResolver answers one scripted ResolvePeerDelivery and records
 // the request.
 type fakePeerDeliveryResolver struct {
-	req  *shimv1.ResolvePeerDeliveryRequest
-	resp *shimv1.ResolvePeerDeliveryResponse
-	err  error
+	// standingDown is what StandingDown answers: this daemon standing the fake down.
+	standingDown bool
+	req          *shimv1.ResolvePeerDeliveryRequest
+	resp         *shimv1.ResolvePeerDeliveryResponse
+	err          error
 }
+
+// StandingDown answers the fake's stand-down latch.
+func (c *fakePeerDeliveryResolver) StandingDown() bool { return c.standingDown }
 
 func (f *fakePeerDeliveryResolver) ResolvePeerDelivery(_ context.Context, req *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error) {
 	f.req = req

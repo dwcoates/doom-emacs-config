@@ -274,11 +274,16 @@ func hasRecord(f *fixture, level, operation string) bool {
 // call panics through the embedded nil interface, which no test here reaches.
 type fakeRollBackTransport struct {
 	shimclient.Client
+	// standingDown is what StandingDown answers: this daemon standing the fake down.
+	standingDown bool
 
 	req  *shimv1.RollBackSessionRequest
 	resp *shimv1.RollBackSessionResponse
 	err  error
 }
+
+// StandingDown answers the fake's stand-down latch.
+func (c *fakeRollBackTransport) StandingDown() bool { return c.standingDown }
 
 func (c *fakeRollBackTransport) RollBackSession(_ context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
 	c.req = req

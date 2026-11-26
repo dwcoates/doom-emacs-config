@@ -264,6 +264,13 @@ func TestCaptureDisplacedEndsOnlyTheTurn(t *testing.T) {
 			wantCause: "shim KillTurn refused: no_turn_open: no turn is open",
 		},
 		{
+			name: "a kill the shim's stand-down cut leaves the turn captured", openTurns: []wsm.Turn{record},
+			killTurnErr:  fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, &ShimRefusal{Verb: "KillTurn", Arm: "query_dead", Detail: "Query closed before response received"}),
+			wantCaptured: true, wantMarked: true, wantKills: 1,
+			wantLevel: "info", wantMsg: "the displaced turn's shim went under the kill; its session ends with it",
+			wantCause: "the shim was stood down by this daemon: shim KillTurn refused: query_dead: Query closed before response received",
+		},
+		{
 			name:         "an unreadable record captures and ends nothing",
 			openTurnsErr: errors.New("the store is down"),
 			wantErr:      "the store is down",

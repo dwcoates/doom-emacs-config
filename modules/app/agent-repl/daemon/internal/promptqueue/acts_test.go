@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -1026,5 +1027,48 @@ func TestReviveForSettingsWithNoRevivalIsNoSession(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrNoSession) {
 		t.Fatalf("err = %v, want ErrNoSession", err)
+	}
+}
+
+// stoodDownUnderTheCall is a shim call this daemon's stand-down of the shim
+// cut: the shim refused it because it was going.
+var stoodDownUnderTheCall = fmt.Errorf("%w: shim refused: vendor_refused: Query closed before response received", ErrShimStoodDown)
+
+func TestASessionActTheShimsStandDownCutIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		act     Act
+		arrange func(h *harness)
+		message string
+	}{
+		{name: "a model change", act: Act{Kind: ActSetModel, Value: "claude-opus-5-5"},
+			arrange: func(h *harness) { h.sender.setModelErr = stoodDownUnderTheCall },
+			message: "this daemon stood the shim down under the model change; the model was not changed"},
+		{name: "a permission-mode change", act: Act{Kind: ActSetPermissionMode, Value: "default"},
+			arrange: func(h *harness) { h.sender.setModeErr = stoodDownUnderTheCall },
+			message: "this daemon stood the shim down under the permission-mode change; the mode was not changed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act.
+			err := h.q.SubmitSessionAct(context.Background(), theWorkspace, tt.act)
+
+			// Assert.
+			if !errors.Is(err, ErrShimStoodDown) {
+				t.Fatalf("err = %v, want the stand-down surfaced", err)
+			}
+			if !logged(h.log.Records(), "info", opAct, tt.message) {
+				t.Fatalf("records = %+v, want %q at info", h.log.Records(), tt.message)
+			}
+			for _, r := range h.log.Records() {
+				if r.Operation == opAct && r.Level == "error" {
+					t.Fatalf("error record %+v, want none for the stand-down", r)
+				}
+			}
+		})
 	}
 }

@@ -316,6 +316,8 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 		fields := dlog.Context{"workspace": string(ws), "turn": string(*inFlight), "cause": err.Error()}
 		if refusal, ok := AsShimRefusal(err); ok && refusal.KillFoundNoTurnOpen() {
 			f.deps.Log.Global().Info(opFleetRollout, "the displaced turn had already ended when the kill landed", fields)
+		} else if shimGone(err) {
+			f.deps.Log.Global().Info(opFleetRollout, "the displaced turn's shim went under the kill; its session ends with it", fields)
 		} else {
 			f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", fields)
 		}

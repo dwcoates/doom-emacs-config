@@ -714,6 +714,12 @@ func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 			message: "the shim refused the interrupt as not naming its open turn, though the queue still runs that turn; the jump is stripped and the prompt waits for the turn to end",
 		},
 		{
+			name:    "a kill this daemon's stand-down of the shim cut is no refusal",
+			cause:   fmt.Errorf("%w: shim KillTurn refused: query_dead: Query closed before response received", ErrShimStoodDown),
+			level:   "info",
+			message: "this daemon stood the shim down under the interrupt; the jump is stripped and the prompt waits for the turn's end",
+		},
+		{
 			name:    "any other refusal is unexpected",
 			cause:   errors.New("the turn is not the open one"),
 			level:   "warn",

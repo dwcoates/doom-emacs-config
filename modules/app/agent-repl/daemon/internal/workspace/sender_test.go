@@ -20,6 +20,8 @@ import (
 
 // fakeSenderClient answers each shim verb with whatever a test arranged.
 type fakeSenderClient struct {
+	// standingDown is what StandingDown answers: this daemon standing the fake down.
+	standingDown   bool
 	startTurn      *shimv1.StartTurnResponse
 	updateAgent    *shimv1.UpdateAgentResponse
 	killTurn       *shimv1.KillTurnResponse
@@ -34,6 +36,9 @@ type fakeSenderClient struct {
 	rollBackReq    *shimv1.RollBackSessionRequest
 	startTurnErr   error
 }
+
+// StandingDown answers the fake's stand-down latch.
+func (c *fakeSenderClient) StandingDown() bool { return c.standingDown }
 
 func (c *fakeSenderClient) RollBackSession(_ context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
 	c.rollBackReq = req
@@ -1093,6 +1098,35 @@ func TestSenderEveryTurnVerbCarriesTheSender(t *testing.T) {
 			// Assert.
 			if got := client.startTurnReq.GetSentBy().GetWorkspaceName(); got != "parser-fix" {
 				t.Fatalf("sent_by.workspace_name = %q, want parser-fix", got)
+			}
+		})
+	}
+}
+
+func TestForQueueAnswersTheStandDownAsTheQueuesStoodDown(t *testing.T) {
+	recorded := &ShimRefusal{Verb: "StartTurn", Arm: ArmShimPromptRecorded}
+	plain := errors.New("socket closed")
+	tests := []struct {
+		name          string
+		err           error
+		wantStoodDown bool
+	}{
+		{name: "a call the stand-down cut at the transport", err: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, plain), wantStoodDown: true},
+		{name: "a refusal from a shim being stood down", err: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, &ShimRefusal{Verb: "StartTurn", Arm: "query_dead"}), wantStoodDown: true},
+		{name: "a prompt the vendor already recorded stays recorded", err: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, recorded), wantStoodDown: false},
+		{name: "any other failure", err: plain, wantStoodDown: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the table. Act.
+			got := forQueue(tt.err)
+
+			// Assert.
+			if !errors.Is(got, tt.err) {
+				t.Fatalf("forQueue = %v, want the cause kept", got)
+			}
+			if stood := errors.Is(got, promptqueue.ErrShimStoodDown); stood != tt.wantStoodDown {
+				t.Fatalf("errors.Is(forQueue, ErrShimStoodDown) = %v, want %v", stood, tt.wantStoodDown)
 			}
 		})
 	}

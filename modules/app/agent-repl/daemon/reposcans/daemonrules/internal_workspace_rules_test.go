@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -984,5 +985,46 @@ func TestEveryBindThenNameGoesThroughBringUpViews(t *testing.T) {
 	// Assert
 	if !slices.Equal(pairs, []string{"register.go"}) {
 		t.Fatalf("bind-then-name pairs = %v, want exactly the one in bringUpViews (register.go)", pairs)
+	}
+}
+
+// TestEveryTypedShimRefusalIsReadThroughShimRefused pins the extraction: a
+// ShimRefusal is built by hand only where no shim answered (the daemon's own
+// no-session answers) or where the stand-down cannot apply, so a verb that
+// reads a shim's refusal without shimRefused fails here.
+func TestEveryTypedShimRefusalIsReadThroughShimRefused(t *testing.T) {
+	sourcescan.InPackage(t, internalWorkspaceDir)
+	// Arrange: every literal a non-test source may hold, by its text.
+	allowed := []string{
+		// shimRefused itself.
+		`&ShimRefusal{Verb: verb, Arm: arm, Detail: detail}`,
+		// The daemon's own answers for a workspace with no session or shim.
+		`Arm: ArmShimNoSession, Detail: "the workspace has no live session"}`,
+		`Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}`,
+		`Arm: ArmShimNoSession, Detail: err.Error()}`,
+		`Arm: ArmShimNoSession, Detail: "the workspace has no running session"}`,
+		// KillSession raises the latch itself (shimRefused's comment).
+		`&ShimRefusal{Verb: "KillSession", Arm: killSessionArm(failure), Detail: failure.GetDetail()}`,
+		// An arm the daemon does not name is a contract fault, never the stand-down.
+		`&ShimRefusal{Verb: "SendKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}`,
+	}
+	files := sourcescan.Production(t, internalWorkspaceDir)
+
+	// Act.
+	var strays []string
+	for _, file := range files {
+		for i, line := range strings.Split(string(file.Source), "\n") {
+			if !strings.Contains(line, "&ShimRefusal{") {
+				continue
+			}
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.Contains(line, a) }) {
+				strays = append(strays, file.Name+":"+strconv.Itoa(i+1)+": "+strings.TrimSpace(line))
+			}
+		}
+	}
+
+	// Assert.
+	if len(strays) != 0 {
+		t.Fatalf("typed refusals built without shimRefused:\n%s", strings.Join(strays, "\n"))
 	}
 }

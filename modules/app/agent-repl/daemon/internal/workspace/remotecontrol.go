@@ -267,6 +267,7 @@ func (f *Fleet) owedForNetwork(ctx context.Context, log dlog.Logger, ws ids.Work
 // change uses.
 type shimclientRemoteControl interface {
 	SetSessionRemoteControl(ctx context.Context, req *shimv1.SetSessionRemoteControlRequest) (*shimv1.SetSessionRemoteControlResponse, error)
+	standingDowner
 }
 
 // applyRemoteControl sends one SetSessionRemoteControl for ON, and keeps the
@@ -289,7 +290,7 @@ func (f *Fleet) applyRemoteControl(ctx context.Context, log dlog.Logger, ws ids.
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: remoteControlArm(failure), Detail: failure.GetDetail()}
+		return shimRefused(client, "SetSessionRemoteControl", remoteControlArm(failure), failure.GetDetail())
 	}
 	success := response.GetSuccess()
 	switch {

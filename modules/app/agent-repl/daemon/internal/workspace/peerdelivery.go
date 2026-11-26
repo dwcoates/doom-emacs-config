@@ -22,6 +22,7 @@ import (
 // peerDeliveryResolver is the one shim call ResolvePeerDelivery needs.
 type peerDeliveryResolver interface {
 	ResolvePeerDelivery(ctx context.Context, req *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error)
+	standingDowner
 }
 
 // ResolvePeerDelivery asks WS's shim which sessions hold the two ends of
@@ -60,7 +61,7 @@ func resolvePeerDelivery(ctx context.Context, client peerDeliveryResolver, deliv
 		return feed.PeerDeliveryEnds{}, err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return feed.PeerDeliveryEnds{}, &ShimRefusal{Verb: "ResolvePeerDelivery", Arm: resolvePeerDeliveryArm(failure), Detail: failure.GetDetail()}
+		return feed.PeerDeliveryEnds{}, shimRefused(client, "ResolvePeerDelivery", resolvePeerDeliveryArm(failure), failure.GetDetail())
 	}
 	success := response.GetSuccess()
 	if success == nil {

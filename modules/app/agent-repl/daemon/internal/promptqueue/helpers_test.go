@@ -702,7 +702,9 @@ type fakeSender struct {
 	killErr      error
 	promptErr    error
 	setModelErr  error
-	mainAgent    string
+	// setModeErr, when set, is every SetPermissionMode's answer.
+	setModeErr error
+	mainAgent  string
 	// startHook runs inside StartTurn, so a test can observe what the queue
 	// holds while a delivery is in flight.
 	startHook func()
@@ -891,6 +893,9 @@ func (s *fakeSender) SetPermissionMode(_ context.Context, mode string) error {
 	defer s.mu.Unlock()
 	if s.callHook != nil {
 		s.callHook("SetPermissionMode")
+	}
+	if s.setModeErr != nil {
+		return s.setModeErr
 	}
 	s.modes = append(s.modes, mode)
 	return nil

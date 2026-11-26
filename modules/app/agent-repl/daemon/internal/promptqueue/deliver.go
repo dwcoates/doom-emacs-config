@@ -201,6 +201,12 @@ func (q *queue) deliverToAgent(ctx context.Context, d *delivery, sub Submission,
 	d.outside(shimCall{what: "agent_prompt", turn: sub.Turn, holds: sub.claims()}, log, func() {
 		err = sender.PromptAgent(ctx, agent, sub.Said)
 	})
+	if errors.Is(err, ErrShimStoodDown) {
+		log.Info(opDeliver, "this daemon stood the shim down under the agent-addressed prompt; it was not delivered", dlog.Context{
+			"agent": agent.GetValue(), "cause": err.Error(),
+		})
+		return Disposition{}, fmt.Errorf("prompt agent %q on %q: %w", agent.GetValue(), sub.WS, err)
+	}
 	if err != nil {
 		log.Error(opDeliver, "the shim refused the agent-addressed prompt", dlog.Context{
 			"agent": agent.GetValue(), "cause": err.Error(),
