@@ -41,9 +41,10 @@ const DefaultLauncherSocket = "~/.cache/agent-repl/sock/launcher.sock"
 // to be resized.
 const LauncherPostBound = 5 * time.Second
 
-// ErrNotAllowed is a banner macOS refused because the user has not allowed
-// Zettel to post notifications.
-var ErrNotAllowed = errors.New("macOS refused the banner: Zettel is not allowed to post notifications (System Settings → Notifications → Zettel)")
+// ErrNotAllowed is a banner Zettel's notification settings keep off the
+// screen, so the launcher never posted it; the error wrapping it names the
+// setting.
+var ErrNotAllowed = errors.New("Zettel's notification settings keep the banner off screen (System Settings → Notifications → Zettel)")
 
 // Launcher is the macOS Backend: the launcher (Zettel.app) posts every
 // banner, and each Post hands it one over the launcher's own socket.
@@ -106,7 +107,7 @@ func (l *Launcher) Post(ctx context.Context, target Target, banner Banner, made 
 		made()
 		return Handed, nil
 	case *agentreplv1.DesktopBannerPostOutcome_NotAllowed:
-		return Unclicked, ErrNotAllowed
+		return Unclicked, fmt.Errorf("%w: %s", ErrNotAllowed, arm.NotAllowed.GetSetting())
 	case *agentreplv1.DesktopBannerPostOutcome_Failed:
 		return Unclicked, fmt.Errorf("macOS refused the banner: %s", arm.Failed.GetPlatformError())
 	default:

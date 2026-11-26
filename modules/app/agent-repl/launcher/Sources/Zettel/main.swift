@@ -179,13 +179,13 @@ do {
 // own executable so macOS answers for Zettel.app.
 func exitWithAuthorization() -> Never {
     let settled = DispatchSemaphore(value: 0)
-    var status = UNAuthorizationStatus.notDetermined
+    var display = DisplaySettings(authorization: .notDetermined, alert: .notSupported, style: .none)
     UNUserNotificationCenter.current().getNotificationSettings { settings in
-        status = settings.authorizationStatus
+        display = DisplaySettings(settings)
         settled.signal()
     }
     settled.wait()
-    let report = authorizationReport(status)
+    let report = displayReport(display)
     print(report.line)
     exit(report.allowed ? 0 : 1)
 }

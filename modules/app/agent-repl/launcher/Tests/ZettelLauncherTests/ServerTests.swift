@@ -70,8 +70,8 @@ final class BannerExchangeTests: XCTestCase {
     func testEachResultIsAnsweredAsItsOutcome() async throws {
         let cases: [(PostResult, Launcher_V1_PostBannerResponse, LogLevel, String)] = [
             (.posted, .with { $0.outcome.posted = .init() }, .info, "posted a banner"),
-            (.notAllowed, .with { $0.outcome.notAllowed = .init() }, .error,
-             "macOS refused the banner: Zettel is not allowed to notify (System Settings → Notifications → Zettel)"),
+            (.notAllowed("the alert style is None"), .with { $0.outcome.notAllowed.setting = "the alert style is None" }, .error,
+             "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)"),
             (.failed("center busy"), .with { $0.outcome.failed.platformError = "center busy" }, .error, "macOS refused the banner"),
         ]
         for (result, want, level, record) in cases {
@@ -87,6 +87,19 @@ final class BannerExchangeTests: XCTestCase {
             XCTAssertEqual(center.posted.map(\.group.id), ["agent-repl:ws1"], "\(result)")
             XCTAssertEqual(log.first(level, record)?.context["daemon_pid"], "4242", "\(result)")
         }
+    }
+
+    func testABannerKeptOffScreenRecordsTheSettingThatKeepsIt() async throws {
+        // Arrange
+        fresh()
+        center.result = .notAllowed("notifications are denied")
+
+        // Act
+        _ = try await exchange(delimited(bannerRequest()))
+
+        // Assert
+        let record = log.first(.error, "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)")
+        XCTAssertEqual(record?.context["setting"], "notifications are denied")
     }
 
     func testAnUnpostableRequestIsRefusedAndPostsNothing() async throws {

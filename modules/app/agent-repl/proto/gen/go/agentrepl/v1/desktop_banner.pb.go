@@ -389,15 +389,17 @@ type isDesktopBannerPostOutcome_Outcome interface {
 }
 
 type DesktopBannerPostOutcome_Posted struct {
-	// The notification center accepted the banner. Whether macOS then shows
-	// it at once, or files it in Notification Center because a Focus is on,
-	// is the user's setting and not reported.
+	// The notification center accepted the banner, and Zettel's settings
+	// draw it on screen: notifications are allowed, alerts are on, and their
+	// style is banners or alerts. The daemon rings the banner's chime on this
+	// answer alone, so a sound always means a banner on screen. A Focus that
+	// files the banner silently is not reported.
 	Posted *DesktopBannerPostOutcomePosted `protobuf:"bytes,1,opt,name=posted,proto3,oneof"`
 }
 
 type DesktopBannerPostOutcome_NotAllowed struct {
-	// The user has not allowed Zettel to post notifications, so the banner
-	// was refused. Remedied only in System Settings → Notifications → Zettel.
+	// Zettel's notification settings keep the banner off the screen, so it was
+	// not posted. Remedied only in System Settings → Notifications → Zettel.
 	NotAllowed *DesktopBannerPostOutcomeNotAllowed `protobuf:"bytes,2,opt,name=not_allowed,json=notAllowed,proto3,oneof"`
 }
 
@@ -449,9 +451,12 @@ func (*DesktopBannerPostOutcomePosted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_desktop_banner_proto_rawDescGZIP(), []int{6}
 }
 
-// The user has not allowed Zettel to post notifications.
+// Zettel's notification settings keep the banner off the screen.
 type DesktopBannerPostOutcomeNotAllowed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The setting that keeps it off, as a line for the record (e.g.
+	// "notifications are denied", "the alert style is None"). REQUIRED.
+	Setting       string `protobuf:"bytes,1,opt,name=setting,proto3" json:"setting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -484,6 +489,13 @@ func (x *DesktopBannerPostOutcomeNotAllowed) ProtoReflect() protoreflect.Message
 // Deprecated: Use DesktopBannerPostOutcomeNotAllowed.ProtoReflect.Descriptor instead.
 func (*DesktopBannerPostOutcomeNotAllowed) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_desktop_banner_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DesktopBannerPostOutcomeNotAllowed) GetSetting() string {
+	if x != nil {
+		return x.Setting
+	}
+	return ""
 }
 
 // The notification center refused the banner for a reason other than
@@ -557,8 +569,9 @@ const file_agentrepl_v1_desktop_banner_proto_rawDesc = "" +
 	"notAllowed\x12F\n" +
 	"\x06failed\x18\x03 \x01(\v2,.agentrepl.v1.DesktopBannerPostOutcomeFailedH\x00R\x06failedB\t\n" +
 	"\aoutcome\" \n" +
-	"\x1eDesktopBannerPostOutcomePosted\"$\n" +
-	"\"DesktopBannerPostOutcomeNotAllowed\"G\n" +
+	"\x1eDesktopBannerPostOutcomePosted\">\n" +
+	"\"DesktopBannerPostOutcomeNotAllowed\x12\x18\n" +
+	"\asetting\x18\x01 \x01(\tR\asetting\"G\n" +
 	"\x1eDesktopBannerPostOutcomeFailed\x12%\n" +
 	"\x0eplatform_error\x18\x01 \x01(\tR\rplatformErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 

@@ -4,7 +4,8 @@ import ZettelProto
 /// What the platform's notification center did with one banner.
 public enum PostResult: Equatable, Sendable {
     case posted
-    case notAllowed
+    /// Zettel's settings keep the banner off screen; the setting that does.
+    case notAllowed(String)
     case failed(String)
 }
 
@@ -37,7 +38,7 @@ public func answer(for result: PostResult) -> Launcher_V1_PostBannerResponse {
     .with { response in
         switch result {
         case .posted: response.outcome.posted = .init()
-        case .notAllowed: response.outcome.notAllowed = .init()
+        case .notAllowed(let setting): response.outcome.notAllowed.setting = setting
         case .failed(let platformError): response.outcome.failed.platformError = platformError
         }
     }
@@ -73,8 +74,8 @@ public struct BannerExchange: Sendable {
             switch result {
             case .posted:
                 log.info(ServerOp.post, "posted a banner", fields)
-            case .notAllowed:
-                log.error(ServerOp.post, "macOS refused the banner: Zettel is not allowed to notify (System Settings → Notifications → Zettel)", fields)
+            case .notAllowed(let setting):
+                log.error(ServerOp.post, "Zettel's settings keep the banner off screen; nothing was posted (System Settings → Notifications → Zettel)", fields.merging(["setting": setting]) { $1 })
             case .failed(let cause):
                 log.error(ServerOp.post, "macOS refused the banner", fields.merging(["cause": cause]) { $1 })
             }

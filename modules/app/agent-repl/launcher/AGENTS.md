@@ -35,7 +35,12 @@ click selects. It is the SERVER of the posts and the reporter of the clicks.
   workspace replaces its older one), with no sound (the daemon rings the one
   chime), and answers a `PostBannerResponse` once macOS's notification center
   took or refused it: an `agentrepl.v1.DesktopBannerPostOutcome` (posted,
-  not_allowed or failed) or a `PostBannerRefused`.
+  not_allowed or failed) or a `PostBannerRefused`. `posted` means Zettel's
+  settings draw the banner on screen: before each post it reads them
+  (`offScreenSetting`), and a banner they keep off (denied, alerts off, style
+  None, provisional) is never handed to macOS and answers `not_allowed`
+  naming that setting, because macOS's own `add` takes such a banner without
+  an error. `--check-notifications` asks the same function.
 - On a click it brings Emacs forward (the click is the one moment macOS lets it
   activate another app) and reports `ReportDesktopBannerClicked` with the
   banner's click token, to whichever daemon `<state>/daemon.addr` advertises at

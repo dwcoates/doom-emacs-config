@@ -12,9 +12,74 @@ public func postResult(for error: Error?) -> PostResult {
     guard let error else { return .posted }
     let ns = error as NSError
     if ns.domain == UNErrorDomain && ns.code == UNError.Code.notificationsNotAllowed.rawValue {
-        return .notAllowed
+        return .notAllowed("the notification center refused: notifications are not allowed")
     }
     return .failed("\(ns.domain) \(ns.code): \(ns.localizedDescription)")
+}
+
+/// The three of Zettel's notification settings that decide whether a banner
+/// is drawn on screen.
+public struct DisplaySettings: Equatable, Sendable {
+    public var authorization: UNAuthorizationStatus
+    public var alert: UNNotificationSetting
+    public var style: UNAlertStyle
+
+    public init(authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle) {
+        self.authorization = authorization
+        self.alert = alert
+        self.style = style
+    }
+
+    /// The settings macOS reports for Zettel.
+    public init(_ settings: UNNotificationSettings) {
+        self.init(authorization: settings.authorizationStatus, alert: settings.alertSetting, style: settings.alertStyle)
+    }
+}
+
+/// The setting that keeps a banner off the screen, or nil when Zettel's
+/// settings draw it. THE ONE ANSWER to whether a banner can appear: a post
+/// asks it before handing macOS the banner, and `--check-notifications` asks
+/// it for the installer.
+///
+/// macOS accepts a banner (`add` answers no error) even when its settings
+/// will never draw it, so the center's answer alone cannot say a banner
+/// appeared. The daemon rings the chime on `posted`, so `posted` is answered
+/// only when the settings draw the banner.
+public func offScreenSetting(_ settings: DisplaySettings) -> String? {
+    switch settings.authorization {
+    case .authorized: break
+    case .denied: return "notifications are denied"
+    case .notDetermined: return "notifications were never allowed (run Zettel --request-notifications)"
+    case .provisional: return "notifications are delivered quietly (provisional), never drawn"
+    case .ephemeral: return "notifications are ephemeral"
+    @unknown default: return "the authorization is one this app does not know (\(settings.authorization.rawValue))"
+    }
+    switch settings.alert {
+    case .enabled: break
+    case .disabled: return "alerts are off"
+    case .notSupported: return "alerts are not supported"
+    @unknown default: return "the alert setting is one this app does not know (\(settings.alert.rawValue))"
+    }
+    switch settings.style {
+    case .banner, .alert: return nil
+    case .none: return "the alert style is None"
+    @unknown default: return "the alert style is one this app does not know (\(settings.style.rawValue))"
+    }
+}
+
+/// Posts one banner only when SETTINGS draw it on screen: otherwise it is not
+/// handed to macOS at all and answers the setting that keeps it off. ADD hands
+/// the banner to the notification center.
+public func gatedPost(_ settings: DisplaySettings, add: () async throws -> Void) async -> PostResult {
+    if let setting = offScreenSetting(settings) {
+        return .notAllowed(setting)
+    }
+    do {
+        try await add()
+        return .posted
+    } catch {
+        return postResult(for: error)
+    }
 }
 
 /// The notification content one banner posts as: its title and body, no sound
@@ -47,24 +112,15 @@ public struct NotificationCenterPoster: BannerCenter {
             return .failed("encode the click token: \(error)")
         }
         let request = UNNotificationRequest(identifier: banner.group.id, content: content, trigger: nil)
-        do {
-            try await UNUserNotificationCenter.current().add(request)
-            return .posted
-        } catch {
-            return postResult(for: error)
-        }
+        let center = UNUserNotificationCenter.current()
+        let settings = DisplaySettings(await center.notificationSettings())
+        return await gatedPost(settings) { try await center.add(request) }
     }
 }
 
-/// One line naming a notification authorization, and whether it lets the
-/// app post: the answer of `--check-notifications`.
-public func authorizationReport(_ status: UNAuthorizationStatus) -> (line: String, allowed: Bool) {
-    switch status {
-    case .authorized: return ("Zettel may notify", true)
-    case .provisional: return ("Zettel may notify quietly (provisional)", true)
-    case .ephemeral: return ("Zettel may notify (ephemeral)", true)
-    case .denied: return ("Zettel may not notify: denied (System Settings → Notifications → Zettel)", false)
-    case .notDetermined: return ("Zettel may not notify: not asked yet (run Zettel --request-notifications)", false)
-    @unknown default: return ("Zettel may not notify: an authorization this app does not know (\(status.rawValue))", false)
-    }
+/// One line saying whether Zettel's settings draw banners, and whether they
+/// do: the answer of `--check-notifications`.
+public func displayReport(_ settings: DisplaySettings) -> (line: String, allowed: Bool) {
+    guard let setting = offScreenSetting(settings) else { return ("Zettel may notify", true) }
+    return ("Zettel's banners stay off screen: \(setting) (System Settings → Notifications → Zettel)", false)
 }
