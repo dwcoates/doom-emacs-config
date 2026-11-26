@@ -174,3 +174,11 @@ Its brief names this file, and it is the mediator's to write.
   adoption answered; since 2026-11-26 every reopen waits behind the context's
   adoption latch (`DaemonContext.awaitAdopted`), so one seen again is a defect
   in that latch, never a reason to re-level the record.
+- A `daemon.merge.remediate` error `has no live session to await turn` on a
+  successor within seconds of its takeover, preceded by `daemon.merge.review`
+  "takes up a merge no handover gave this daemon" for the same workspace and
+  followed by `daemon.rollout.adopt` "adopted the workspace", means the
+  takeover's queue review took up a merge an adoption was still bringing here;
+  since 2026-11-26 the review leaves such merges to their adoption
+  (`rollout.controller.adoptionHandsMerges`), so one seen again is a defect in
+  that predicate, never a reason to re-level the record.
