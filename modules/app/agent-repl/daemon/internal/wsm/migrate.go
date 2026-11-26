@@ -424,6 +424,9 @@ var migrations = []migration{
 	// and the stored feed rows' retired shapes dropped (retiredasyncmerges.go).
 	{To: 221, Name: "landing_effects", Kind: MigrationAdditive, DDL: landingEffectsDDL, Rewrite: retireAsyncMergeRows},
 	{To: 222, Name: "retired_async_merges", Kind: MigrationContract, DDL: retiredAsyncMergesDDL},
+	// IT IS ADDITIVE: the previous build reads the carried origin and the
+	// queue entries without their retired bubble (retiredasyncmerges.go).
+	{To: 223, Name: "retired_async_merge_rows", Kind: MigrationAdditive, DDL: retiredAsyncMergeRowsDDL, Rewrite: retireAsyncMergeQueueEntries},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

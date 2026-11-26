@@ -48,6 +48,13 @@ import (
 // A MERGE WORKSPACE STILL OPEN STAYS OPEN, as the visible child of the
 // workspace it was forked for: children are never hidden, and its work is
 // the user's to land or close.
+//
+// Layout 223, ADDITIVE, exists because layout 221's edit missed two retired
+// shapes, which reached the live file (2026-11-26 deploy check): the bubble of
+// a stored merge queue entry, which made the feed refuse every stored queue
+// tab, and the retired pick origin of a merge workspace's turns, which made
+// every read of the workspaces fail (retiredAsyncMergeRowsDDL,
+// retireAsyncMergeQueueEntries).
 const landingEffectsDDL = `
 ALTER TABLE workspaces ADD COLUMN landing_close_after TEXT;
 ALTER TABLE workspaces ADD COLUMN landing_cleanup_dir TEXT;
@@ -106,7 +113,18 @@ ALTER TABLE deploying_merges DROP COLUMN async;
 DELETE FROM merge_tab_intervals WHERE kind = 'pick';
 `
 
-// The retired fields of stored feed rows this step drops or carries.
+// retiredAsyncMergeRowsDDL is layout 223's own statement: a turn of the
+// retired pick origin (PROMPT_ORIGIN_MERGE_PICK, reserved 33), which no build
+// decodes any more, becomes a merge conflict repair. The pick turn was the
+// merge workspace's brief to pick the requester's commits and resolve what
+// conflicted, so the conflict repair is the surviving origin closest to it:
+// both start an agent turn, and both spend as VENDOR_CALL_CAUSE_MERGE. Only
+// turns.origin ever held the name.
+const retiredAsyncMergeRowsDDL = `
+UPDATE turns SET origin = 'PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR' WHERE origin = 'PROMPT_ORIGIN_MERGE_PICK';
+`
+
+// The retired fields of stored feed rows these steps drop or carry.
 const (
 	// retiredMergeHeadMode is frontend.v1.FeedMergeHead.mode: every merge
 	// now runs in place, so a stored head's mode says nothing.
@@ -116,6 +134,10 @@ const (
 	// merge workspace's feed, which nothing mirrors any more, so the tab
 	// has nothing to draw and is dropped.
 	retiredMergeTabResolving protowire.Number = 12
+	// retiredMergeQueueEntryBubble is frontend.v1.FeedMergeQueueEntry.bubble,
+	// where an async merge's bubble stood: every entry is now a workspace's
+	// own merge, so the bubble says nothing and is dropped.
+	retiredMergeQueueEntryBubble protowire.Number = 5
 )
 
 // retireAsyncMergeRows is layout 221's row edit: a stored merge head loses its
@@ -132,6 +154,23 @@ func retireAsyncMergeRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) erro
 						return false, nil
 					}
 					return dropUnknown(m, retiredMergeHeadMode)
+				})
+			})
+		})
+}
+
+// retireAsyncMergeQueueEntries is layout 223's row edit: every merge queue
+// entry of a stored row (a queue tab's ahead, current and behind) loses its
+// retired bubble. Every other row stays byte for byte.
+func retireAsyncMergeQueueEntries(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
+	return rewriteDurableRows(ctx, tx, log, logsite.Msg("dropped the retired bubble of stored merge queue entries"),
+		func(raw []byte) ([]byte, bool, error) {
+			return editFeedRow(raw, func(row *frontendv1.FeedRow) (bool, error) {
+				return walkMessages(row.ProtoReflect(), func(m protoreflect.Message) (bool, error) {
+					if _, entry := m.Interface().(*frontendv1.FeedMergeQueueEntry); !entry {
+						return false, nil
+					}
+					return dropUnknown(m, retiredMergeQueueEntryBubble)
 				})
 			})
 		})
