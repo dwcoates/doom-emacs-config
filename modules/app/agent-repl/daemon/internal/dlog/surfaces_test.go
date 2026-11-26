@@ -48,7 +48,7 @@ func readFileRecords(t *testing.T, path string) []map[string]any {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(raw)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -343,7 +343,7 @@ func TestWorkspaceOrCentralReportsTheFallbackOncePerWorkspace(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gone")
 
 	// Act: many records about the one workspace.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		s.WorkspaceOrCentral(dir).Info("daemon.workspace.opened", "opened", nil)
 	}
 
@@ -1979,7 +1979,7 @@ func TestClientLogOnAGoneDirectoryStatesTheFallbackOnceAtInfo(t *testing.T) {
 	dir := goneWorkspaceDir(t)
 
 	// Act: many records about the one workspace.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err := s.ClientLog(dir, sidecarRecord()); err != nil {
 			t.Fatalf("ClientLog: %v", err)
 		}
