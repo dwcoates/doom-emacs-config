@@ -101,6 +101,10 @@ func ensureWifiService(t testing.TB, d *Daemon) string {
 		t.Fatalf("harness: start the persistent-wifi service: %v", err)
 	}
 	_ = file.Close()
+	// THE SERVICE NAMES THE STATE ROOT in its argv (--state-dir) and outlives
+	// every daemon over it by design, so it is the TEST's process, never a
+	// stray of the daemon's tree: the test stops it at its end, below.
+	SpareFromStrayReaping(t, cmd.Process.Pid)
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 	wifiServices.Store(d.StateDir, &wifiHost{socket: socket, hostToolsDir: d.HostToolsDir, lid: d.Lid, powerSource: d.PowerSource})
