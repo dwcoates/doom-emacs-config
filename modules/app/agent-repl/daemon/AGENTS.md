@@ -1267,7 +1267,7 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
 1. build into `<state>/deploy/staging/<nonce>` (`ScriptBuilder`: `make -C
    proto all`, then `bin/build-frontend.sh --out <staging> <target>` for
    shim, webapp, daemon, store, sidecar, zettel, lock, and on macOS
-   `launcher`, staged as `cache-bin/Zettel.app`). A failure is `build_failed`
+   `launcher`, staged as `cache-bin/Zettel.app.staged`, a name with no `.app` extension so macOS never registers the build as a second Zettel). A failure is `build_failed`
    with the step, the tail of its output and the archived log; NOTHING is
    installed or restarted.
 2. hash every staged artifact (`buildid`: binaries and the shim bundle by
@@ -1275,7 +1275,8 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
    held to `proto/vocab/elisp-build.json`);
 3. install atomically (copy beside, rename over; the shim bundle only while no
    spawn holds it; the launcher app's bundle swapped whole into
-   `~/Applications`, `Live.LauncherApp`);
+   `~/Applications`, `Live.LauncherApp`, and a stray `cache-bin/Zettel.app` from an
+   older build removed with an INFO record, `removeStrayLauncherApp`);
 4. decide, component by component, against each RUNNING process's reported
    build: store/sidecar by their build report (`agentrepl/logging/buildreport`)
    and restart them in the recorded safe order (`Restarter`); the launcher app

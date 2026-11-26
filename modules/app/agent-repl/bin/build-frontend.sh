@@ -100,7 +100,7 @@
 #   zettel  -> DIR/cache-bin/zettel
 #   tests   -> DIR/cache-bin/agent-repl-tests
 #              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
-#   launcher -> DIR/cache-bin/Zettel.app (macOS only; + .Zettel.app.built-sha,
+#   launcher -> DIR/cache-bin/Zettel.app.staged (macOS only; + .Zettel.app.built-sha,
 #              .Zettel.app.source-tree in DIR/cache-bin/). In place, the app
 #              is also installed in ~/Applications by bin/build-launcher.sh;
 #              staged, the deploy installs it.
@@ -319,7 +319,9 @@ LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
 SOCKETHOLD_ARTIFACT="$CACHE_BIN/sockethold"
 ZETTEL_ARTIFACT="$CACHE_BIN/zettel"
 TESTS_ARTIFACT="$CACHE_BIN/agent-repl-tests"
-LAUNCHER_ARTIFACT="$CACHE_BIN/Zettel.app"
+# NOT NAMED *.app: macOS registers any .app it finds, and a second Zettel beside
+# the installed one shows twice in System Settings.
+LAUNCHER_ARTIFACT="$CACHE_BIN/Zettel.app.staged"
 
 # Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
 # readiness-report.sh can say which source revision the deployed artifact is

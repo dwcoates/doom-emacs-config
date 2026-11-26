@@ -37,9 +37,15 @@ type Live struct {
 	Applications string
 }
 
-// LauncherBundle is the launcher's bundle name, staged in the cache bin
-// and installed in Live.Applications.
+// LauncherBundle is the launcher's bundle name, installed in
+// Live.Applications.
 const LauncherBundle = "Zettel.app"
+
+// LauncherStaged is the name the launcher's built bundle stands under in the
+// staging cache bin. It carries no .app extension, so macOS never registers
+// the build as a second Zettel beside the installed one (System Settings
+// listed both, and notifications could be attributed to either).
+const LauncherStaged = "Zettel.app.staged"
 
 // LauncherExecutable is the launcher's executable inside its bundle: the
 // file its build is named by.
@@ -256,4 +262,24 @@ func stampsBeside(stagedDir, liveDir, prefix string) map[string]string {
 		out[filepath.Join(stagedDir, name)] = filepath.Join(liveDir, name)
 	}
 	return out
+}
+
+// removeStrayLauncherApp deletes a Zettel.app bundle left in the live cache
+// bin by a build from before the staged bundle lost its .app name. macOS
+// registers any .app it finds, so the leftover is a second Zettel in System
+// Settings. The record names what was removed; nothing stands there once a
+// machine has healed, so a clean cache bin logs nothing.
+func (d *Deployer) removeStrayLauncherApp(live Live) error {
+	stray := live.CacheBinPath(LauncherBundle)
+	if _, err := os.Lstat(stray); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read whether a stray launcher app stands at %s: %w", stray, err)
+	}
+	if err := os.RemoveAll(stray); err != nil {
+		return fmt.Errorf("remove the stray launcher app at %s: %w", stray, err)
+	}
+	d.log.Info(opInstall, "removed a stray Zettel.app from the cache bin, which macOS would list beside the installed one", dlog.Context{"path": stray, "installed": live.LauncherApp()})
+	return nil
 }

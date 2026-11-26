@@ -188,8 +188,8 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
   printf 'harness\n' > "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources/source-sha256"
   if [ "$(uname)" = Darwin ]; then
-    mkdir -p "$out/cache-bin/Zettel.app/Contents/MacOS"
-    printf ` + shellword.Quote(strings.TrimSuffix(fakeLauncherExecutable, "\n")+"\n") + ` > "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel"
+    mkdir -p "$out/cache-bin/Zettel.app.staged/Contents/MacOS"
+    printf ` + shellword.Quote(strings.TrimSuffix(fakeLauncherExecutable, "\n")+"\n") + ` > "$out/cache-bin/Zettel.app.staged/Contents/MacOS/Zettel"
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.Zettel.app.$f"; done
   fi
   for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock sockethold; do

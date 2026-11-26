@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -334,5 +335,59 @@ func TestTheLauncherInstallPlacesItsStampsBesideTheInstalledApp(t *testing.T) {
 	stamp := filepath.Join(h.live.Applications, ".Zettel.app.source-tree")
 	if got := readFile(t, stamp); got != "tree-launcher-2" {
 		t.Fatalf("launcher source-tree stamp = %q, want the fresh build's, which a staging run reuses the app by", got)
+	}
+}
+
+func TestTheLauncherIsStagedUnderANameMacOSDoesNotTreatAsAnApp(t *testing.T) {
+	// Arrange
+	staged := LauncherStaged
+
+	// Act
+	ext := filepath.Ext(staged)
+
+	// Assert
+	if ext == ".app" {
+		t.Fatalf("staged launcher %q has the .app extension, so macOS would register it beside the installed one", staged)
+	}
+	if staged == LauncherBundle {
+		t.Fatalf("staged launcher %q is the installed bundle's name", staged)
+	}
+}
+
+func TestTheLauncherInstallRemovesAStrayAppFromTheCacheBin(t *testing.T) {
+	cases := []struct {
+		name       string
+		stray      bool
+		wantRecord bool
+	}{
+		{name: "a leftover Zettel.app in the cache bin is removed and recorded", stray: true, wantRecord: true},
+		{name: "a clean cache bin records nothing", stray: false, wantRecord: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newLauncherHarness(t, hashOf(t, "launcher-1"))
+			stray := h.live.CacheBinPath(LauncherBundle)
+			if tc.stray {
+				writeFile(t, filepath.Join(stray, LauncherExecutable), "stale")
+			}
+
+			// Act
+			_, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+			if _, statErr := os.Lstat(stray); !os.IsNotExist(statErr) {
+				t.Fatalf("stray app at %s: stat err = %v, want it gone", stray, statErr)
+			}
+			if got := logged(h.log, "info", opInstall, "removed a stray Zettel.app"); got != tc.wantRecord {
+				t.Fatalf("removal recorded = %v, want %v", got, tc.wantRecord)
+			}
+			if got := readFile(t, filepath.Join(h.live.LauncherApp(), LauncherExecutable)); got != "launcher-2" {
+				t.Fatalf("installed launcher = %q, want the fresh build", got)
+			}
+		})
 	}
 }

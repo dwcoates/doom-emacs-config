@@ -918,7 +918,7 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	}
 	if d.deps.Launcher {
 		step("launcher", &b.launcher, func() (string, error) {
-			return buildid.File(filepath.Join(s.CacheBin(LauncherBundle), LauncherExecutable))
+			return buildid.File(filepath.Join(s.CacheBin(LauncherStaged), LauncherExecutable))
 		})
 	}
 	return b, err
@@ -1054,7 +1054,7 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 	if d.deps.Launcher {
 		// ITS STAMPS STAND BESIDE THE INSTALLED APP, in the Applications
 		// directory, where a staging run looks for the launcher to reuse.
-		launcherStamps := stampsBeside(filepath.Dir(s.CacheBin(LauncherBundle)), live.Applications, LauncherBundle+".")
+		launcherStamps := stampsBeside(filepath.Dir(s.CacheBin(LauncherStaged)), live.Applications, LauncherBundle+".")
 		artifacts = append(artifacts, artifact{component: ComponentLauncher, name: LauncherBundle, fresh: fresh.launcher,
 			installed: func() (string, error) {
 				return buildid.File(filepath.Join(live.LauncherApp(), LauncherExecutable))
@@ -1062,7 +1062,10 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 				if err := in.dropStamps(launcherStamps); err != nil {
 					return err
 				}
-				if err := in.dir(s.CacheBin(LauncherBundle), live.LauncherApp()); err != nil {
+				if err := in.dir(s.CacheBin(LauncherStaged), live.LauncherApp()); err != nil {
+					return err
+				}
+				if err := d.removeStrayLauncherApp(live); err != nil {
 					return err
 				}
 				return in.stamps(launcherStamps)
