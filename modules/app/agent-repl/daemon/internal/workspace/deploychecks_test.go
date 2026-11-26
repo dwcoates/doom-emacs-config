@@ -439,6 +439,89 @@ func TestAnswerDeployCheckColdGateAnswersOnlyAStandingDeployChecksGate(t *testin
 	}
 }
 
+// TestAnswerDeployCheckColdGateAwaitsTheAdoption pins the handover's order:
+// the carried gate is raised inside the adoption, before the rollout marks the
+// workspace owned, so the answer waits on the adoption rather than reading the
+// standing once (2026-11-26 02:04:57Z, refused not_yet_adopted).
+func TestAnswerDeployCheckColdGateAwaitsTheAdoption(t *testing.T) {
+	errBound := errors.New("rollout: workspace \"w1\" was not adopted within 20s")
+	const (
+		waited   = "the gate was raised before this daemon adopted the deploy check; its answer waited for the adoption"
+		answered = "a cold gate stands on the standing deploy check; it is answered compact-and-resume at once"
+		handed   = "the deploy check was handed to a successor daemon; its gate's answer is left to the daemon that serves the workspace"
+	)
+	tests := []struct {
+		name         string
+		notMediator  bool
+		first        Standing
+		reached      Standing
+		awaitErr     error
+		wantAnswered bool
+		wantAwaits   int
+		wantRecord   string
+		wantAbsent   string
+	}{
+		{name: "a gate raised before the adoption is answered once the adoption lands",
+			first: StandingNotYetAdopted, reached: StandingOwned, wantAnswered: true, wantAwaits: 1, wantRecord: waited},
+		{name: "a gate raised on an owned deploy check is answered with no word of a wait",
+			first: StandingOwned, reached: StandingOwned, wantAnswered: true, wantAwaits: 1, wantRecord: answered, wantAbsent: waited},
+		{name: "an adoption wait that fails answers its failure and nothing else",
+			first: StandingNotYetAdopted, reached: StandingNotYetAdopted, awaitErr: errBound, wantAwaits: 1, wantAbsent: answered},
+		{name: "a deploy check handed to a successor is left to the daemon that serves it",
+			first: StandingNotYetAdopted, reached: StandingTransferringAway, wantAwaits: 1, wantRecord: handed},
+		{name: "a workspace that is no deploy check never waits on an adoption",
+			notMediator: true, first: StandingNotYetAdopted, reached: StandingOwned},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			record := f.workspace("w1", t.TempDir())
+			if !tt.notMediator {
+				record.Mediator = wsm.MediatorDeploy
+			}
+			f.db.workspaces[record.ID] = record
+			served, _ := coldCompactMenu()
+			f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
+			f.owner.standing = tt.first
+			awaits := 0
+			f.owner.awaitAdopted = func(ids.WorkspaceID) (Standing, error) {
+				awaits++
+				f.owner.standing = tt.reached
+				return tt.reached, tt.awaitErr
+			}
+
+			// Act
+			err := f.verbs.(*verbs).AnswerDeployCheckColdGate(context.Background(), record.ID)
+
+			// Assert
+			if tt.awaitErr != nil && !errors.Is(err, tt.awaitErr) {
+				t.Fatalf("AnswerDeployCheckColdGate = %v, want the wait's failure %v", err, tt.awaitErr)
+			}
+			if tt.awaitErr == nil && err != nil {
+				t.Fatalf("AnswerDeployCheckColdGate = %v, want no error", err)
+			}
+			if awaits != tt.wantAwaits {
+				t.Fatalf("adoption waits = %d, want %d", awaits, tt.wantAwaits)
+			}
+			if got := f.cards.coldGatesCleared == 1; got != tt.wantAnswered {
+				t.Fatalf("gate answered = %v (gates taken %d), want %v", got, f.cards.coldGatesCleared, tt.wantAnswered)
+			}
+			records := f.log.logger.Records()
+			if tt.wantRecord != "" {
+				if _, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: tt.wantRecord}); !ok {
+					t.Fatalf("records = %+v, want %q at INFO", records, tt.wantRecord)
+				}
+			}
+			if tt.wantAbsent != "" {
+				if _, ok := dlog.FindRecord(records, dlog.RecordQuery{Operation: opDeployChecks, Message: tt.wantAbsent}); ok {
+					t.Fatalf("records = %+v, want no %q", records, tt.wantAbsent)
+				}
+			}
+		})
+	}
+}
+
 func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

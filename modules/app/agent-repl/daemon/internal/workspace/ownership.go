@@ -25,12 +25,29 @@ func NewOwnership(controller rollout.Controller) Ownership {
 	return &ownership{rollout: controller}
 }
 
-// Standing translates the rollout's standing into the verbs' spelling. The two
-// enumerations are deliberately separate — the packages do not share a
+// Standing translates the rollout's standing into the verbs' spelling.
+func (o *ownership) Standing(_ context.Context, ws ids.WorkspaceID) (Standing, error) {
+	return translateStanding(ws, o.rollout.Standing(ws))
+}
+
+// AwaitAdopted waits on the rollout's own adoption latch, within its adoption
+// bound, and translates the standing it reached. A bound that fires is the
+// rollout's ERROR, returned with the standing translated as well.
+func (o *ownership) AwaitAdopted(ctx context.Context, ws ids.WorkspaceID) (Standing, error) {
+	reached, err := o.rollout.AwaitAdopted(ctx, ws)
+	standing, translateErr := translateStanding(ws, reached)
+	if err != nil {
+		return standing, err
+	}
+	return standing, translateErr
+}
+
+// translateStanding carries a rollout standing into the verbs' spelling. The
+// two enumerations are deliberately separate — the packages do not share a
 // vocabulary — so the translation is exhaustive and an unrecognized value is a
 // refusal rather than a silent "owned".
-func (o *ownership) Standing(_ context.Context, ws ids.WorkspaceID) (Standing, error) {
-	switch standing := o.rollout.Standing(ws); standing {
+func translateStanding(ws ids.WorkspaceID, standing rollout.Standing) (Standing, error) {
+	switch standing {
 	case rollout.StandingOwned:
 		return StandingOwned, nil
 	case rollout.StandingTransferringAway:
