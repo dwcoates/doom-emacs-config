@@ -191,3 +191,70 @@ func TestAJoiningSuccessorAdoptsATransferThatLeftNobodyToCall(t *testing.T) {
 		t.Fatal("the workspace nobody was left to call about was never adopted")
 	}
 }
+
+// runFollower runs followCarries over CHANGES until CTX ends, answering a
+// channel closed when the follower has stopped its watch.
+func runFollower(ctx context.Context, h *harness, changes <-chan error) <-chan struct{} {
+	stopped := make(chan struct{})
+	go h.c.followCarries(ctx, changes, func() { close(stopped) })
+	return stopped
+}
+
+func TestTheFollowerAdoptsTheHeadlessWorkspacesATransferLeft(t *testing.T) {
+	// Arrange: armed without Join, so this follower is the only one.
+	adopted := make(chan ids.WorkspaceID, 4)
+	h := harnessSignallingAdoptions(t, adopted)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true, Web: true})
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+	releaseServing(t, h, ws)
+	carryParticipants(t, h, ws, outgoingPrevious, Participants{})
+	ctx, cancel := context.WithCancel(context.Background())
+	changes := make(chan error, 1)
+	stopped := runFollower(ctx, h, changes)
+
+	// Act
+	changes <- nil
+
+	// Assert
+	select {
+	case got := <-adopted:
+		if got != ws {
+			t.Fatalf("adopted %q, want %q", got, ws)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the follower never adopted the workspace the transfer left headless")
+	}
+	cancel()
+	<-stopped
+	found := false
+	for _, rec := range records(h.log, opJoin) {
+		if rec.Level == "info" && rec.Message == "a transfer left workspaces with no participant to call; adopting them headless" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want the headless adoption recorded at INFO", records(h.log, opJoin))
+	}
+}
+
+func TestAFollowerWhoseWatchFailsStopsAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	changes := make(chan error, 1)
+	stopped := runFollower(context.Background(), h, changes)
+
+	// Act
+	changes <- errFake
+	<-stopped
+
+	// Assert
+	if !loggedError(h.log, opJoin, "could not watch the handover's carries") {
+		t.Fatalf("records = %+v, want the failed watch at ERROR", records(h.log, opJoin))
+	}
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want none from a follower that stopped", got)
+	}
+}
