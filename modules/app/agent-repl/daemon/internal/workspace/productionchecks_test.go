@@ -193,3 +193,23 @@ func TestRegistrationFailsOnAnUnreadableProductionStanding(t *testing.T) {
 		t.Fatalf("Register = %v, want the read's failure", err)
 	}
 }
+
+func TestAThreadsNamingDrawsNoProductionChecksAndAsksNoStanding(t *testing.T) {
+	// Arrange: a thread, with a standing read that would fail if asked.
+	f := newFixture(t)
+	record := f.workspace("w1", t.TempDir())
+	record.Kind = wsm.WorkspaceKindThread
+	f.db.with(record)
+	f.merge.productionStandingErr = errors.New("the zettel home is no registered repository")
+
+	// Act
+	err := f.verbs.(*verbs).publishNaming(context.Background(), f.log.logger, record)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("publishNaming = %v, want the thread named", err)
+	}
+	if n := len(f.topbarNamings); n == 0 || f.topbarNamings[n-1].ProductionChecks.On {
+		t.Fatalf("namings = %+v, want the last drawing no production-checks chip", f.topbarNamings)
+	}
+}

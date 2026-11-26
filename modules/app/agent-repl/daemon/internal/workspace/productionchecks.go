@@ -79,7 +79,7 @@ func (v *verbs) RestateProductionChecks(ctx context.Context, scope merge.Reposit
 	}
 	restated := 0
 	for _, record := range workspaces {
-		if record.Repo != repo || record.Closed {
+		if record.Repo != repo || record.Closed || record.IsThread() {
 			continue
 		}
 		v.deps.Topbar.SetProductionChecks(record.ID, chip)
