@@ -16,8 +16,8 @@ import (
 	"agent-repld/internal/drain"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/landingreports"
 	"agent-repld/internal/merge"
-	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/sidebar"
@@ -339,17 +339,6 @@ func (f *verbsForwarder) republishRoster(what string) func(context.Context) erro
 		}
 		return verbs.RepublishRoster(ctx, what)
 	}
-}
-
-// ClaimMergeName is the merge orchestrator's name check (merge.Names), read
-// out of the verbs, which are built after the orchestrator. One asked for
-// before they are bound is a wiring defect, answered as an error.
-func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
-	verbs, err := f.bound("an async merge's name was checked")
-	if err != nil {
-		return "", nil, false, err
-	}
-	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
 
 // MergeBranch is the merge orchestrator's name resolution (merge.Names). It
@@ -842,65 +831,50 @@ func (f *mergeForwarder) TakeTestRunsOff(ctx context.Context) (func(answered err
 // exists.
 var errMergeMoverUnbound = errors.New("agent-repld: the merge orchestrator is not bound; a workspace's merges cannot be moved")
 
-// detachedForwarder carries the detached-merge service to the merge
-// orchestrator, which is built before the workspace verbs and the prompt
-// handler the service is made of. A detached merge reaching it before the
-// service is bound is a defect in the boot order, answered as an error.
-type detachedForwarder struct {
-	lateBound[*mergeworkspace.Service]
+// reportsForwarder carries the landing reports to the merge orchestrator, the
+// deploy and the rollout, which are built before the prompt handler the
+// reports submit through. A report reaching it before the service is bound is
+// a defect in the boot order, answered as an error.
+type reportsForwarder struct {
+	lateBound[*landingreports.Service]
 }
 
-func (f *detachedForwarder) service() (*mergeworkspace.Service, error) {
+func (f *reportsForwarder) service() (*landingreports.Service, error) {
 	target, ok := f.load()
 	if !ok {
-		return nil, fmt.Errorf("agent-repld: a detached merge reached the merge orchestrator before the detached-merge service existed")
+		return nil, fmt.Errorf("agent-repld: a landing report was asked for before the landing reports existed")
 	}
 	return target, nil
 }
 
-func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
-	target, err := f.service()
-	if err != nil {
-		return wsm.Workspace{}, err
-	}
-	return target.Fork(ctx, requester, origin, name, base)
-}
-
-func (f *detachedForwarder) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error) {
-	target, err := f.service()
-	if err != nil {
-		return false, err
-	}
-	return target.Reveal(ctx, mergeWS)
-}
-
-// CoverOwed reaches the detached-merge service, which records its own
+// CoverLandings reaches the landing reports, which record their own
 // failures; a deploy before that service exists is answered with the error.
-func (f *detachedForwarder) CoverOwed(ctx context.Context) error {
+func (f *reportsForwarder) CoverLandings(ctx context.Context) error {
 	target, err := f.service()
 	if err != nil {
 		return err
 	}
-	return target.CoverOwed(ctx)
+	return target.CoverLandings(ctx)
 }
 
-// PayOwed reaches the detached-merge service. A deploy or a takeover cannot
-// end before the graph that built the service has, so a payment that finds
-// none is a defect in the graph's order, and panics.
-func (f *detachedForwarder) PayOwed(ctx context.Context, coveredOnly bool, deployErr error) {
+// DeployEnded reaches the landing reports. A deploy or a takeover cannot end
+// before the graph that built the service has, so one that finds none is a
+// defect in the graph's order, and panics.
+func (f *reportsForwarder) DeployEnded(ctx context.Context, coveredOnly bool, deployErr error) {
 	target, err := f.service()
 	if err != nil {
 		panic(err)
 	}
-	target.PayOwed(ctx, coveredOnly, deployErr)
+	target.DeployEnded(ctx, coveredOnly, deployErr)
 }
 
-func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
+// HandBack reaches the landing reports.
+func (f *reportsForwarder) HandBack(ctx context.Context, ws ids.WorkspaceID, record wsm.Workspace, out merge.DetachedOutcome) error {
 	target, err := f.service()
 	if err != nil {
 		return err
 	}
-	return target.HandBack(ctx, requester, mergeWS, out)
+	return target.HandBack(ctx, ws, record, out)
 }
 
 // holdsForwarder is the prompt queue's Supersede for a notifier built before

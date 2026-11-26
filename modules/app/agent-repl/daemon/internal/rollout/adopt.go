@@ -1500,7 +1500,7 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// be once its work ends, and the prompt queue takes a registered bounce
 	// before it delivers anything queued. So a report reaches its requester on
 	// the build that carries the landing it reports.
-	c.deps.Reports.PayOwed(c.lifetime(context.Background()), true, nil)
+	c.deps.Reports.DeployEnded(c.lifetime(context.Background()), true, nil)
 	c.settleTakeover(fields)
 	if len(elders) > 0 {
 		inflight.Standing(func() { c.afterElders(elders, promoted, fields) })
@@ -1801,7 +1801,7 @@ func (c *controller) bounceStaleAdopted(fields dlog.Context) {
 func (c *controller) SettleBoot(ctx context.Context) {
 	fields := dlog.Context{"why": "fresh_boot"}
 	c.judgeLiveShims(fields)
-	c.deps.Reports.PayOwed(ctx, false, nil)
+	c.deps.Reports.DeployEnded(ctx, false, nil)
 	c.deps.ServingSettled(ctx)
 	c.takeUpOwedMoves(ctx)
 }
