@@ -190,9 +190,11 @@ func TestWaitingMergesAreRebasedOneAtATimeInQueueOrder(t *testing.T) {
 	w.awaitPass(t)
 
 	// Assert
-	first, second := <-w.rebased, <-w.rebased
-	if first != "ws-c" || second != "ws-d" {
-		t.Fatalf("rebased %s then %s, want ws-c then ws-d", first, second)
+	// The head stays in line while it deploys, so the merge next in line
+	// (ws-b) is rebased first, then the members behind it.
+	first, second, third := <-w.rebased, <-w.rebased, <-w.rebased
+	if first != "ws-b" || second != "ws-c" || third != "ws-d" {
+		t.Fatalf("rebased %s, %s, %s, want ws-b, ws-c, ws-d", first, second, third)
 	}
 	w.finish(t)
 }
