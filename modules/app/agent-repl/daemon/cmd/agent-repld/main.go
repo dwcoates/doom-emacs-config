@@ -33,6 +33,7 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/testsclient"
+	"agent-repld/internal/wifirpc"
 	"agent-repld/internal/wsm"
 	"agent-repld/internal/zettelclient"
 )
@@ -108,6 +109,11 @@ type options struct {
 	// queue gate runs on. This flag BEATS $AGENT_REPL_TESTS_SOCKET, which in
 	// turn beats the default.
 	testsSocket string
+	// wifiSocket is the persistent-wifi service's unix socket, which the
+	// topbar's mode change passes through and the standing is followed on.
+	// This flag BEATS $AGENT_REPL_PERSISTENT_WIFI_SOCKET, which in turn beats
+	// the default.
+	wifiSocket string
 	// promptsDir is the prompts/ directory the briefs are read from at use
 	// time.
 	promptsDir string
@@ -184,7 +190,7 @@ type options struct {
 // commandNames are the first arguments main answers as a command rather than
 // booting the daemon, sorted.
 func commandNames() []string {
-	names := []string{thawGuardVerb, deployVerb, callVerb, audiooutput.Verb}
+	names := []string{deployVerb, callVerb, audiooutput.Verb}
 	for noun := range cliNouns {
 		names = append(names, noun)
 	}
@@ -224,12 +230,12 @@ const defaultZettelSocket = "~/.cache/agent-repl/sock/zettel.sock"
 // default.
 const defaultTestsSocket = "~/.cache/agent-repl/sock/tests.sock"
 
+// defaultWifiSocket is the persistent-wifi service's socket when neither the
+// flag nor the environment (wifirpc.EnvSocket) names one: the service's own
+// default.
+const defaultWifiSocket = "~/.cache/agent-repl/sock/persistent-wifi.sock"
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == thawGuardVerb {
-		// THE GUARD STARTS NOTHING: it waits for the daemon that started it
-		// to be gone, then thaws a frozen set no daemon owns.
-		os.Exit(runThawGuard(os.Args[2:], os.Stderr))
-	}
 	if len(os.Args) > 1 && os.Args[1] == audiooutput.Verb {
 		// THE VERB STARTS NOTHING: it prints the default audio output once.
 		os.Exit(runAudioOutputVerb(audiooutput.Read, os.Stdout, os.Stderr))
@@ -347,6 +353,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
 	config.StringVar(&opts.launcherSocket, "launcher-socket", "", "launcher unix socket, overriding $"+desktopnotify.EnvLauncherSocket)
 	config.StringVar(&opts.testsSocket, "tests-socket", "", "test service unix socket, overriding $"+testsclient.EnvSocket)
+	config.StringVar(&opts.wifiSocket, "wifi-socket", "", "persistent-wifi service unix socket, overriding $"+wifirpc.EnvSocket)
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
@@ -416,6 +423,11 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.testsSocket = testsSocket
+	wifiSocket, err := resolveSocket("persistent-wifi", opts.wifiSocket, os.Getenv(wifirpc.EnvSocket), defaultWifiSocket, os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.wifiSocket = wifiSocket
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
 	if err != nil {
 		return options{}, err

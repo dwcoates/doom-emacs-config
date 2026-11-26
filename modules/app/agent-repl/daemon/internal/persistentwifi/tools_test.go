@@ -212,3 +212,50 @@ func TestConfigFromEnvOnLinux(t *testing.T) {
 		})
 	}
 }
+
+func TestToolsFromEnvOnMacOS(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		want    Tools
+		wantErr bool
+	}{
+		{"unset is the production layout under HOME", map[string]string{"HOME": "/home/owner"}, homeTools(), false},
+		{"a tools dir resolves every tool from it", map[string]string{EnvToolsDir: "/fakes"}, ToolsIn("/fakes"), false},
+		{"a relative tools dir is refused", map[string]string{EnvToolsDir: "fakes"}, Tools{}, true},
+		{"a HOME that is not absolute is refused", map[string]string{"HOME": "home/owner"}, Tools{}, true},
+		{"the lid, the hotspot and the freeze list are not this resolver's", map[string]string{"HOME": "/home/owner", EnvLid: "bogus", appfreeze.EnvApps: "Terminal"}, homeTools(), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(k string) string { return tt.env[k] }
+
+			// Act
+			got, _, err := toolsFromEnv("darwin", getenv)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("toolsFromEnv() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("toolsFromEnv() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToolsFromEnvResolvesThisPlatformsTools(t *testing.T) {
+	// Act
+	_, err := ToolsFromEnv(func(k string) string {
+		if k == "HOME" {
+			return "/home/u"
+		}
+		return ""
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ToolsFromEnv() error = %v", err)
+	}
+}

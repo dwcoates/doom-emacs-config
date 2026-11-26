@@ -115,6 +115,27 @@ passed; every other flag keeps its default.
   test harness binds and hands over (`daemon/integration/harness/testservice.go`),
   so a client's connect queues until the service accepts. The daemon keeps it
   loaded and current exactly as it keeps zettel.
+- `com.agentrepl.persistent-wifi` — `--socket` (the Connect-over-UDS server
+  path, `~/.cache/agent-repl/sock/persistent-wifi.sock`), `--holder` (the
+  socket holder's control socket,
+  `~/.cache/agent-repl/sock/persistent-wifi-holder.sock`, from which it takes
+  the listening socket, so the daemon's connects queue until it accepts),
+  `--state-dir` (`~/.claude-emacs`, whose `persistent-wifi/` directory keeps
+  the frozen set and the recorded energy mode, and whose `logs/` holds its run
+  log) and `--metrics-root`. `--listen-fd` serves an already-listening socket
+  a test harness hands over (`daemon/integration/harness/wifiservice.go`),
+  and `AGENT_REPL_PERSISTENT_WIFI_SOCKET` is the daemon's test-only socket
+  override, deliberately not set. The service owns the lid and power-source
+  watchers, the `pmset` settings, the display sleep, the application freeze
+  and the Wi-Fi failover (`docs/protobuf-design/persistent-wifi.md`, section
+  15); the daemon passes the topbar's mode change through to it and follows
+  its standing. The service is a command of the daemon's module
+  (`daemon/cmd/agent-repl-wifi`), and its source stamp is its own package
+  closure (`bin/lib-deploy-stamp.sh`), so a daemon deploy that changes
+  nothing it compiles from leaves it running. The hotspot's name and the
+  freeze list are the two per-user variables it reads, which its definition
+  carries (`env_passthrough`), since no service manager inherits a shell
+  profile.
 - `app.zettel.launcher` — `--resident` (started by launchd, so the app
   stays in the background rather than opening Emacs as an open by hand does),
   `--log` (`~/.cache/agent-repl/log/launcher.log`) and `--holder` (the

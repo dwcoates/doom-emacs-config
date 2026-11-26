@@ -404,3 +404,110 @@ quiet state, not the switch.
     before its join, and a hotspot already joined is answered `joined` with
     `joined_by: macos`, never joined a second time.
 
+
+### 15. Persistent wifi is its own service (2026-11-26, a new `persistentwifi.v1` contract; the topbar's wire is unchanged)
+
+- What changed:
+  - The controller (`daemon/internal/persistentwifi`), the application
+    freezer (`daemon/internal/appfreeze`) and the thaw guard moved out of
+    the daemon into their own launchd and systemd service,
+    `com.agentrepl.persistent-wifi` (`daemon/cmd/agent-repl-wifi`). The lid
+    and power-source watchers, the `pmset` settings, the display sleep, the
+    freeze and the Wi-Fi failover (sections 13 and 14, unchanged) run there.
+  - The daemon keeps `UpdatePersistentWifiMode` and the standing the topbar
+    watches (`agentrepl.v1.WatchDaemonResponse.persistent_wifi`), and
+    passes both through to the service (`daemon/internal/wifirpc`).
+  - New contract `persistentwifi.v1.PersistentWifi`
+    (`proto/src/persistentwifi/v1/`): `UpdateMode` carries the existing
+    `agentrepl.v1.UpdatePersistentWifiModeRequest` and
+    `UpdatePersistentWifiModeResponse` whole, and `WatchStanding` streams
+    `agentrepl.v1.PersistentWifiState` (the current standing first, then
+    every change). No message of the topbar's wire changed; one
+    `DEPLOY_COMPONENT_PERSISTENT_WIFI` value and one footer
+    `persistent_wifi` arm were added so the deploy's progress line names the
+    service.
+- Why: a daemon restart or deploy stopped the failover, so a deploy that
+  landed with the lid closed and Wi-Fi down left nothing rejoining until the
+  new daemon was up, and a fault in the Wi-Fi code took the daemon down.
+- Consequences:
+  - THE SERVICE'S SOCKET IS A SOCKET HOLDER'S
+    (`com.agentrepl.sockethold.persistent-wifi`), so the daemon's connect
+    queues until the service accepts. The daemon follows the standing per
+    CONNECTION: a stream that ends after serving a standing is reopened at
+    once and is told the current standing again; a connection that never
+    served one and was not answered by the service ends the follow with an
+    error instead of spinning (`wifirpc.Client.Run`). No fallback stands in
+    for the service: while it is unreachable the standing says so.
+  - THE LID-CLOSED QUIET STATE REACHES THE DAEMON AS THE STANDING'S `quiet`
+    ARM. The daemon moves its own view gate (`viewquiet`) from it, so its
+    views stop and its page views freeze exactly as before; the gate's
+    metrics (`agentrepl_view_renders_skipped_total`) stay on the daemon. The
+    controller no longer holds the gate. The gauge (`agentrepl_lid_quiet`)
+    and the freeze counters (`agentrepl_app_freezes_total`,
+    `agentrepl_app_thaws_total`) are the service's, on its own
+    `persistent-wifi` metrics registry (`wifimetrics`).
+  - THE STATE ROOT'S FROZEN SET AND ENERGY RECORD KEEP THEIR PLACE
+    (`persistent-wifi/` under the state root), so a frozen set a daemon left
+    is adopted by the service and thawed. The thaw guard is the service's
+    child now and guards the service's life: a service that dies with the lid
+    closed leaves its guard to thaw the set, and its next boot adopts any
+    that remains.
+  - THE SERVICE'S SOURCE STAMP IS ITS OWN PACKAGE CLOSURE
+    (`bin/lib-deploy-stamp.sh`, `agent-repl-wifi`), so a daemon deploy that
+    changes nothing the service compiles from leaves it running.
+  - THE PER-USER SETTINGS REACH THE SERVICE BY ITS DEFINITION, not by a
+    shell profile: `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` and
+    `AGENT_REPL_PERSISTENT_WIFI_FREEZE_APPS` are rendered into the service's
+    launchd or systemd definition from the environment the installer or the
+    deploy renders it in (`env_passthrough`). A changed value takes effect
+    when the definition is rendered again.
+  - THE ONE-TIME UNDO OF AN EARLIER BUILD'S LID DIM STAYS (owner ruling,
+    2026-11-26): at startup the service reads the `persistent_wifi_lid_dim`
+    row from the daemon's state database (`cmd/agent-repl-wifi/lidim.go`,
+    which never creates the file or the table), sets the display back to the
+    kept level and clears the row, with `restoreLegacyDimLocked`'s error
+    records and tests unchanged.
+  - A SERVICE THE DAEMON CANNOT REACH IS A STANDING, NEVER A STALE ONE. New
+    arm `agentrepl.v1.PersistentWifiState.service_unreachable` (field 11, a
+    `detail` string), set only then, with every other field unset. The
+    client publishes it from daemon start until the first connection serves
+    and the moment a serving connection ends, before reopening; it carries no
+    quiet state, so the daemon's views lift (`wifiStandingReceiver`). The
+    chip draws it as every fact unread (the muted glyph the contract
+    promises the tooltip explains) with a tooltip sentence naming the arm and
+    its detail; a distinct paint is a look-and-feel call left to the owner.
+    The daemon's boot no longer waits on the service
+    (`wifirpc.Client.Start`, in place of a boot read). A connection the
+    service accepts but never answers is recorded at ERROR once, at the
+    first-standing bound, and kept, waiting on the held socket. A service
+    that is shutting down refuses a new watch with Unavailable (with response
+    headers, so it is told apart from a failed dial), and the client reopens
+    on a fresh dial that queues on the held socket for its replacement.
+  - THE QUIET STATE'S ORDER IS A CONTRACT: `leaveQuietLocked` and
+    `enterQuietLocked` publish the standing carrying the quiet change as a
+    step of its own, where `views.Set` once stood (before the freeze and the
+    display sleep on entry, before the display wake on leave), and the
+    controller tests pin the order against the fake runner's and freezer's
+    calls.
+  - ONE VALIDATOR: `persistentwifi.ValidateUpdate` is the only constructor of
+    `ValidUpdate`, which `Controller.Update` takes, and both the daemon's
+    topbar handler and `wifirpc.Server.UpdateMode` validate through it.
+  - THE SERVICE PROTECTS EVERY CONNECTED DAEMON'S PROCESS TREE from its
+    freeze: it reads each connection's peer pid from the kernel
+    (`LOCAL_PEERPID`, `SO_PEERCRED`; a pid it cannot read refuses the
+    connection and is recorded) and `appfreeze.Protection.Selves` names those
+    pids with its own while their connections live.
+  - EVERY TIMEOUT IS FIVE TIMES ITS MEASURED EXPECTED TIME (owner ruling,
+    2026-11-26). The first-standing bound (2.1s) is five times the live
+    daemon's worst standing read, 412ms over 205 reads, which a connection
+    made while the service starts waits on. The service's drain, loop stop and
+    probe dial and the server's header read were sized first at five times an
+    idle-host measurement (drain 0.33ms, loop stop 0.25ms, dial 24us, header
+    1.31ms) and fired in a merge gate at 90% host load (a loop stop past 2ms),
+    so each is 100ms until the loaded stops are measured: the service records
+    each stop's own times (`drain_us`, `loops_us`), and the bounds are
+    re-sized from them.
+  - The daemon's deploy still stops the Wi-Fi helper's waiting asks
+    (`persistentwifi.StopAsks`) with the tools it resolves itself
+    (`persistentwifi.ToolsFromEnv`); the helper app is still launched per job
+    with `open`, now by the service.

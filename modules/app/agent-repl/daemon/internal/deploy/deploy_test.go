@@ -1706,7 +1706,7 @@ func TestAStaleStandaloneRestartsAloneAndIsReported(t *testing.T) {
 		{name: "reports the fresh build: nothing restarts", want: UpToDate},
 		{name: "reports an older build: it alone restarts", stale: true, want: Restarted},
 	}
-	builds := map[Component][2]string{ComponentZettel: {theOld.zettel, theFresh.zettel}, ComponentTests: {theOld.tests, theFresh.tests}}
+	builds := map[Component][2]string{ComponentZettel: {theOld.zettel, theFresh.zettel}, ComponentTests: {theOld.tests, theFresh.tests}, ComponentPersistentWifi: {theOld.wifiService, theFresh.wifiService}}
 	for _, sv := range Standalones {
 		for _, tc := range cases {
 			t.Run(sv.Short+" "+tc.name, func(t *testing.T) {
@@ -1828,7 +1828,7 @@ func TestNewRefusesAMissingReconnectTracker(t *testing.T) {
 }
 
 func TestAFailedStandaloneRestartIsTheDeploysAnswer(t *testing.T) {
-	old := map[Component]string{ComponentZettel: theOld.zettel, ComponentTests: theOld.tests}
+	old := map[Component]string{ComponentZettel: theOld.zettel, ComponentTests: theOld.tests, ComponentPersistentWifi: theOld.wifiService}
 	for _, sv := range Standalones {
 		t.Run(sv.Short, func(t *testing.T) {
 			// Arrange
@@ -2188,8 +2188,8 @@ func TestADeployTellsItsHotReloadEveryStep(t *testing.T) {
 		want    []string
 	}{
 		{"a deploy whose daemon stays", func(*testing.T, *harness) {}, []string{
-			"begin", "built:8", "install_began", "install_ended",
-			"current:store", "current:sidecar", "current:zettel", "current:test service",
+			"begin", "built:9", "install_began", "install_ended",
+			"current:store", "current:sidecar", "current:zettel", "current:test service", "current:persistent-wifi service",
 			"daemon_current", "shims_judging", "shims_judged", "webapp_judged",
 		}},
 		{"a stale store restarts the sidecar with it", func(t *testing.T, h *harness) {
@@ -2356,7 +2356,7 @@ func TestNewRefusesAMissingHotReload(t *testing.T) {
 }
 
 func TestHotReloadServiceNamesEveryComponent(t *testing.T) {
-	for _, c := range []Component{ComponentStore, ComponentSidecar, ComponentZettel, ComponentTests, ComponentLauncher, ComponentDaemon, ComponentShim, ComponentWebapp, ComponentElisp} {
+	for _, c := range []Component{ComponentStore, ComponentSidecar, ComponentZettel, ComponentTests, ComponentPersistentWifi, ComponentLauncher, ComponentDaemon, ComponentShim, ComponentWebapp, ComponentElisp} {
 		t.Run(string(c), func(t *testing.T) {
 			// Act
 			got := hotReloadService(c)

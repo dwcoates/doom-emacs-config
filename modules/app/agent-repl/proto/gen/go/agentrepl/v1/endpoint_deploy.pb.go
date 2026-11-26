@@ -79,33 +79,39 @@ const (
 	// banner: installed at ~/Applications/Zettel.app and run by launchd as
 	// app.zettel.launcher.
 	DeployComponent_DEPLOY_COMPONENT_LAUNCHER DeployComponent = 9
+	// The persistent-wifi service (daemon/cmd/agent-repl-wifi), which owns the
+	// machine's lid-closed operation and Wi-Fi failover, run by the platform's
+	// service manager as com.agentrepl.persistent-wifi.
+	DeployComponent_DEPLOY_COMPONENT_PERSISTENT_WIFI DeployComponent = 10
 )
 
 // Enum value maps for DeployComponent.
 var (
 	DeployComponent_name = map[int32]string{
-		0: "DEPLOY_COMPONENT_UNSPECIFIED",
-		1: "DEPLOY_COMPONENT_DAEMON",
-		2: "DEPLOY_COMPONENT_SHIM",
-		3: "DEPLOY_COMPONENT_WEBAPP",
-		4: "DEPLOY_COMPONENT_STORE",
-		5: "DEPLOY_COMPONENT_SIDECAR",
-		6: "DEPLOY_COMPONENT_ELISP",
-		7: "DEPLOY_COMPONENT_ZETTEL",
-		8: "DEPLOY_COMPONENT_TESTS",
-		9: "DEPLOY_COMPONENT_LAUNCHER",
+		0:  "DEPLOY_COMPONENT_UNSPECIFIED",
+		1:  "DEPLOY_COMPONENT_DAEMON",
+		2:  "DEPLOY_COMPONENT_SHIM",
+		3:  "DEPLOY_COMPONENT_WEBAPP",
+		4:  "DEPLOY_COMPONENT_STORE",
+		5:  "DEPLOY_COMPONENT_SIDECAR",
+		6:  "DEPLOY_COMPONENT_ELISP",
+		7:  "DEPLOY_COMPONENT_ZETTEL",
+		8:  "DEPLOY_COMPONENT_TESTS",
+		9:  "DEPLOY_COMPONENT_LAUNCHER",
+		10: "DEPLOY_COMPONENT_PERSISTENT_WIFI",
 	}
 	DeployComponent_value = map[string]int32{
-		"DEPLOY_COMPONENT_UNSPECIFIED": 0,
-		"DEPLOY_COMPONENT_DAEMON":      1,
-		"DEPLOY_COMPONENT_SHIM":        2,
-		"DEPLOY_COMPONENT_WEBAPP":      3,
-		"DEPLOY_COMPONENT_STORE":       4,
-		"DEPLOY_COMPONENT_SIDECAR":     5,
-		"DEPLOY_COMPONENT_ELISP":       6,
-		"DEPLOY_COMPONENT_ZETTEL":      7,
-		"DEPLOY_COMPONENT_TESTS":       8,
-		"DEPLOY_COMPONENT_LAUNCHER":    9,
+		"DEPLOY_COMPONENT_UNSPECIFIED":     0,
+		"DEPLOY_COMPONENT_DAEMON":          1,
+		"DEPLOY_COMPONENT_SHIM":            2,
+		"DEPLOY_COMPONENT_WEBAPP":          3,
+		"DEPLOY_COMPONENT_STORE":           4,
+		"DEPLOY_COMPONENT_SIDECAR":         5,
+		"DEPLOY_COMPONENT_ELISP":           6,
+		"DEPLOY_COMPONENT_ZETTEL":          7,
+		"DEPLOY_COMPONENT_TESTS":           8,
+		"DEPLOY_COMPONENT_LAUNCHER":        9,
+		"DEPLOY_COMPONENT_PERSISTENT_WIFI": 10,
 	}
 )
 
@@ -1599,7 +1605,7 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\"j\n" +
 	"\x13DeployInstallFailed\x12;\n" +
 	"\tcomponent\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.DeployComponentR\tcomponent\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail*\xb6\x02\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail*\xdc\x02\n" +
 	"\x0fDeployComponent\x12 \n" +
 	"\x1cDEPLOY_COMPONENT_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17DEPLOY_COMPONENT_DAEMON\x10\x01\x12\x19\n" +
@@ -1610,7 +1616,9 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\x16DEPLOY_COMPONENT_ELISP\x10\x06\x12\x1b\n" +
 	"\x17DEPLOY_COMPONENT_ZETTEL\x10\a\x12\x1a\n" +
 	"\x16DEPLOY_COMPONENT_TESTS\x10\b\x12\x1d\n" +
-	"\x19DEPLOY_COMPONENT_LAUNCHER\x10\tB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x19DEPLOY_COMPONENT_LAUNCHER\x10\t\x12$\n" +
+	" DEPLOY_COMPONENT_PERSISTENT_WIFI\x10\n" +
+	"B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_deploy_proto_rawDescOnce sync.Once

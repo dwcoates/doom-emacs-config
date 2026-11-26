@@ -90,7 +90,7 @@ var table = []Process{
 	{PID: 502, PPID: 501, Path: "/Applications/Spotify.app/Contents/MacOS/Spotify"},
 }
 
-var protection = Protection{Self: 100, PathPrefixes: []string{"/Users/u/agent-repl/daemon/bin", "/Users/u/.cache/agent-repl"}}
+var protection = Protection{Selves: func() []int { return []int{100} }, PathPrefixes: []string{"/Users/u/agent-repl/daemon/bin", "/Users/u/.cache/agent-repl"}}
 
 type rig struct {
 	f      *Freezer
@@ -356,6 +356,44 @@ func TestProtectionCoversTheDaemonItsEditorAgentRepAndAgentSessions(t *testing.T
 		if got[pid] {
 			t.Errorf("pid %d is protected, want it freezable", pid)
 		}
+	}
+}
+
+func TestProtectionCoversEveryConnectedDaemonsTreeWhileItsConnectionLives(t *testing.T) {
+	// Arrange: the service (pid 7) has a daemon (100) connected, then it goes.
+	connected := []int{100}
+	p := Protection{Selves: func() []int { return append([]int{7}, connected...) }}
+	// A configured application's process (200) whose parent is the daemon: it
+	// is what an agent session of the daemon spawned.
+	tree := []Process{
+		{PID: 7, PPID: 1, Path: "/Users/u/.cache/agent-repl/bin/agent-repl-wifi"},
+		{PID: 90, PPID: 1, Path: "/usr/local/bin/editor-wrapper"},
+		{PID: 100, PPID: 90, Path: "/Users/u/worktrees/x/daemon/bin/agent-repld"},
+		{PID: 200, PPID: 100, Path: "/Applications/Slack.app/Contents/MacOS/Slack"},
+		{PID: 300, PPID: 1, Path: "/Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper"},
+	}
+
+	// Act
+	while := p.protected(tree, bundleOf)
+	connected = nil
+	after := p.protected(tree, bundleOf)
+
+	// Assert
+	for _, pid := range []int{7, 90, 100, 200} {
+		if !while[pid] {
+			t.Errorf("while the daemon is connected pid %d is not protected", pid)
+		}
+	}
+	if while[300] {
+		t.Error("a process outside every connected tree is protected")
+	}
+	for _, pid := range []int{90, 100, 200} {
+		if after[pid] {
+			t.Errorf("once the connection ended pid %d is still protected", pid)
+		}
+	}
+	if !after[7] {
+		t.Error("the service's own pid is no longer protected")
 	}
 }
 

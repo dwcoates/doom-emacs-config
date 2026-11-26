@@ -3630,7 +3630,8 @@ and a forced one does not wait for in-flight work."
     ("DEPLOY_COMPONENT_ELISP" . :elisp)
     ("DEPLOY_COMPONENT_ZETTEL" . :zettel)
     ("DEPLOY_COMPONENT_TESTS" . :tests)
-    ("DEPLOY_COMPONENT_LAUNCHER" . :launcher))
+    ("DEPLOY_COMPONENT_LAUNCHER" . :launcher)
+    ("DEPLOY_COMPONENT_PERSISTENT_WIFI" . :persistent-wifi))
   "The DeployComponent vocabulary, wire name to keyword.
 UNSPECIFIED is deliberately ABSENT: it is never sent, and an outcome
 carrying it is malformed.")

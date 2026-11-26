@@ -96,7 +96,7 @@ make_tree() {
              "$root/proto/helpers/go" \
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/tree-sitter-tldr" \
-             "$root/daemon/cmd/agent-repld" "$root/daemon/bin"
+             "$root/daemon/cmd/agent-repld" "$root/daemon/cmd/agent-repl-wifi" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
     cp "$THIS_DIR/lib-node-store.sh" "$root/bin/lib-node-store.sh"
@@ -107,6 +107,7 @@ make_tree() {
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"
     echo "export const y = 1" > "$root/webapp/src/main.ts"
     echo "package main" > "$root/daemon/cmd/agent-repld/main.go"
+    echo "package main" > "$root/daemon/cmd/agent-repl-wifi/main.go"
     echo "package main" > "$root/agent-shim/shim-store/main.go"
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
     echo "package main" > "$root/agent-shim/shim-lock/main.go"
@@ -2694,6 +2695,7 @@ build_group_staging() {
     t_out_stages_a_cache_bin_service lock shim-lock
     t_out_stages_a_cache_bin_service zettel zettel
     t_out_stages_a_cache_bin_service tests agent-repl-tests
+    t_out_stages_a_cache_bin_service persistent-wifi agent-repl-wifi
     t_launcher_stages_without_installing_and_installs_in_place
     t_out_writes_nothing_live
     t_in_place_fresh_fixture_builds_nothing

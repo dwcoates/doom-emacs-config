@@ -68,6 +68,9 @@ const (
 	ComponentSidecar Component = "sidecar"
 	ComponentZettel  Component = "zettel"
 	ComponentTests   Component = "tests"
+	// ComponentPersistentWifi is the persistent-wifi service, which holds
+	// the persistent-wifi mode.
+	ComponentPersistentWifi Component = "persistent-wifi"
 	// ComponentLauncher is the launcher, Zettel.app, which posts every macOS
 	// desktop banner.
 	ComponentLauncher Component = "launcher"
@@ -96,6 +99,8 @@ func (c Component) Arm() agentreplv1.DeployComponent {
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ZETTEL
 	case ComponentTests:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_TESTS
+	case ComponentPersistentWifi:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_PERSISTENT_WIFI
 	case ComponentLauncher:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_LAUNCHER
 	default:
@@ -268,6 +273,8 @@ func hotReloadService(c Component) string {
 		return hotreload.ServiceZettel
 	case ComponentTests:
 		return hotreload.ServiceTests
+	case ComponentPersistentWifi:
+		return hotreload.ServicePersistentWifi
 	case ComponentLauncher:
 		return hotreload.ServiceLauncher
 	case ComponentDaemon:

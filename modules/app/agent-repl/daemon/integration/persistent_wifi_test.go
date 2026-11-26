@@ -31,7 +31,7 @@ func recordedEnergyMode(t *testing.T, d *harness.Daemon) string {
 // awaitPowerSource waits for d to have heard its power source as source
 // ("ac" or "battery"), so a lid or mode change after it is decided on it.
 func awaitPowerSource(d *harness.Daemon, source string) {
-	d.AwaitLogRecord(d.RunLogPath(), "the power source heard as "+source, func(r harness.LogRecord) bool {
+	d.AwaitLogRecord(d.WifiRunLogPath(), "the power source heard as "+source, func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.persistentwifi.power_source" && r.Message == "the power source changed" &&
 			r.Context["power_source"] == source
 	})
@@ -39,7 +39,7 @@ func awaitPowerSource(d *harness.Daemon, source string) {
 
 // awaitEnergyRecord waits for d's energy step to record msg with trigger.
 func awaitEnergyRecord(d *harness.Daemon, msg, trigger string) {
-	d.AwaitLogRecord(d.RunLogPath(), msg+" on "+trigger, func(r harness.LogRecord) bool {
+	d.AwaitLogRecord(d.WifiRunLogPath(), msg+" on "+trigger, func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.persistentwifi.energy" && r.Message == msg && r.Context["trigger"] == trigger
 	})
 }

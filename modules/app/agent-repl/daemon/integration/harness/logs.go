@@ -63,6 +63,23 @@ func (d *Daemon) RunLogPath() string {
 	return filepath.Join(d.StateDir, "logs", "daemon.run.log")
 }
 
+// WifiRunLogPath is the persistent-wifi service's run log, under the state
+// root's logs directory beside the daemon's.
+func (d *Daemon) WifiRunLogPath() string {
+	return filepath.Join(d.StateDir, "logs", "persistent-wifi.run.log")
+}
+
+// WifiRunLog reads every record the persistent-wifi service wrote to its run
+// log. The service outlives the daemons over its state root, so unlike the
+// daemon's run log it is not scoped to one process.
+func (d *Daemon) WifiRunLog() []LogRecord {
+	d.t.Helper()
+	if _, err := os.Stat(d.WifiRunLogPath()); err != nil {
+		return nil
+	}
+	return readLog(d.t, d.WifiRunLogPath())
+}
+
 // WorkspaceLogPath is one of a workspace's per-workspace log sinks
 // ("daemon", "shim", "webapp", "sidecar").
 func WorkspaceLogPath(workspaceDir, sink string) string {

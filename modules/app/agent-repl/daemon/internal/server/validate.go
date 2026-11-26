@@ -2,6 +2,7 @@ package server
 
 import (
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/persistentwifi"
 	"agentrepl/logging/logsite"
 
 	"fmt"
@@ -1895,10 +1896,12 @@ func validateRollOutLandingRequest(req *agentreplv1.RollOutLandingRequest) *conn
 
 // validateUpdateShutdownScheduleRequest is UpdateShutdownScheduleRequest's base
 // function.
-// validateUpdatePersistentWifiModeRequest refuses a request naming no action.
+// validateUpdatePersistentWifiModeRequest refuses a request the persistent-wifi
+// service's own validator refuses (persistentwifi.ValidateUpdate, the one
+// validator), so the topbar's call is refused here before it is passed through.
 func validateUpdatePersistentWifiModeRequest(req *agentreplv1.UpdatePersistentWifiModeRequest) *connect.Error {
-	if req.GetAction() == nil {
-		return invalid("action", "a persistent-wifi action arm is required")
+	if _, err := persistentwifi.ValidateUpdate(req); err != nil {
+		return invalid("action", err.Error())
 	}
 	return nil
 }

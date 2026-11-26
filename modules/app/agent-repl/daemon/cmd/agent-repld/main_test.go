@@ -141,7 +141,7 @@ func TestParseFlagsRefusesAnArgumentThatIsNotAFlag(t *testing.T) {
 
 func TestCommandNamesAreEveryFirstArgumentMainAnswers(t *testing.T) {
 	// Arrange.
-	want := []string{thawGuardVerb, deployVerb, callVerb, audiooutput.Verb}
+	want := []string{deployVerb, callVerb, audiooutput.Verb}
 	for noun := range cliNouns {
 		want = append(want, noun)
 	}

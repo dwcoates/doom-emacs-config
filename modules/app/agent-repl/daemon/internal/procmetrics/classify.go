@@ -12,13 +12,14 @@ import (
 // The process label's values, spelled once in restarttiming, whose resource
 // windows name the groups they watch by them.
 const (
-	ProcessDaemon      = restarttiming.ProcessDaemon
-	ProcessDaemonTools = restarttiming.ProcessDaemonTools
-	ProcessStore       = restarttiming.ProcessStore
-	ProcessSidecar     = restarttiming.ProcessSidecar
-	ProcessShim        = restarttiming.ProcessShim
-	ProcessShimTools   = restarttiming.ProcessShimTools
-	ProcessEmacs       = restarttiming.ProcessEmacs
+	ProcessDaemon         = restarttiming.ProcessDaemon
+	ProcessDaemonTools    = restarttiming.ProcessDaemonTools
+	ProcessStore          = restarttiming.ProcessStore
+	ProcessSidecar        = restarttiming.ProcessSidecar
+	ProcessPersistentWifi = restarttiming.ProcessPersistentWifi
+	ProcessShim           = restarttiming.ProcessShim
+	ProcessShimTools      = restarttiming.ProcessShimTools
+	ProcessEmacs          = restarttiming.ProcessEmacs
 	// The WebKit processes Emacs is responsible for, by role.
 	ProcessWebKitWebContent = restarttiming.ProcessWebKitWebContent
 	ProcessWebKitNetworking = restarttiming.ProcessWebKitNetworking
@@ -40,7 +41,10 @@ var webkitRoles = map[string]string{
 const (
 	storeName   = "shim-store"
 	sidecarName = "shim-claude-sidecar"
-	nodeName    = "node"
+	// wifiName is the persistent-wifi service's binary (buildreport.ServicePersistentWifi
+	// names the same one).
+	wifiName = "agent-repl-wifi"
+	nodeName = "node"
 )
 
 // Group is a set of processes measured together. Workspace is set for a
@@ -78,7 +82,7 @@ func classify(platform Platform, ids map[int]Identity, self, emacs int, sockDir 
 		children[id.PPID] = append(children[id.PPID], pid)
 	}
 	sort.Ints(pids)
-	var shims []int
+	var shims, services []int
 	for _, pid := range pids {
 		id := ids[pid]
 		role, webkit := platform.WebKitRole(ids, id, emacs)
@@ -91,6 +95,9 @@ func classify(platform Platform, ids map[int]Identity, self, emacs int, sockDir 
 			out.groups[pid] = Group{Process: ProcessStore}
 		case id.Name == sidecarName && platform.ServiceParent(ids, id.PPID):
 			out.groups[pid] = Group{Process: ProcessSidecar}
+		case id.Name == wifiName && platform.ServiceParent(ids, id.PPID):
+			out.groups[pid] = Group{Process: ProcessPersistentWifi}
+			services = append(services, pid)
 		case emacs != 0 && webkit:
 			group, ok := webkitRoles[role]
 			if !ok {
@@ -116,6 +123,11 @@ func classify(platform Platform, ids map[int]Identity, self, emacs int, sockDir 
 	// the daemon's: shims first, so a shim the daemon spawned keeps its own.
 	for _, shim := range shims {
 		claimDescendants(out.groups, children, shim, Group{Process: ProcessShimTools, Workspace: out.groups[shim].Workspace})
+	}
+	// THE PERSISTENT-WIFI SERVICE'S DESCENDANTS ARE ITS OWN: the tools it runs
+	// are measured with it, not with the daemon.
+	for _, service := range services {
+		claimDescendants(out.groups, children, service, Group{Process: ProcessPersistentWifi})
 	}
 	claimDescendants(out.groups, children, self, Group{Process: ProcessDaemonTools})
 	return out

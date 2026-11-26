@@ -390,9 +390,12 @@ const (
 	ProcessDaemonTools = "daemon_tools"
 	ProcessStore       = "store"
 	ProcessSidecar     = "sidecar"
-	ProcessShim        = "shim"
-	ProcessShimTools   = "shim_tools"
-	ProcessEmacs       = "emacs"
+	// ProcessPersistentWifi is the persistent-wifi service and every tool it
+	// runs (pmset, the Wi-Fi helper, the application freeze).
+	ProcessPersistentWifi = "persistent_wifi"
+	ProcessShim           = "shim"
+	ProcessShimTools      = "shim_tools"
+	ProcessEmacs          = "emacs"
 	// The WebKit processes Emacs is responsible for, by role.
 	ProcessWebKitWebContent = "webkit_webcontent"
 	ProcessWebKitNetworking = "webkit_networking"

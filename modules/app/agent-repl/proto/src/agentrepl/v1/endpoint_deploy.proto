@@ -83,6 +83,10 @@ enum DeployComponent {
   // banner: installed at ~/Applications/Zettel.app and run by launchd as
   // app.zettel.launcher.
   DEPLOY_COMPONENT_LAUNCHER = 9;
+  // The persistent-wifi service (daemon/cmd/agent-repl-wifi), which owns the
+  // machine's lid-closed operation and Wi-Fi failover, run by the platform's
+  // service manager as com.agentrepl.persistent-wifi.
+  DEPLOY_COMPONENT_PERSISTENT_WIFI = 10;
 }
 
 // What the deploy decided for one component.

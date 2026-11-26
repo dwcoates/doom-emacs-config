@@ -19,6 +19,7 @@ func TestProgramFoldsEveryExecutableIntoTheClosedVocabulary(t *testing.T) {
 		{"shim-claude-sidecar", ProgramSidecar},
 		{"zettel", ProgramZettel},
 		{"agent-repl-tests", ProgramTestService},
+		{"agent-repl-wifi", ProgramDaemon},
 		{"lsregister", ProgramOther},
 		{"", ProgramOther},
 	}

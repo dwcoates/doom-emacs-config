@@ -1614,6 +1614,31 @@ test_a_rendered_service_expands_its_arguments_placeholders() {
   else fail "service placeholders" "rc=$RC" "$OUT" "$(cat "$plist" 2>&1)"; fi
 }
 
+# env_passthrough names the per-user variables a service reads, which no
+# service manager inherits from a shell profile: the render takes each from
+# the environment it runs in, and leaves out a name unset there.
+test_a_rendered_service_carries_the_passthrough_variables_it_names_that_are_set() {
+  new_case
+  manifest "[$(jq -c '.env_passthrough = ["SVC_HOTSPOT", "SVC_UNSET"]' <<<"$SVC_ENTRY")]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/svc" && chmod +x "$HOME/.cache/agent-repl/bin/svc"'
+  EXTRA_ENV="SVC_HOTSPOT=Phone" run define-service com.example.svc
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist"
+  if [ "$RC" -eq 0 ] && grep -qF "<key>SVC_HOTSPOT</key>" "$plist" && grep -qF "<string>Phone</string>" "$plist" \
+     && ! grep -qF "SVC_UNSET" "$plist"; then
+    pass "a rendered service carries the passthrough variables it names that are set, and none that are not"
+  else fail "env_passthrough on darwin" "rc=$RC" "$OUT" "$(cat "$plist" 2>&1)"; fi
+}
+
+test_a_rendered_systemd_unit_carries_the_passthrough_variables_it_names_that_are_set() {
+  new_case
+  manifest "[$(jq -c '.env_passthrough = ["SVC_HOTSPOT", "SVC_UNSET"]' <<<"$SVC_ENTRY")]"
+  PLATFORM=linux EXTRA_ENV="SVC_HOTSPOT=Home" run define-service com.example.svc
+  local unit="$CASE/home/.config/systemd/user/com.example.svc.service"
+  if [ "$RC" -eq 0 ] && grep -qxF 'Environment="SVC_HOTSPOT=Home"' "$unit" && ! grep -qF "SVC_UNSET" "$unit"; then
+    pass "a rendered systemd unit carries the passthrough variables it names that are set, and none that are not"
+  else fail "env_passthrough on linux" "rc=$RC" "$OUT" "$(cat "$unit" 2>&1)"; fi
+}
+
 # A config root is one person's, so a service names the roots through
 # {claude-config-roots} rather than any literal one.
 test_no_real_service_names_a_literal_claude_config_root() {

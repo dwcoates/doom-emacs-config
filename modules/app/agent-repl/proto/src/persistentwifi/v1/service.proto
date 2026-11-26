@@ -1,0 +1,32 @@
+// service.proto — the persistent-wifi service's Connect service: every rpc
+// signature, one endpoint_<rpc>.proto per rpc.
+//
+// THE DAEMON IS THE ONLY CALLER. The persistent-wifi service, kept running
+// by the platform's service manager like the store and the test service,
+// owns the machine's lid-closed operation: the lid and power-source
+// watchers, the power settings, the display sleep, the application freeze
+// and the Wi-Fi failover. A daemon restart or deploy therefore never stops
+// the failover. The daemon passes the topbar's change request through to it
+// and follows the standing it publishes. The messages carried are
+// agentrepl.v1's (persistent_wifi.proto and
+// endpoint_update_persistent_wifi_mode.proto), whole.
+
+syntax = "proto3";
+
+package persistentwifi.v1;
+
+import "persistentwifi/v1/endpoint_update_mode.proto";
+import "persistentwifi/v1/endpoint_watch_standing.proto";
+
+option go_package = "agentrepl/proto/persistentwifi/v1;persistentwifiv1";
+
+service PersistentWifi {
+  // Turn the machine's persistent wifi mode on, off or over, and answer
+  // what the change left standing.
+  rpc UpdateMode(UpdateModeRequest) returns (UpdateModeResponse);
+
+  // The machine's persistent-wifi standing: its current value first, then
+  // every change. The stream is scoped to its connection, so a caller that
+  // reconnects is told the current standing again.
+  rpc WatchStanding(WatchStandingRequest) returns (stream WatchStandingResponse);
+}

@@ -359,6 +359,10 @@ deploy_stamp_system_files() {
         sockethold)          deploy_stamp_go_files "$repo" "$mod/agent-shim/sockethold" . ;;
         zettel)              deploy_stamp_go_files "$repo" "$mod/zettel" . ;;
         agent-repl-tests)    deploy_stamp_go_files "$repo" "$mod/testservice" . ;;
+        # The persistent-wifi service is a command of the daemon's module, so
+        # its set is its OWN package closure, never the daemon's: a daemon
+        # change the service does not compile from leaves the service running.
+        agent-repl-wifi)     deploy_stamp_go_files "$repo" "$mod/daemon" ./cmd/agent-repl-wifi ;;
         # Its build script and bundle plist belong to it; the bindings it
         # links come out of the package's own source list.
         launcher)            files="$(deploy_stamp_swift_files "$repo" "$mod/launcher" \

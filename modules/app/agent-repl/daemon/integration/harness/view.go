@@ -432,7 +432,7 @@ func (d *Daemon) leaveClaim() {
 // no view claimed.
 func (d *Daemon) sweptRecords() []LogRecord {
 	d.t.Helper()
-	all := append(d.RunLog(), d.WorkspaceLogRecords()...)
+	all := append(append(d.RunLog(), d.WifiRunLog()...), d.WorkspaceLogRecords()...)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := make([]LogRecord, 0, len(all))

@@ -74,6 +74,8 @@ import (
 	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
+	"agent-repld/internal/wifirpc"
+
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
@@ -1388,41 +1390,29 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the rollout and drain controllers ----
 
-	// ---- the persistent-wifi controller ----
+	// ---- the persistent-wifi service's client ----
 	//
-	// Every host tool it runs goes through the one script runner, and every
-	// standing it reads reaches the topbar's chip on every strip. It hears
-	// the lid from the operating system (or the fake host's pipe), and with
-	// the mode on a closed lid puts the machine in the lid-closed quiet state:
-	// the views stop, the configured applications freeze, the display sleeps.
-	wifiConfig, err := persistentwifi.ConfigFromEnv(os.Getenv)
+	// The persistent-wifi service (cmd/agent-repl-wifi) owns the lid and power
+	// watchers, the power settings, the display sleep, the application freeze
+	// and the Wi-Fi failover, so none of them stops with this daemon. The
+	// daemon passes the topbar's mode change through to it and follows the
+	// standing it publishes: the standing reaches the topbar's chip on every
+	// strip, and the lid-closed quiet state the standing carries stops the
+	// views (viewquiet) and, with them, every page view nobody can see.
+	wifiTools, err := persistentwifi.ToolsFromEnv(os.Getenv)
 	if err != nil {
-		return nil, fmt.Errorf("agent-repld: resolve the persistent-wifi config: %w", err)
+		return nil, fmt.Errorf("agent-repld: resolve the persistent-wifi tools: %w", err)
 	}
-	freezer, err := buildFreezer(wifiConfig, scripts, p.Layout.Dir(), selfExe, p.Metrics, log)
-	if err != nil {
-		return nil, err
-	}
-	wifi, err := persistentwifi.New(persistentwifi.Deps{
-		Config: wifiConfig,
-		Runner: scripts,
-		Clock:  clock.System{},
-		// HEARD, NEVER RE-READ ON A BEAT: the Wi-Fi link on the daemon's
-		// one network listener, the mode on the power settings' files.
-		NetworkChanged: networkWatch.Changed,
-		PowerChanges:   wifiConfig.PowerChanges(),
-		OnChange:       topbarResolver.SetPersistentWifi,
-		Log:            log,
-		Lid:            wifiConfig.Lid(),
-		PowerSource:    wifiConfig.PowerSource(),
-		LegacyLidDims:  p.DB,
-		Freezer:        freezer,
-		Views:          viewGate,
-		Telemetry:      p.Metrics,
-		EnergyRecord:   energyRecord(p.Layout.Dir()),
+	wifiRPC, wifiCloseIdle := wifirpc.Dial(p.Opts.wifiSocket)
+	wifi, err := wifirpc.New(wifirpc.Deps{
+		RPC:        wifiRPC,
+		CloseIdle:  wifiCloseIdle,
+		Log:        log,
+		Clock:      clock.System{},
+		OnStanding: wifiStandingReceiver(viewGate, topbarResolver),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)
+		return nil, fmt.Errorf("agent-repld: build the persistent-wifi client: %w", err)
 	}
 	wifiStanding.bind(wifi.Topic())
 	// THE WEB CONTENT PROCESS'S FOOTPRINT, once a minute: every workspace
@@ -1620,7 +1610,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metrics surface's version series and the rail's header state it.
 	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
-		WifiTools:      wifiConfig.Tools,
+		WifiTools:      wifiTools,
+		WifiSocket:     p.Opts.wifiSocket,
 		Surfaces:       p.Surfaces,
 		Checkout:       paths.Checkout,
 		WorkConfigRoot: p.Opts.multiRepoConfigDir,
@@ -2175,9 +2166,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "repo_divergence", Run: divergence.Run},
 		{Name: "selection_follow", Run: selectionFollower.Run},
 		{Name: "lock_watchdog", Run: stalls.Run},
-		{Name: "persistent_wifi", Run: wifi.Run},
-		{Name: "persistent_wifi_lid", Run: wifi.WatchLid},
-		{Name: "persistent_wifi_power_source", Run: wifi.WatchPowerSource},
+		{Name: "persistent_wifi_standing", Run: wifi.Run},
 		{Name: "network_watch", Run: networkWatch.Run},
 		{Name: "network_changed", Run: func(ctx context.Context) error {
 			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)
@@ -2373,10 +2362,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				return err
 			}
 			pushes.SeedFeedTextScale(scale)
-			// THE PERSISTENT-WIFI STANDING IS READ BEFORE ANYTHING IS SERVED,
-			// so no topbar chip or Emacs stream is ever drawn from a standing
-			// nobody read.
-			wifi.Refresh(ctx)
+			// THE PERSISTENT-WIFI STANDING IS STATED BEFORE ANYTHING IS SERVED,
+			// as unreachable until the service first answers, so no topbar chip
+			// or Emacs stream is drawn from a standing nobody read, and the
+			// boot never waits on the service: it fails and recovers
+			// independently of this daemon.
+			wifi.Start()
 			// THE STANDING NEWS DIGEST COMES BACK the same way: a digest
 			// nobody dismissed before a bounce stands again in every webview,
 			// read before anything is served.

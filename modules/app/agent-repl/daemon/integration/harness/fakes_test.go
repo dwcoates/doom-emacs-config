@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"bufio"
 	"errors"
 	"net"
@@ -142,11 +143,7 @@ func readStateLine(t *testing.T, r *bufio.Reader) string {
 
 func TestStateSocketWritesEachConnectionTheStateThenEveryChange(t *testing.T) {
 	// Arrange: two daemons connect, a handover's predecessor and successor.
-	dir, err := os.MkdirTemp("/tmp", "hss")
-	if err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "hss")
 	s := newStateSocket(t, dir, "shade", "light")
 	var readers []*bufio.Reader
 	for range 2 {
@@ -178,11 +175,7 @@ func TestStateSocketWritesEachConnectionTheStateThenEveryChange(t *testing.T) {
 
 func TestFakeLidIsAStateSocketNamedLidStartingOpen(t *testing.T) {
 	// Arrange
-	dir, err := os.MkdirTemp("/tmp", "hsl")
-	if err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "hsl")
 
 	// Act
 	l := NewFakeLid(t, dir)

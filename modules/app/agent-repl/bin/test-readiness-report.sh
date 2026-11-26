@@ -356,9 +356,9 @@ t_dirty_stamp_flagged_and_still_measured() {
 
 # --- 6. a stamp naming an unknown revision errors, without killing the run --
 t_unknown_deployed_revision_errors_per_system() {
-    local root systems=8; root="$(new_root)"
+    local root systems=9; root="$(new_root)"
     # The launcher is reported on macOS alone.
-    [ "$(uname)" != Darwin ] || systems=9
+    [ "$(uname)" != Darwin ] || systems=10
     stamp "$root/webapp/dist/.built-sha" "0123456789012345678901234567890123456789"
     run_report "$root"
     if [ "$RC" -eq 0 ] \
@@ -385,7 +385,7 @@ t_proto_commit_stales_the_systems_that_compile_from_it() {
     # only proto/gen/swift, the shim and the webapp import none of it here), so
     # a proto regeneration genuinely cannot stale them.
     if [ "$(jq_get "$OUT" "sorted(s['name'] for s in d['systems'] if s['source_sha'] == '$want')")" \
-         = "['daemon', 'shim-claude-sidecar', 'shim-store', 'zettel']" ]; then
+         = "['agent-repl-wifi', 'daemon', 'shim-claude-sidecar', 'shim-store', 'zettel']" ]; then
         pass "a proto commit becomes the source revision of exactly the systems that compile from it"
     else
         fail "a proto commit becomes the source revision of exactly the systems that compile from it" \
@@ -396,7 +396,10 @@ t_proto_commit_stales_the_systems_that_compile_from_it() {
 
 # --- 7a. the runner's roster is a daemon build input ------------------------
 # The daemon compiles testrun/roster in (the merge gate's suite selection), so
-# a roster commit stales the daemon and no other system. That the rest of
+# a roster commit stales the daemon and no other system (the fixture's `go list`
+# stub lists a module whole, so the persistent-wifi service, a command of the
+# daemon's module, reads the same here; its own package closure is pinned in
+# test-lib-deploy-stamp.sh). That the rest of
 # testrun/ is no system's input is the package-level closure `go list` makes,
 # pinned against real modules by test-lib-deploy-stamp.sh.
 t_runner_roster_commit_stales_only_the_daemon() {
@@ -409,7 +412,7 @@ t_runner_roster_commit_stales_only_the_daemon() {
     local roster; roster="$(head_sha "$root")"
     run_report "$root"
     if [ "$(jq_get "$OUT" 'sysmap["daemon"]["source_sha"]')" = "$roster" ] \
-       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$roster' for s in d['systems'] if s['name'] != 'daemon')")" = "False" ]; then
+       && [ "$(jq_get "$OUT" "any(s['source_sha'] == '$roster' for s in d['systems'] if s['name'] not in ('daemon', 'agent-repl-wifi'))")" = "False" ]; then
         pass "a roster commit is the daemon's source revision and no other system's"
     else
         fail "a roster commit is the daemon's source revision and no other system's" \

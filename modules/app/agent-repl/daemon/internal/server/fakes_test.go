@@ -3426,19 +3426,21 @@ func (f *fakeKeepLives) KeepLive(_ context.Context, ws ids.WorkspaceID) (*agentr
 	return f.response, f.err
 }
 
-// fakePersistentWifi records every action and answers a scripted response.
+// fakePersistentWifi records every action and answers a scripted response,
+// or the scripted err when one is set (a service the call could not reach).
 type fakePersistentWifi struct {
 	mu       sync.Mutex
 	topic    publish.Topic[*agentreplv1.PersistentWifiState]
 	requests []*agentreplv1.UpdatePersistentWifiModeRequest
 	response *agentreplv1.UpdatePersistentWifiModeResponse
+	err      error
 }
 
-func (f *fakePersistentWifi) Update(_ context.Context, req *agentreplv1.UpdatePersistentWifiModeRequest) *agentreplv1.UpdatePersistentWifiModeResponse {
+func (f *fakePersistentWifi) Update(_ context.Context, req *agentreplv1.UpdatePersistentWifiModeRequest) (*agentreplv1.UpdatePersistentWifiModeResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, req)
-	return f.response
+	return f.response, f.err
 }
 
 func (f *fakePersistentWifi) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] {

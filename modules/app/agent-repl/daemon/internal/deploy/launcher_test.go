@@ -65,10 +65,10 @@ func TestTheLauncherTellsItsHotReload(t *testing.T) {
 	}{
 		{name: "the reported launcher runs the fresh build",
 			running: func(t *testing.T) string { return hashOf(t, "launcher-2") },
-			want:    []string{"built:9", "current:test service", "current:launcher", "daemon_current"}},
+			want:    []string{"built:10", "current:persistent-wifi service", "current:launcher", "daemon_current"}},
 		{name: "the reported launcher runs an older build",
 			running: func(t *testing.T) string { return hashOf(t, "launcher-1") },
-			want:    []string{"built:9", "current:test service", "restarting:launcher", "restarted:launcher", "daemon_current"}},
+			want:    []string{"built:10", "current:persistent-wifi service", "restarting:launcher", "restarted:launcher", "daemon_current"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

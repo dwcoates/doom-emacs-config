@@ -101,6 +101,10 @@ type DeploySources struct {
 	// it and a deploy judges it up to date. Unset, the staged test service
 	// is a placeholder whose report the harness states itself.
 	Tests string
+	// Wifi, when set, is the persistent-wifi service binary the world really
+	// runs (wifiservice.go), staged the way Tests is. Unset, the staged
+	// service is a placeholder whose report the harness states itself.
+	Wifi string
 }
 
 // realServices reports whether the staged services are real binaries.
@@ -109,7 +113,7 @@ func (s DeploySources) realServices() bool { return s.Store != "" }
 // placeholderServices are the cache-bin services this build stages as
 // placeholder bytes, whose reports the harness states itself
 // (Daemon.StateServiceBuilds): zettel always, the store and the sidecar when
-// the world runs no real ones, and the test service when it runs none.
+// the world runs no real ones, and the test service and the persistent-wifi service when it runs none.
 func (s DeploySources) placeholderServices() []string {
 	var out []string
 	if !s.realServices() {
@@ -118,6 +122,9 @@ func (s DeploySources) placeholderServices() []string {
 	out = append(out, buildreport.ServiceZettel)
 	if s.Tests == "" {
 		out = append(out, buildreport.ServiceTests)
+	}
+	if s.Wifi == "" {
+		out = append(out, buildreport.ServicePersistentWifi)
 	}
 	return out
 }
@@ -183,6 +190,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   ` + service(buildreport.ServiceSidecar, src.Sidecar) + `
   ` + service(buildreport.ServiceZettel, "") + `
   ` + service(buildreport.ServiceTests, src.Tests) + `
+  ` + service(buildreport.ServicePersistentWifi, src.Wifi) + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
   printf 'harness sockethold\n' > "$out/cache-bin/sockethold"
   mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
@@ -192,7 +200,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
     printf ` + shellword.Quote(strings.TrimSuffix(fakeLauncherExecutable, "\n")+"\n") + ` > "$out/cache-bin/Zettel.app/Contents/MacOS/Zettel"
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.Zettel.app.$f"; done
   fi
-  for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock sockethold; do
+  for n in shim-store shim-claude-sidecar zettel agent-repl-tests agent-repl-wifi shim-lock sockethold; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done
   done
   exit 0

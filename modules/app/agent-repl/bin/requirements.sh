@@ -1097,7 +1097,17 @@ rendered_service() {
     json="$(printf '%s\n' "${args[@]}" | jq -Rn '[inputs]')"
   fi
   entry="$(printf '%s\n' "$entry" | jq -c --argjson args "$json" '.args = $args')"
-  printf '%s\n' "$entry" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
+  # `env_passthrough` NAMES THE PER-USER VARIABLES a service reads from the
+  # environment this render runs in (the installer's, or the deploy's
+  # define-service), because no service manager inherits a shell profile. A
+  # name unset or empty here is left out of the definition.
+  local passed="{}" name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ -n "${!name:-}" ] || continue
+    passed="$(printf '%s\n' "$passed" | jq -c --arg k "$name" --arg v "${!name}" '.[$k] = $v')"
+  done < <(printf '%s\n' "$entry" | jq -r '(.env_passthrough // [])[]')
+  printf '%s\n' "$entry" | jq -r --argjson passed "$passed" --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
     --arg path "$(command_service_path)" --arg restart "$SERVICE_RESTART_SECONDS" --arg stop "$SERVICE_STOP_SECONDS" '
     def home: gsub("~/"; $home + "/");
     def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
@@ -1105,7 +1115,7 @@ rendered_service() {
     def word: "\"" + (gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\\$"; "$$") | unit) + "\"";
     (if .command then .command elif .program then .program else $cache + "/bin/" + .binary end) as $program
     | (["/usr/bin/env", $program] + .args | map(home)) as $argv
-    | ((if .command then {PATH: $path} else {} end) + ((.env // {}) | map_values(home))) as $env
+    | ((if .command then {PATH: $path} else {} end) + ((.env // {}) | map_values(home)) + $passed) as $env
     | ($cache + "/log/" + .log.stdout) as $out | ($cache + "/log/" + .log.stderr) as $err
     | "Rendered by bin/requirements.sh from the \(.id) entry of its requirements.json; change that entry, never this file." as $note
     | if $platform == "darwin" then

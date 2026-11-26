@@ -18,7 +18,6 @@ import (
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/publish"
-	"agent-repld/internal/viewquiet"
 )
 
 // Operations every record of this package carries.
@@ -63,8 +62,6 @@ type Deps struct {
 	// Freezer freezes the configured applications for the quiet state.
 	// REQUIRED.
 	Freezer AppFreezer
-	// Views is the view gate the quiet state moves. REQUIRED.
-	Views *viewquiet.Gate
 	// Telemetry is the quiet state's gauge; nil records nothing.
 	Telemetry QuietTelemetry
 	// EnergyRecord keeps the energy mode the quiet state recorded on
@@ -90,7 +87,6 @@ type Controller struct {
 	sourceWatch PowerSourceWatcher
 	legacy      LegacyLidDims
 	freezer     AppFreezer
-	views       *viewquiet.Gate
 	telemetry   QuietTelemetry
 	energyStore EnergyStore
 	topic       publish.Topic[*agentreplv1.PersistentWifiState]
@@ -163,8 +159,6 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: the store of an earlier build's lid dim is required")
 	case d.Freezer == nil:
 		return nil, fmt.Errorf("persistentwifi: an application freezer is required")
-	case d.Views == nil:
-		return nil, fmt.Errorf("persistentwifi: a view gate is required")
 	case d.EnergyRecord == nil:
 		return nil, fmt.Errorf("persistentwifi: the store of the recorded energy mode is required")
 	case d.NetworkChanged == nil:
@@ -181,7 +175,7 @@ func New(d Deps) (*Controller, error) {
 		network: d.NetworkChanged, power: d.PowerChanges,
 		onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, sourceWatch: d.PowerSource, legacy: d.LegacyLidDims, freezer: d.Freezer,
-		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
+		telemetry: d.Telemetry, energyStore: d.EnergyRecord,
 		scanBound: scanBound, bluetoothBound: bluetoothBound, hotspotJoinBound: hotspotJoinBound,
 	}
 	d.Freezer.OnChange(c.frozenChanged)
@@ -325,8 +319,9 @@ func (c *Controller) recordCause(fact, was string, err error) string {
 }
 
 // Update runs one UpdatePersistentWifiMode action and answers the response.
-// The request was validated by the caller: its action is set.
-func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersistentWifiModeRequest) *agentreplv1.UpdatePersistentWifiModeResponse {
+// It takes only a ValidUpdate, whose action is set by construction.
+func (c *Controller) Update(ctx context.Context, valid ValidUpdate) *agentreplv1.UpdatePersistentWifiModeResponse {
+	req := valid.req
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

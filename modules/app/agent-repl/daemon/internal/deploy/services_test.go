@@ -55,7 +55,7 @@ type fakeServiceManager struct {
 func newFakeServiceManager(dir string) *fakeServiceManager {
 	return &fakeServiceManager{
 		dir:    dir,
-		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true, TestsLabel: true},
+		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true, TestsLabel: true, WifiLabel: true},
 		pid:    map[string]int{StoreLabel: 10, SidecarLabel: 20},
 	}
 }

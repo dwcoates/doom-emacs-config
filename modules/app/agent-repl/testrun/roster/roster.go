@@ -277,6 +277,7 @@ var Programs = []Program{
 	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
 	{Name: "zettel", Owner: "zettel", Module: "zettel", Package: "."},
 	{Name: "agent-repl-tests", Owner: "testservice", Module: "testservice", Package: "."},
+	{Name: "agent-repl-wifi", Owner: "daemon", Module: "daemon", Package: "./cmd/agent-repl-wifi"},
 }
 
 // CoverageSystems are the suites whose code is a system the coverage
@@ -403,7 +404,7 @@ var Suites = []Suite{
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
 		TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
-		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git", "agent-repl-tests"}},
+		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git", "agent-repl-tests", "agent-repl-wifi"}},
 		// EACH PACKAGE IS REUSED ON ITS OWN, keyed on the build graph `go list
 		// -deps -test` names for it; what its tests read beyond that graph is
 		// declared per package, and every other read in the checkout is
@@ -552,7 +553,7 @@ var Suites = []Suite{
 		// harness.MainAt, which takes the daemon and its fakes from the
 		// run's programs rather than building them; the rest are the
 		// programs a world spawns.
-		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests"}},
+		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests", "agent-repl-wifi"}},
 		Reuse: &Reuse{Units: map[string][]string{
 			// The webapp layer's boot budget is held to its driver's.
 			".": {"webapp/test/webapp-layer/drive.ts"},
@@ -571,7 +572,7 @@ var Suites = []Suite{
 				"daemon/integration/", "agent-shim/claude/shim/test/"},
 		}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
-		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests"}},
+		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests", "agent-repl-wifi"}},
 		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
 }
 

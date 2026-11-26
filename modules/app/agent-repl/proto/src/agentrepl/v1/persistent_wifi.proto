@@ -73,6 +73,23 @@ message PersistentWifiState {
   // when it clears; the daemon stops resolving the views those readers show
   // for the same span. Session work is never part of it.
   optional PersistentWifiQuiet quiet = 10;
+  // The persistent-wifi service the daemon reads this standing from cannot be
+  // reached: it is down, restarting, or has not answered since the daemon
+  // started. SET ONLY THEN, and then every other field is unset, since none of
+  // the facts they carry is current: nothing holds the machine quiet, so
+  // readers draw the facts as unread (the daemon lifts its views) and the
+  // tooltip names this arm's detail. The daemon publishes it the moment its
+  // watch of the service ends, and from its own start until the service first
+  // answers; the service's next standing replaces it.
+  optional PersistentWifiServiceUnreachable service_unreachable = 11;
+}
+
+// The persistent-wifi service cannot be reached, and why.
+message PersistentWifiServiceUnreachable {
+  // A one-line account of why the daemon holds no standing from the service,
+  // for the chip's tooltip and the record: not yet answered, the watch ended
+  // with its cause, or no first standing within the daemon's bound.
+  string detail = 1;
 }
 
 // The Wi-Fi interface has an active link to a network.

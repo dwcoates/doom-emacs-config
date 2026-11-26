@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/persistent_wifi.proto.
  */
 export const file_agentrepl_v1_persistent_wifi: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEiwwQKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjcKCGxpZF9vcGVuGAUgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEjsKCmxpZF9jbG9zZWQYBiABKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhIzCgZub19saWQYByABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlOb0xpZEgCEkEKDWxpZF91bndhdGNoZWQYCCABKAsyKC5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAhI1CgVxdWlldBgKIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVF1aWV0SAOIAQFCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZEIICgZfcXVpZXRKBAgJEApSB2xpZF9kaW0iQgoUUGVyc2lzdGVudFdpZmlKb2luZWQSGQoMbmV0d29ya19uYW1lGAEgASgJSACIAQFCDwoNX25ldHdvcmtfbmFtZSIZChdQZXJzaXN0ZW50V2lmaU5vdEpvaW5lZCIWChRQZXJzaXN0ZW50V2lmaU1vZGVPbiIXChVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiFwoVUGVyc2lzdGVudFdpZmlMaWRPcGVuIhkKF1BlcnNpc3RlbnRXaWZpTGlkQ2xvc2VkIhUKE1BlcnNpc3RlbnRXaWZpTm9MaWQiLAoaUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWQSDgoGZGV0YWlsGAEgASgJIu4BChNQZXJzaXN0ZW50V2lmaVF1aWV0EjoKC2Zyb3plbl9hcHBzGAEgAygLMiUuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpRnJvemVuQXBwEkgKDmRpc3BsYXlfYXNsZWVwGAIgASgLMi4uYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpUXVpZXREaXNwbGF5QXNsZWVwSAASRgoNZGlzcGxheV9hd2FrZRgDIAEoCzItLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUF3YWtlSABCCQoHZGlzcGxheSI6ChdQZXJzaXN0ZW50V2lmaUZyb3plbkFwcBIMCgRuYW1lGAEgASgJEhEKCXByb2Nlc3NlcxgCIAEoDSIiCiBQZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUFzbGVlcCIxCh9QZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUF3YWtlEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEirQUKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjcKCGxpZF9vcGVuGAUgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEjsKCmxpZF9jbG9zZWQYBiABKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhIzCgZub19saWQYByABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlOb0xpZEgCEkEKDWxpZF91bndhdGNoZWQYCCABKAsyKC5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAhI1CgVxdWlldBgKIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVF1aWV0SAOIAQESUAoTc2VydmljZV91bnJlYWNoYWJsZRgLIAEoCzIuLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVNlcnZpY2VVbnJlYWNoYWJsZUgEiAEBQgYKBHdpZmlCBgoEbW9kZUIFCgNsaWRCCAoGX3F1aWV0QhYKFF9zZXJ2aWNlX3VucmVhY2hhYmxlSgQICRAKUgdsaWRfZGltIjIKIFBlcnNpc3RlbnRXaWZpU2VydmljZVVucmVhY2hhYmxlEg4KBmRldGFpbBgBIAEoCSJCChRQZXJzaXN0ZW50V2lmaUpvaW5lZBIZCgxuZXR3b3JrX25hbWUYASABKAlIAIgBAUIPCg1fbmV0d29ya19uYW1lIhkKF1BlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhYKFFBlcnNpc3RlbnRXaWZpTW9kZU9uIhcKFVBlcnNpc3RlbnRXaWZpTW9kZU9mZiIXChVQZXJzaXN0ZW50V2lmaUxpZE9wZW4iGQoXUGVyc2lzdGVudFdpZmlMaWRDbG9zZWQiFQoTUGVyc2lzdGVudFdpZmlOb0xpZCIsChpQZXJzaXN0ZW50V2lmaUxpZFVud2F0Y2hlZBIOCgZkZXRhaWwYASABKAki7gEKE1BlcnNpc3RlbnRXaWZpUXVpZXQSOgoLZnJvemVuX2FwcHMYASADKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlGcm96ZW5BcHASSAoOZGlzcGxheV9hc2xlZXAYAiABKAsyLi5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlRdWlldERpc3BsYXlBc2xlZXBIABJGCg1kaXNwbGF5X2F3YWtlGAMgASgLMi0uYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpUXVpZXREaXNwbGF5QXdha2VIAEIJCgdkaXNwbGF5IjoKF1BlcnNpc3RlbnRXaWZpRnJvemVuQXBwEgwKBG5hbWUYASABKAkSEQoJcHJvY2Vzc2VzGAIgASgNIiIKIFBlcnNpc3RlbnRXaWZpUXVpZXREaXNwbGF5QXNsZWVwIjEKH1BlcnNpc3RlbnRXaWZpUXVpZXREaXNwbGF5QXdha2USDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
 
 /**
  * The machine's persistent-wifi standing as the daemon last read it: whether
@@ -138,6 +138,20 @@ export type PersistentWifiState = Message<"agentrepl.v1.PersistentWifiState"> & 
    * @generated from field: optional agentrepl.v1.PersistentWifiQuiet quiet = 10;
    */
   quiet?: PersistentWifiQuiet | undefined;
+
+  /**
+   * The persistent-wifi service the daemon reads this standing from cannot be
+   * reached: it is down, restarting, or has not answered since the daemon
+   * started. SET ONLY THEN, and then every other field is unset, since none of
+   * the facts they carry is current: nothing holds the machine quiet, so
+   * readers draw the facts as unread (the daemon lifts its views) and the
+   * tooltip names this arm's detail. The daemon publishes it the moment its
+   * watch of the service ends, and from its own start until the service first
+   * answers; the service's next standing replaces it.
+   *
+   * @generated from field: optional agentrepl.v1.PersistentWifiServiceUnreachable service_unreachable = 11;
+   */
+  serviceUnreachable?: PersistentWifiServiceUnreachable | undefined;
 };
 
 /**
@@ -146,6 +160,29 @@ export type PersistentWifiState = Message<"agentrepl.v1.PersistentWifiState"> & 
  */
 export const PersistentWifiStateSchema: GenMessage<PersistentWifiState> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_persistent_wifi, 0);
+
+/**
+ * The persistent-wifi service cannot be reached, and why.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiServiceUnreachable
+ */
+export type PersistentWifiServiceUnreachable = Message<"agentrepl.v1.PersistentWifiServiceUnreachable"> & {
+  /**
+   * A one-line account of why the daemon holds no standing from the service,
+   * for the chip's tooltip and the record: not yet answered, the watch ended
+   * with its cause, or no first standing within the daemon's bound.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiServiceUnreachable.
+ * Use `create(PersistentWifiServiceUnreachableSchema)` to create a new message.
+ */
+export const PersistentWifiServiceUnreachableSchema: GenMessage<PersistentWifiServiceUnreachable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 1);
 
 /**
  * The Wi-Fi interface has an active link to a network.
@@ -169,7 +206,7 @@ export type PersistentWifiJoined = Message<"agentrepl.v1.PersistentWifiJoined"> 
  * Use `create(PersistentWifiJoinedSchema)` to create a new message.
  */
 export const PersistentWifiJoinedSchema: GenMessage<PersistentWifiJoined> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 1);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 2);
 
 /**
  * The Wi-Fi interface has no active link: the radio is off, or on and joined
@@ -185,7 +222,7 @@ export type PersistentWifiNotJoined = Message<"agentrepl.v1.PersistentWifiNotJoi
  * Use `create(PersistentWifiNotJoinedSchema)` to create a new message.
  */
 export const PersistentWifiNotJoinedSchema: GenMessage<PersistentWifiNotJoined> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 2);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 3);
 
 /**
  * System sleep is disabled: the lid can be closed without sleeping the
@@ -201,7 +238,7 @@ export type PersistentWifiModeOn = Message<"agentrepl.v1.PersistentWifiModeOn"> 
  * Use `create(PersistentWifiModeOnSchema)` to create a new message.
  */
 export const PersistentWifiModeOnSchema: GenMessage<PersistentWifiModeOn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 3);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 4);
 
 /**
  * System sleep is enabled: closing the lid sleeps the machine and drops its
@@ -217,7 +254,7 @@ export type PersistentWifiModeOff = Message<"agentrepl.v1.PersistentWifiModeOff"
  * Use `create(PersistentWifiModeOffSchema)` to create a new message.
  */
 export const PersistentWifiModeOffSchema: GenMessage<PersistentWifiModeOff> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 4);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 5);
 
 /**
  * The lid is open.
@@ -232,7 +269,7 @@ export type PersistentWifiLidOpen = Message<"agentrepl.v1.PersistentWifiLidOpen"
  * Use `create(PersistentWifiLidOpenSchema)` to create a new message.
  */
 export const PersistentWifiLidOpenSchema: GenMessage<PersistentWifiLidOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 5);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 6);
 
 /**
  * The lid is closed.
@@ -247,7 +284,7 @@ export type PersistentWifiLidClosed = Message<"agentrepl.v1.PersistentWifiLidClo
  * Use `create(PersistentWifiLidClosedSchema)` to create a new message.
  */
 export const PersistentWifiLidClosedSchema: GenMessage<PersistentWifiLidClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 6);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 7);
 
 /**
  * The machine reports no lid (a desktop Mac): the display never follows a lid.
@@ -262,7 +299,7 @@ export type PersistentWifiNoLid = Message<"agentrepl.v1.PersistentWifiNoLid"> & 
  * Use `create(PersistentWifiNoLidSchema)` to create a new message.
  */
 export const PersistentWifiNoLidSchema: GenMessage<PersistentWifiNoLid> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 7);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 8);
 
 /**
  * The daemon is NOT hearing the lid: its subscription to the operating
@@ -286,7 +323,7 @@ export type PersistentWifiLidUnwatched = Message<"agentrepl.v1.PersistentWifiLid
  * Use `create(PersistentWifiLidUnwatchedSchema)` to create a new message.
  */
 export const PersistentWifiLidUnwatchedSchema: GenMessage<PersistentWifiLidUnwatched> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 8);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 9);
 
 /**
  * The lid-closed quiet state, as the daemon holds it.
@@ -330,7 +367,7 @@ export type PersistentWifiQuiet = Message<"agentrepl.v1.PersistentWifiQuiet"> & 
  * Use `create(PersistentWifiQuietSchema)` to create a new message.
  */
 export const PersistentWifiQuietSchema: GenMessage<PersistentWifiQuiet> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 9);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 10);
 
 /**
  * One frozen application.
@@ -359,7 +396,7 @@ export type PersistentWifiFrozenApp = Message<"agentrepl.v1.PersistentWifiFrozen
  * Use `create(PersistentWifiFrozenAppSchema)` to create a new message.
  */
 export const PersistentWifiFrozenAppSchema: GenMessage<PersistentWifiFrozenApp> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 10);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 11);
 
 /**
  * The display was put to sleep when the quiet state began. It wakes at the
@@ -375,7 +412,7 @@ export type PersistentWifiQuietDisplayAsleep = Message<"agentrepl.v1.PersistentW
  * Use `create(PersistentWifiQuietDisplayAsleepSchema)` to create a new message.
  */
 export const PersistentWifiQuietDisplayAsleepSchema: GenMessage<PersistentWifiQuietDisplayAsleep> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 11);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 12);
 
 /**
  * The display could not be put to sleep; the daemon logged why at ERROR and
@@ -397,5 +434,5 @@ export type PersistentWifiQuietDisplayAwake = Message<"agentrepl.v1.PersistentWi
  * Use `create(PersistentWifiQuietDisplayAwakeSchema)` to create a new message.
  */
 export const PersistentWifiQuietDisplayAwakeSchema: GenMessage<PersistentWifiQuietDisplayAwake> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_persistent_wifi, 12);
+  messageDesc(file_agentrepl_v1_persistent_wifi, 13);
 

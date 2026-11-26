@@ -1,11 +1,11 @@
 package storereader
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -40,11 +40,7 @@ func (f *fakeStore) ReadHistoryPage(_ context.Context, req *connect.Request[stor
 // directory, and answers that store socket's path.
 func serve(t *testing.T, store *fakeStore) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "sr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := tempdirstest.ShortDir(t, "sr")
 	storeSocket := filepath.Join(dir, "store.sock")
 	ln, err := net.Listen("unix", filepath.Join(dir, "store-read.sock"))
 	if err != nil {
