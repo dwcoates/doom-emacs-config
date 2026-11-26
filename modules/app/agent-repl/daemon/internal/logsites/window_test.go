@@ -118,13 +118,25 @@ func TestWindowReadsAnEdgeTheTallySplitsAtExactly(t *testing.T) {
 		wantSites []string
 	}{
 		{name: "to a mark", since: t0, until: edge, wantSites: []string{siteA + "/info/3"},
-			record: func(f *fixture) error { _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge }); return err }},
+			record: func(f *fixture) error {
+				_, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge })
+				return err
+			}},
 		{name: "from a mark", since: edge, until: t0.Add(2 * time.Hour), wantSites: []string{siteB + "/error/1", siteC + "/warn/1", siteA + "/info/1"},
-			record: func(f *fixture) error { _, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge }); return err }},
+			record: func(f *fixture) error {
+				_, err := f.store.RecordLogSiteMark(context.Background(), func() time.Time { return edge })
+				return err
+			}},
 		{name: "to a deploy's start", since: t0, until: edge, wantSites: []string{siteA + "/info/3"},
-			record: func(f *fixture) error { _, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge }); return err }},
+			record: func(f *fixture) error {
+				_, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge })
+				return err
+			}},
 		{name: "from a deploy's start", since: edge, until: t0.Add(2 * time.Hour), wantSites: []string{siteB + "/error/1", siteC + "/warn/1", siteA + "/info/1"},
-			record: func(f *fixture) error { _, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge }); return err }},
+			record: func(f *fixture) error {
+				_, err := f.store.RecordLogSiteDeploy(context.Background(), func() time.Time { return edge })
+				return err
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
