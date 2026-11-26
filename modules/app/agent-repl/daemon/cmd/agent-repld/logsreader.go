@@ -11,7 +11,7 @@ import (
 	"agent-repld/internal/scriptrunner"
 )
 
-// logsReadBound bounds one read of every system's warnings and errors over a
+// The deploy's window read is one read of every system's warnings and errors over a
 // deploy's window: bin/logs.sh --all --level warn, which opens only each
 // sink's warnings file (proto/vocab/log-warnings-sink.json). Measured
 // 2026-11-17 over 1,404 log files (10 GB) for a 20-minute window: 0.86s cold,
@@ -26,15 +26,18 @@ import (
 // Since the reader enumerates the workspaces' logs itself, measured
 // 2026-11-25 over 11,972 log files and 1,627 daemon workspaces, the window of
 // that timeout (51s) read in 0.40-0.50s over ten runs on a host at load
-// average 8. The read runs during the handover: the records of
-// daemon.merge.logs_read put handover reads (1291-1437ms) at about 1.5 times
-// the idle ones (980-1005ms), so the healthy worst case under handover load is
-// 0.75s, and the bound is three times that.
-const logsReadBound = 2250 * time.Millisecond
+// average 8. That idle figure underestimated the read under a deploy: the 28
+// records of daemon.merge.logs_read over the 14 handovers of 2026-11-25
+// 17:48-22:05Z, each read during the handover that brought the daemon up, took
+// 319-1621ms, the first read of each handover the slower (536-1621ms).
+//
+// logsReadMeasured is that healthy worst case under handover load, named in
+// the failure a read past the bound records.
+const logsReadMeasured = 1621 * time.Millisecond
 
-// logsReadMeasured is the measurement logsReadBound was sized from, named in
-// the failure a read past the bound records: the idle worst case.
-const logsReadMeasured = 500 * time.Millisecond
+// logsReadBound bounds one window read at three times its measured handover
+// worst case.
+const logsReadBound = 3 * logsReadMeasured
 
 // opLogsRead is the operation of the record every window read leaves.
 const opLogsRead = "daemon.merge.logs_read"
