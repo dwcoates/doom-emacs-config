@@ -488,7 +488,7 @@ func TestDescribeCreateRequest(t *testing.T) {
 			want: strings.Join([]string{
 				"- name: `fix-login`",
 				"- one-shot: yes",
-				"- base ref: `master`",
+				"- source branch: `master`",
 				"- parent workspace id: `ws-parent`",
 				"- forked from workspace id: `ws-parent`",
 				"- model: `opus`",

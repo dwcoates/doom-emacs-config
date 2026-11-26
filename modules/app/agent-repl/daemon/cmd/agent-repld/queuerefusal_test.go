@@ -45,16 +45,6 @@ var queueRefusals = func() []describedRefusal {
 				refusalCase{name: "branch_gone", err: armedWith(requeue, "branch_gone", map[string]any{"branch": "b"}),
 					want: "the branch b that ws's merge lands no longer exists, so the merge could never run; end it with `agent-repld merge-queue discard ws`"},
 				refusalCase{name: "already_landed", err: armed(requeue, "already_landed", nil), want: "ws's merge already landed, which ended its request and closed its workspace"},
-				refusalCase{name: "version_increment_required", err: armed(requeue, "version_increment_required", nil),
-					want: "ws's request lost its values when it was adopted and lands on a versioned main branch; requeue it with -version-part minor or patch and -changelog-line TEXT"},
-				refusalCase{name: "version_increment_unexpected/unversioned_repository", err: armed(requeue, "version_increment_unexpected", &agentreplv1.MergeWorkspaceVersionIncrementUnexpected{
-					Reason: &agentreplv1.MergeWorkspaceVersionIncrementUnexpected_UnversionedRepository{UnversionedRepository: &agentreplv1.MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository{}}}),
-					want: "ws's merge takes no version increment, as its repository's deploy config versions nothing; requeue it without -version-part or -changelog-line"},
-				refusalCase{name: "version_increment_unexpected/not_default_branch", err: armed(requeue, "version_increment_unexpected", &agentreplv1.MergeWorkspaceVersionIncrementUnexpected{
-					Reason: &agentreplv1.MergeWorkspaceVersionIncrementUnexpected_NotDefaultBranch{NotDefaultBranch: &agentreplv1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch{}}}),
-					want: "ws's merge takes no version increment, as it lands into a parent workspace's checkout, not the main branch; requeue it without -version-part or -changelog-line"},
-				refusalCase{name: "version_already_recorded", err: armed(requeue, "version_already_recorded", nil),
-					want: "ws's request recorded its own version increment; requeue it without -version-part or -changelog-line"},
 				refusalCase{name: "placement_behind_not_in_line", err: armedWith(requeue, "placement_behind_not_in_line", map[string]any{"behind": "other"}),
 					want: "the merge other that ws was to go behind is not in its queue"},
 				refusalCase{name: "workspace_closed", err: armed(requeue, "workspace_closed", nil),

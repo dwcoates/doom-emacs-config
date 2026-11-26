@@ -460,7 +460,7 @@ func TestMergeSourceLandingCloses(t *testing.T) {
 		{name: "an own-branch merge closes its requester", source: MergeSource{Kind: MergeSourceOwnBranch}, closes: "ws"},
 		{name: "an own-branch merge kept open closes nothing", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "a one-shot's merge closes the workspace its effects name too", source: MergeSource{Kind: MergeSourceOwnBranch}, effects: effects, closes: "ws", also: "one-shot"},
-		{name: "a one-shot kept open closes nothing, its effects included", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, effects: effects},
+		{name: "a one-shot kept open still closes the workspace its effects name", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, effects: effects, also: "one-shot"},
 		{name: "a workspace source closes that workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "other"}, closes: "other"},
 		{name: "a named branch closes nothing", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 	}

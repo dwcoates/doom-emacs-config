@@ -128,7 +128,7 @@ func TestMismatch(t *testing.T) {
 	}{
 		{
 			name:       "the declared fields match",
-			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waiting_on_user"}},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser"}},
 			candidates: []protoreflect.MessageDescriptor{chip},
 			wantMatch:  true,
 		},
@@ -140,13 +140,13 @@ func TestMismatch(t *testing.T) {
 		},
 		{
 			name:       "a retired field the codec still names is extra",
-			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waiting_on_user", "racing"}},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser", "racing"}},
 			candidates: []protoreflect.MessageDescriptor{chip},
 			wantIn:     "names [racing]",
 		},
 		{
 			name:       "one matching package of several is enough",
-			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waiting_on_user"}},
+			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count", "waitingOnUser"}},
 			candidates: []protoreflect.MessageDescriptor{waiting, chip},
 			wantMatch:  true,
 		},
@@ -154,14 +154,14 @@ func TestMismatch(t *testing.T) {
 			name:       "a narrowed field the codec leaves out still matches",
 			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{"count"}},
 			candidates: []protoreflect.MessageDescriptor{chip},
-			narrowed:   map[string]bool{"waiting_on_user": true},
+			narrowed:   map[string]bool{"waitingOnUser": true},
 			wantMatch:  true,
 		},
 		{
 			name:       "a narrowing excuses only the field it names",
 			claim:      Claim{File: "f.el", Message: "FooterChipChildren", Fields: []string{}},
 			candidates: []protoreflect.MessageDescriptor{chip},
-			narrowed:   map[string]bool{"waiting_on_user": true},
+			narrowed:   map[string]bool{"waitingOnUser": true},
 			wantIn:     "lacks [count]",
 		},
 		{

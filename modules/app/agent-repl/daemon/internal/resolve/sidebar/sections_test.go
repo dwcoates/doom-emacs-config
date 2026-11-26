@@ -1773,7 +1773,7 @@ func TestAMergeOfAWorkspaceTheRegistryDoesNotCarryIsRecordedAndNotDrawn(t *testi
 	if got := queueSubjectIDs(queueGroup(latestPush(t, r), repo)); !slices.Equal(got, []string{"w2"}) {
 		t.Fatalf("queue = %v, want the registered merge alone", got)
 	}
-	if !hasError(logs.Records(), "daemon.sidebar.merge_queue") {
+	if !hasError(logs.Records(), "daemon.sidebar.queue_lines") {
 		t.Fatal("the merge of an unregistered workspace was not recorded at error")
 	}
 }

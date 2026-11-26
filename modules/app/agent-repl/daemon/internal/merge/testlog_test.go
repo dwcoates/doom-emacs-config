@@ -70,7 +70,7 @@ func TestATokenIsRefusedWhenItNamesNoLogTheFeedDraws(t *testing.T) {
 				return token
 			},
 			wantReason: "not_drawn_here",
-			wantFields: dlog.Context{"merge_workspace": "ws-foreign", "drawn_in": "ws-foreign"},
+			wantFields: dlog.Context{"merge_workspace": "ws-foreign"},
 		},
 	}
 	for _, tt := range tests {

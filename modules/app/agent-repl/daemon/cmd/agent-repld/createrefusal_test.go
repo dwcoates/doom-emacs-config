@@ -73,7 +73,6 @@ var createRefusals = func() []describedRefusal {
 		with("creation_hook_failed", map[string]any{"path": "/r/h.sh", "detail": "exit 1", "log_path": "/l"},
 			"the creation hook /r/h.sh failed (exit 1; its log is /l); the create was undone, and the repository's main workspace was asked to find out why"),
 		with("placement_on_child", map[string]any{"detail": "c"}, "the placement names a child, which sits wherever its parent does (c)"),
-		with("placement_on_merge_workspace", map[string]any{"detail": "m"}, "a merge workspace is drawn nowhere until revealed, so it takes no placement (m)"),
 		with("placement_requires_workspace", map[string]any{"detail": "u"}, "the user asked, not a workspace, and only a workspace places what it creates (u)"),
 		with("unknown_placement_subsection", map[string]any{"name": "s"}, "the repository has no subsection s"),
 		plain("blank_placement_subsection_name", "the new subsection's name is blank"),

@@ -457,9 +457,7 @@ func queueSubject(own wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQu
 // entry references a registered workspace), recorded loudly here as
 // assertRepositoryInvariant records its own. Nothing is dropped to hide the
 // first: both queues' merges are drawn, in queue-key order. A merge with no
-// record cannot be drawn and is named in the record. A FAILED merge whose
-// workspace has since left the registry (closed and forgotten) is placed by
-// the workspace it is credited to.
+// record cannot be drawn and is named in the record.
 func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 	const op = "daemon.sidebar.queue_lines"
 	keys := make([]wsm.RepoKey, 0, len(r.state.queues))
