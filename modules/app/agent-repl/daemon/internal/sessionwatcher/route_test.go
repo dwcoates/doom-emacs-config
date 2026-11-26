@@ -4204,3 +4204,91 @@ func TestLogUnmodeledRecordsAGapOncePerUnitAndNoGapForAToolNotOffered(t *testing
 		})
 	}
 }
+
+// spawnUpdateActivity is a spawn's running update stamped with CONTRACT, naming
+// CREATED as its created agent ("" names none).
+func spawnUpdateActivity(activityID, created string, contract conversationv1.AgentActivityContract) *conversationv1.AgentActivity {
+	update := &conversationv1.AgentSubagentUpdate{}
+	if created != "" {
+		update.CreatedAgentId = agentID(created)
+	}
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Contract:   contract,
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: update},
+		}},
+	}
+}
+
+// A RUNNING SPAWN'S UPDATE STANDS FOR ITS START ON AN OPENING PAGE: the update
+// upserts the start's row, so a page served while the child runs carries no
+// start. Each case is one update the page carries and the watch it owes.
+func TestOpeningPageRunningSpawnUpdateWatch(t *testing.T) {
+	const revision4 = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT
+	const revision3 = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL
+	cases := []struct {
+		name      string
+		act       *conversationv1.AgentActivity
+		wantWatch string
+		wantLevel string
+		wantOp    string
+	}{
+		{name: "a revision-4 update opens its child's watch", act: spawnUpdateActivity("spawn-1", "sub-1", revision4), wantWatch: "sub-1"},
+		{name: "a revision-3 update naming no agent is old data and opens nothing", act: spawnUpdateActivity("spawn-1", "", revision3), wantLevel: "info", wantOp: "daemon.sessionwatcher.page_spawn_predates_contract"},
+		{name: "a revision-4 update naming no agent is a producer defect", act: spawnUpdateActivity("spawn-1", "", revision4), wantLevel: "error", wantOp: "daemon.sessionwatcher.subagent_unaddressable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+
+			// Act.
+			h.route(h.main, pageFrame(frameEntryAt("ptr-1", frameUpdate("main-1", activityUpdate(tc.act)))))
+			h.quiet()
+
+			// Assert.
+			if tc.wantWatch == "" {
+				h.client.NoAgentOpen(t)
+				if !h.hasRecord(tc.wantLevel, tc.wantOp) {
+					t.Fatalf("records = %+v, want %s %s", h.log.Records(), tc.wantLevel, tc.wantOp)
+				}
+				return
+			}
+			open := h.client.NextAgentOpen(t)
+			if open.Req.GetTarget().GetValue() != tc.wantWatch {
+				t.Fatalf("the opening page opened a watch on %q, want %q", open.Req.GetTarget().GetValue(), tc.wantWatch)
+			}
+		})
+	}
+}
+
+// SpawnCreatedAgent reads the created agent off every arm that names one, so
+// each consumer learns it from the same frames.
+func TestSpawnCreatedAgent(t *testing.T) {
+	created := agentID("sub-1")
+	cases := []struct {
+		name  string
+		spawn *conversationv1.AgentSubagent
+		want  string
+	}{
+		{name: "a start", spawn: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{CreatedAgentId: created}}}, want: "sub-1"},
+		{name: "a running update", spawn: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{CreatedAgentId: created}}}, want: "sub-1"},
+		{name: "a success", spawn: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{CreatedAgentId: created}}}, want: "sub-1"},
+		{name: "a failure", spawn: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{CreatedAgentId: created}}}, want: "sub-1"},
+		{name: "an update from before revision 4", spawn: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{}}}, want: ""},
+		{name: "no arm", spawn: &conversationv1.AgentSubagent{}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := SpawnCreatedAgent(tc.spawn).GetValue()
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("SpawnCreatedAgent = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

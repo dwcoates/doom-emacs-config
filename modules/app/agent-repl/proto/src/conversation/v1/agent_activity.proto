@@ -248,6 +248,12 @@ enum AgentActivityContract {
   // plane's restating one, so a row stamped 2 and not 3 lacks it as expected
   // old data.
   AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL = 3;
+  // A spawn's running update restates the agent it created
+  // (AgentSubagentUpdate.created_agent_id). An update upserts the row its
+  // start wrote, so below revision 4 a run still going was stored as an update
+  // naming no agent, and a replay of it drew a bubble that addressed no
+  // sub-feed. A row stamped 3 and not 4 lacks it as expected old data.
+  AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT = 4;
 }
 
 // What a unit of work is attributable to beyond its agent.
@@ -2487,6 +2493,14 @@ message AgentSubagentIsolationRemote {
 message AgentSubagentUpdate {
   // What it was asked to do, repeated so this frame stands alone.
   AgentSubagentPrompt prompt = 1;
+
+  // THE AGENT THIS SPAWN CREATED, repeated so this frame stands alone: the
+  // same identity AgentSubagentStart.created_agent_id names. An update
+  // UPSERTS the row its start wrote, so without it a replay of a run still
+  // going served a frame that named no agent, and its bubble addressed no
+  // sub-feed. Set by every producer stamped
+  // SUBAGENT_UPDATE_NAMES_ITS_AGENT or later.
+  AgentId created_agent_id = 6;
 
   // What the run has spent so far.
   AgentSubagentProgress progress = 2;

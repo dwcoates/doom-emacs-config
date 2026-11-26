@@ -1432,7 +1432,7 @@ func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.History
 		switch arm := frame.GetResult().(type) {
 		case *conversationv1.AgentFrame_Update:
 			if act := arm.Update.GetActivity(); act != nil {
-				w.watchSpawnedSubagentLocked(act)
+				w.watchRunningSpawnOnPageLocked(act)
 			}
 		case *conversationv1.AgentFrame_DetachedWork:
 			if sub := arm.DetachedWork.GetCreated().GetWorkCreated().GetSubagent(); sub != nil {
@@ -1442,6 +1442,39 @@ func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.History
 			}
 		}
 	}
+}
+
+// watchRunningSpawnOnPageLocked opens the watch a spawn on an opening page owes
+// its child when the page's frame for it is a START or a running UPDATE.
+//
+// AN UPDATE STANDS FOR ITS START ON A PAGE: it upserts its start's row, so a
+// page served while the child is still running carries the update and no
+// start, and a child watched only from a start was never watched after a
+// handover — its own calls drew in no feed, and work it moved to the
+// background reached the footer with no owner (pre-queue-rule-tests,
+// 2026-11-25). An update below contract revision 4 names no agent: that row is
+// expected old data, and it opens nothing.
+func (w *watcher) watchRunningSpawnOnPageLocked(act *conversationv1.AgentActivity) {
+	sub := act.GetSubagent()
+	if sub.GetStart() == nil && sub.GetUpdate() == nil {
+		return
+	}
+	created := SpawnCreatedAgent(sub)
+	if sub.GetUpdate() != nil && created.GetValue() == "" && !SubagentUpdateNamesItsAgent(act) {
+		w.log.Info("daemon.sessionwatcher.page_spawn_predates_contract",
+			"a running spawn's update on an opening page predates the revision that names its agent; no watch is opened for its child",
+			dlog.Context{"activity_id": act.GetActivityId().GetValue(), "contract": act.GetContract().String()})
+		return
+	}
+	w.watchCreatedAgentLocked(created, act.GetActivityId().GetValue())
+}
+
+// SubagentUpdateNamesItsAgent reports whether act's producer restates the
+// created agent on a spawn's running update: contract revision 4
+// (SUBAGENT_UPDATE_NAMES_ITS_AGENT) and later. Below it the update upserted its
+// start's row naming no agent, so such a row lacks it as expected old data.
+func SubagentUpdateNamesItsAgent(act *conversationv1.AgentActivity) bool {
+	return act.GetContract() >= conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SUBAGENT_UPDATE_NAMES_ITS_AGENT
 }
 
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch
@@ -2138,10 +2171,32 @@ func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
 		w.facts[id] = fact
 	}
 	fact.tool = ActivityToolName(act)
-	if start := act.GetSubagent().GetStart(); start != nil {
-		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch: a subagent start names its created agent", dlog.Context{"function": "recordActivityLocked", "branch": "a subagent start names its created agent"})
-		fact.agent = start.GetCreatedAgentId()
+	if created := SpawnCreatedAgent(act.GetSubagent()); created.GetValue() != "" {
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch: a subagent frame names its created agent", dlog.Context{"function": "recordActivityLocked", "branch": "a subagent frame names its created agent"})
+		fact.agent = created
 	}
+}
+
+// SpawnCreatedAgent is the agent a spawn frame names as the one it created, nil
+// when the frame names none. ONE PLACE: every consumer that learns a spawn's
+// created agent from its frames reads it here, so an arm that comes to restate
+// the agent is read by all of them at once.
+//
+// A START, A RUNNING UPDATE AND BOTH SETTLES each name it. The update does from
+// contract revision 4 (SUBAGENT_UPDATE_NAMES_ITS_AGENT): it upserts its start's
+// row, so a replay of a run still going serves the update and no start.
+func SpawnCreatedAgent(spawn *conversationv1.AgentSubagent) *conversationv1.AgentId {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		return frame.Start.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Update:
+		return frame.Update.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Failure:
+		return frame.Failure.GetCreatedAgentId()
+	}
+	return nil
 }
 
 // ActivityToolName names the tool a unit called, empty for units that are not

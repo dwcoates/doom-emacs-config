@@ -129,7 +129,7 @@ describe("the activity envelope", () => {
   it("stamps the stands-alone contract on a start, where no per-kind code restates anything", () => {
     const activity = agentActivity(UNIT, readStart());
 
-    expect(activity.contract).toBe(conversationv1.AgentActivityContract.MONITOR_FAILURE_RESTATES_ITS_CALL);
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SUBAGENT_UPDATE_NAMES_ITS_AGENT);
   });
 
   it("stamps the stands-alone contract on a settle whatever its arm restated", () => {

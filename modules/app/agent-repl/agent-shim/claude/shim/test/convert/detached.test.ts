@@ -889,6 +889,21 @@ describe("convertDetached: task_progress", () => {
     expect(progressOf(entries[0]).totalTokens).toBe(9_000n);
   });
 
+  it("names the agent the spawn created, so the beat that replaces the start still addresses its sub-feed", () => {
+    // Act
+    const entries = convert({
+      subtype: "task_progress",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      usage: { total_tokens: 4_200 },
+    });
+
+    // Assert
+    const update = (activityOf(entries[0])?.item.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentUpdate;
+    expect(update.createdAgentId?.value).toBe("toolu_1");
+  });
+
   it("drops a beat that names no spawning call and none is remembered", () => {
     expect(
       convert({ subtype: "task_progress", task_id: "t1", usage: { total_tokens: 4_200 } }),
@@ -2617,6 +2632,27 @@ describe("a resumed subagent's frames restate its spawn's commission", () => {
       description: "fix the shim",
       type: "opus-medium",
     });
+  });
+
+  it("names the resumed agent, never the send's minted one, on a resumed run's running beat", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    spawnedSettledAndResumed(registry, calls);
+    registry.rememberAgent("a5583", create(conversationv1.AgentIdSchema, { value: "toolu_spawn" }));
+
+    // Act
+    const entries = convert(
+      { subtype: "task_progress", task_id: "a5583", tool_use_id: "toolu_send", usage: { total_tokens: 10 } },
+      {},
+      registry,
+      calls,
+    );
+
+    // Assert
+    const update = (activityOf(entries.at(-1))?.item.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentUpdate;
+    expect(update.createdAgentId?.value).toBe("toolu_spawn");
   });
 
   it("restates the spawn's commission on a resumed run's terminal", () => {

@@ -413,7 +413,7 @@ describe("every activity stands alone on a real capture", () => {
     const unstamped = foldScenario(scenario)
       .entries.map(activityOf)
       .filter((activity) => activity !== undefined)
-      .filter((activity) => activity.contract !== conversationv1.AgentActivityContract.MONITOR_FAILURE_RESTATES_ITS_CALL)
+      .filter((activity) => activity.contract !== conversationv1.AgentActivityContract.SUBAGENT_UPDATE_NAMES_ITS_AGENT)
       .map((activity) => activity.activityId?.value);
     expect(unstamped).toEqual([]);
   });

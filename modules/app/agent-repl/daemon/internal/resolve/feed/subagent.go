@@ -82,7 +82,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// is not optional there, so a start with an empty one is a producer fault
 	// that still retires the hold rather than joining it — a start held against
 	// itself would wait for a frame that has already arrived.
-	namesAgent := isStart || namedCreatedAgent(spawn).GetValue() != ""
+	namesAgent := isStart || sessionwatcher.SpawnCreatedAgent(spawn).GetValue() != ""
 	settle := subagentSettled(spawn)
 	if !namesAgent && state.created.GetValue() == "" {
 		if !subagentArmDraws(spawn) {
@@ -102,7 +102,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		// own to place them from.
 		state.feed = at
 		state.held = append(state.held, spawn)
-		state.heldBound = state.heldBound || standsAlone(act)
+		state.heldBound = state.heldBound || boundToNameAgent(act, spawn)
 		r.logger(s.id).Debug("daemon.feed.subagent_held",
 			"a spawn's frame arrived before any frame named the created agent; it is held until one does",
 			dlog.Context{"unit": unitID, "held": len(state.held)})
@@ -139,20 +139,15 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	return r.composeSubagent(s, at, unitID, state, commissionOf(spawn)), nil
 }
 
-// namedCreatedAgent answers the created agent this frame states, if its arm
-// states one at all. The start always does; a settle (success or failure) does
-// when its producer knew the id, which is what makes a settled-only delivery
-// addressable.
-func namedCreatedAgent(spawn *conversationv1.AgentSubagent) *conversationv1.AgentId {
-	switch frame := spawn.GetResult().(type) {
-	case *conversationv1.AgentSubagent_Start:
-		return frame.Start.GetCreatedAgentId()
-	case *conversationv1.AgentSubagent_Success:
-		return frame.Success.GetCreatedAgentId()
-	case *conversationv1.AgentSubagent_Failure:
-		return frame.Failure.GetCreatedAgentId()
+// boundToNameAgent reports whether the producer of a spawn frame that names no
+// created agent was bound to name it: a settle from the stands-alone contract
+// (revision 1), an update from SUBAGENT_UPDATE_NAMES_ITS_AGENT (revision 4).
+// A frame below its arm's revision is expected old data.
+func boundToNameAgent(act *conversationv1.AgentActivity, spawn *conversationv1.AgentSubagent) bool {
+	if _, update := spawn.GetResult().(*conversationv1.AgentSubagent_Update); update {
+		return sessionwatcher.SubagentUpdateNamesItsAgent(act)
 	}
-	return nil
+	return standsAlone(act)
 }
 
 // subagentSettled reports whether a spawn frame is one of its settles.
@@ -182,7 +177,7 @@ func settleInstantOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentA
 // costs the bubble its description and a missing start costs it the
 // authoritative clock, and nothing more.
 func (r *resolver) gradeSubagentSettle(s *wsState, act *conversationv1.AgentActivity, state *subagentState, spawn *conversationv1.AgentSubagent) {
-	if namedCreatedAgent(spawn).GetValue() == "" {
+	if sessionwatcher.SpawnCreatedAgent(spawn).GetValue() == "" {
 		r.unrestated(s, act, "subagent", "created_agent_id", "the agent a start this process held named")
 	}
 	if commissionOf(spawn) == nil {
@@ -267,6 +262,13 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		}
 	case *conversationv1.AgentSubagent_Update:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision: case *conversationv1.AgentSubagent_Update", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Update"})
+		// AN UPDATE NAMES THE CREATED AGENT from contract revision 4: it
+		// upserts its start's row, so on a replay of a run still going it is
+		// the only frame the row's identity can come from. Never overwritten
+		// with nothing: an older producer's update leaves what a start told us.
+		if created := frame.Update.GetCreatedAgentId(); created.GetValue() != "" {
+			state.created = created
+		}
 		applyPrompt(bubble, frame.Update.GetPrompt())
 		// A LATE BEAT NEVER REVIVES A HEAD THAT ENDED: the agent's own stream
 		// shares no ordering with the session's level, so progress frames can
@@ -405,8 +407,9 @@ func (r *resolver) announceEntry(s *wsState, unit string, previous, current *fro
 //
 // AN IDENTITY THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the
 // spawn. A settled-only delivery is no longer such a fault — either settle arm
-// can name the agent itself — so what reaches here is a spawn where neither a
-// start nor a naming terminal ever arrived:
+// can name the agent itself, as can an update from contract revision 4 — so
+// what reaches here is a spawn where no frame that names the agent ever
+// arrived:
 // the bubble is drawn from what did arrive, and it is warned, because its row
 // carries no created agent and so addresses no sub-feed. A hold of nothing but
 // rows that PREDATE the stands-alone contract is not a fault but old data, and
