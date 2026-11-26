@@ -1866,6 +1866,17 @@ type fakeMerges struct {
 	// widened, when set, runs as ServingWidened is told, before it is
 	// recorded: a test reads the standings the edge is told after.
 	widened func()
+	// reviewHanded is the predicate the last ReviewQueues was given: a test
+	// probes which merges the review was told to leave to an adoption.
+	reviewHanded func(ids.WorkspaceID) bool
+}
+
+// handedLater answers the predicate the last ReviewQueues was given, and
+// whether a review ran at all.
+func (f *fakeMerges) handedLater() (func(ids.WorkspaceID) bool, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reviewHanded, f.reviewHanded != nil
 }
 
 func (f *fakeMerges) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
@@ -1912,11 +1923,12 @@ func (f *fakeMerges) ServingWidened(context.Context) {
 	f.calls = append(f.calls, "serving_widened")
 }
 
-func (f *fakeMerges) ReviewQueues(context.Context) error {
+func (f *fakeMerges) ReviewQueues(_ context.Context, handedLater func(ids.WorkspaceID) bool) error {
 	f.order.record("review_queues")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "review")
+	f.reviewHanded = handedLater
 	return f.reviewErr
 }
 

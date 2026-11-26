@@ -602,8 +602,14 @@ type MergeMover interface {
 	// ReviewQueues reads every repository's merge queue again from its
 	// durable rows and offers each to this daemon's pump. The takeover asks
 	// it once the outgoing daemon is gone: a queue change that daemon made
-	// while both served (a resume) reached only its own pump.
-	ReviewQueues(ctx context.Context) error
+	// while both served (a resume) reached only its own pump. It leaves
+	// alone every merge of a workspace HANDEDLATER names: the handover's
+	// adoptions finish after the takeover, and each hands its workspace's
+	// merges here through AdoptWorkspace; taken up by the review first, a
+	// merge was resumed before its workspace's session had arrived and its
+	// wait on the repairing turn found none (2026-11-26 16:44:14,
+	// persistent-wifi-service).
+	ReviewQueues(ctx context.Context, handedLater func(ids.WorkspaceID) bool) error
 	// ServingWidened tells the merge queue this daemon now serves workspaces
 	// no adoption of its own told it of (AdoptWorkspace): joining mode's end
 	// at the takeover, and the stragglers marked owned. Its deploy mediation

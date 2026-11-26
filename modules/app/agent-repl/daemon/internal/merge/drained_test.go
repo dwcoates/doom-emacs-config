@@ -501,7 +501,7 @@ func TestTheBootAndTheTakeoverOfferEveryOwedDrain(t *testing.T) {
 		call func(o *orchestrator) error
 	}{
 		{name: "the boot", call: func(o *orchestrator) error { return o.Recover(context.Background()) }},
-		{name: "a successor's takeover", call: func(o *orchestrator) error { return o.ReviewQueues(context.Background()) }},
+		{name: "a successor's takeover", call: func(o *orchestrator) error { return o.ReviewQueues(context.Background(), nothingHanded) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

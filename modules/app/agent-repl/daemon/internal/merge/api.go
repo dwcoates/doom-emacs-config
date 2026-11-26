@@ -405,8 +405,14 @@ type Orchestrator interface {
 	// queue the successor serves meanwhile.
 	ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error
 	// ReviewQueues offers every repository with a merge queue to this
-	// daemon's pump, judged from its durable rows (rollout.MergeMover).
-	ReviewQueues(ctx context.Context) error
+	// daemon's pump, judged from its durable rows (rollout.MergeMover). It
+	// takes up every merge this daemon does not hold save one whose
+	// workspace HANDEDLATER names: the handover's adoptions finish after the
+	// takeover, and each hands its workspace's merges here through
+	// AdoptWorkspace; taken up first, a merge was resumed before its
+	// workspace's session arrived (2026-11-26 16:44:14,
+	// persistent-wifi-service).
+	ReviewQueues(ctx context.Context, handedLater func(ids.WorkspaceID) bool) error
 	// TakeTestRunsOff takes every gate's run off the test service and holds
 	// every gate off it until the release it answers is called: the daemon's
 	// own restart of the service (deploy.Restarter) runs between the two and

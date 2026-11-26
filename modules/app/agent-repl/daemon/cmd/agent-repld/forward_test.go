@@ -321,7 +321,11 @@ func TestAnUnboundMergeMoverRefusesTheMove(t *testing.T) {
 }
 
 // recordingMover records the moves a bound forwarder carries.
-type recordingMover struct{ calls []string }
+type recordingMover struct {
+	calls []string
+	// reviewHanded is the predicate the last ReviewQueues carried.
+	reviewHanded func(ids.WorkspaceID) bool
+}
 
 func (m *recordingMover) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
 	m.calls = append(m.calls, "suspend "+string(ws))
@@ -333,8 +337,9 @@ func (m *recordingMover) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) e
 	return nil
 }
 
-func (m *recordingMover) ReviewQueues(context.Context) error {
+func (m *recordingMover) ReviewQueues(_ context.Context, handedLater func(ids.WorkspaceID) bool) error {
 	m.calls = append(m.calls, "review")
+	m.reviewHanded = handedLater
 	return nil
 }
 
@@ -963,17 +968,20 @@ func TestABoundMergeForwarderCarriesAQueueReview(t *testing.T) {
 	f.bind(target)
 
 	// Act.
-	err := f.ReviewQueues(context.Background())
+	err := f.ReviewQueues(context.Background(), func(ws ids.WorkspaceID) bool { return ws == "handed" })
 
 	// Assert.
 	if err != nil || !reflect.DeepEqual(target.calls, []string{"review"}) {
 		t.Fatalf("ReviewQueues = %v, calls %v; want the review carried", err, target.calls)
 	}
+	if target.reviewHanded == nil || !target.reviewHanded("handed") || target.reviewHanded("other") {
+		t.Fatal("the review reached the mover without the predicate it was given")
+	}
 }
 
 func TestAnUnboundMergeForwarderRefusesAQueueReview(t *testing.T) {
 	// Act.
-	err := (&mergeForwarder{}).ReviewQueues(context.Background())
+	err := (&mergeForwarder{}).ReviewQueues(context.Background(), func(ids.WorkspaceID) bool { return false })
 
 	// Assert.
 	if err == nil {

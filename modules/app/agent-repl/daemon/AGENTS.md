@@ -1537,7 +1537,12 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   workspace -- the successor, or the incumbent taking a failed transfer back
   -- takes every merge of it from the durable rows (`AdoptWorkspace`, the
   boot's own per-entry recovery): the suspended merge resumes at its step, in
-  the same bubble. A daemon admits nothing behind a merge admitted elsewhere,
+  the same bubble. The successor's takeover review (`ReviewQueues`) leaves
+  alone every merge whose workspace an adoption of the join still hands here
+  (`rollout.controller.adoptionHandsMerges`): those adoptions finish after
+  the takeover, and a merge resumed before its session arrived found no
+  session to await its repairing turn on (2026-11-26).
+  A daemon admits nothing behind a merge admitted elsewhere,
   and nothing of a workspace it handed away. Holding the handover until the
   merge ended was rejected: a handover never waits on work, and a merge's
   tests and repairs are unbounded.

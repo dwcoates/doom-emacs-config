@@ -837,9 +837,13 @@ type takeBack struct {
 	call func(o *orchestrator) error
 }
 
+// nothingHanded is a takeover's review with no adoption still handing a
+// workspace here: every merge this daemon does not hold is taken up.
+func nothingHanded(ids.WorkspaceID) bool { return false }
+
 var takeBacks = []takeBack{
 	{name: "a boot's recovery", call: func(o *orchestrator) error { return o.Recover(context.Background()) }},
-	{name: "a successor's takeover", call: func(o *orchestrator) error { return o.ReviewQueues(context.Background()) }},
+	{name: "a successor's takeover", call: func(o *orchestrator) error { return o.ReviewQueues(context.Background(), nothingHanded) }},
 }
 
 // successorOf builds the daemon that takes the harness's queue over from a

@@ -2601,6 +2601,123 @@ func TestATakeoverWhoseQueueReviewFailsSaysSoAndGoesOn(t *testing.T) {
 	}
 }
 
+// heldMergeHandoff is a joining harness whose manifest names WS, adopted
+// once its host calls; the adoption has made WS owned and is held in its
+// tail, inside AdoptWorkspace, until the test sends on h.merges.release.
+func heldMergeHandoff(t *testing.T) (*harness, ids.WorkspaceID) {
+	t.Helper()
+	h := newHarness(t, func(d *Deps) { d.AdoptAwaitsParticipants = true })
+	ws, _ := h.workspace(t)
+	h.merges.adopting = make(chan ids.WorkspaceID, 1)
+	h.merges.release = make(chan struct{})
+	t.Cleanup(func() { close(h.merges.release) })
+	arm(t, h, ws, Participants{Host: true})
+	answered := make(chan error, 1)
+	go func() { answered <- h.c.AdoptHost(context.Background(), ws) }()
+	<-h.merges.adopting
+	if err := <-answered; err != nil {
+		t.Fatalf("AdoptHost = %v, want the owned workspace answered adopted", err)
+	}
+	return h, ws
+}
+
+func TestTakeoverReviewLeavesMergesToAdoptionsStillRunning(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace func(handed ids.WorkspaceID) ids.WorkspaceID
+		want      bool
+	}{
+		{name: "a joining workspace whose adoption has not handed its merges", workspace: func(handed ids.WorkspaceID) ids.WorkspaceID { return handed }, want: true},
+		{name: "a workspace the manifest did not name", workspace: func(ids.WorkspaceID) ids.WorkspaceID { return "ws-not-handed" }, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, ws := heldMergeHandoff(t)
+
+			// Act
+			takeOver(h)
+
+			// Assert
+			handedLater, reviewed := h.merges.handedLater()
+			if !reviewed {
+				t.Fatal("the takeover reviewed no merge queue")
+			}
+			if got := handedLater(tt.workspace(ws)); got != tt.want {
+				t.Fatalf("handedLater = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdoptionHandsMergesOnceAdoptWorkspaceReturns(t *testing.T) {
+	// Arrange: the adoption is held inside AdoptWorkspace.
+	h, ws := heldMergeHandoff(t)
+	if !h.c.adoptionHandsMerges(ws) {
+		t.Fatal("adoptionHandsMerges = false while AdoptWorkspace has not returned, want true")
+	}
+
+	// Act
+	h.merges.release <- struct{}{}
+	h.awaitAdoptionEnded(t, ws)
+
+	// Assert
+	if h.c.adoptionHandsMerges(ws) {
+		t.Fatal("adoptionHandsMerges = true once AdoptWorkspace returned, want false")
+	}
+}
+
+func TestAFailedAdoptWorkspaceLeavesTheMergesStillToBeHanded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.merges.mu.Lock()
+	h.merges.adoptErr = errors.New("database is locked")
+	h.merges.mu.Unlock()
+
+	// Act
+	arm(t, h, ws, Participants{})
+	h.awaitAdoptionEnded(t, ws)
+
+	// Assert
+	if !h.c.adoptionHandsMerges(ws) {
+		t.Fatal("adoptionHandsMerges = false after AdoptWorkspace failed, want the merges still owed")
+	}
+}
+
+func TestAdoptionHandsMerges(t *testing.T) {
+	const ws = ids.WorkspaceID("ws-probed")
+	tests := []struct {
+		name         string
+		joining      map[ids.WorkspaceID]bool
+		mergesHanded map[ids.WorkspaceID]bool
+		want         bool
+	}{
+		{name: "joining and not handed", joining: map[ids.WorkspaceID]bool{ws: true}, want: true},
+		{name: "joining and handed", joining: map[ids.WorkspaceID]bool{ws: true}, mergesHanded: map[ids.WorkspaceID]bool{ws: true}, want: false},
+		{name: "not joining", joining: map[ids.WorkspaceID]bool{"ws-other": true}, want: false},
+		{name: "nil maps", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.joining = tt.joining
+			h.c.mergesHanded = tt.mergesHanded
+			h.c.mu.Unlock()
+
+			// Act
+			got := h.c.adoptionHandsMerges(ws)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("adoptionHandsMerges = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTheTakeoverTakesUpTheHeldCreates(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -3412,5 +3529,43 @@ func TestADaemonArmsNothingFromTheManifestItWrote(t *testing.T) {
 	}
 	if !errors.Is(adoptErr, ErrNoTransferAnnounced) {
 		t.Fatalf("AdoptHost answered %v, want no_transfer_announced: this daemon serves the workspace", adoptErr)
+	}
+}
+
+func TestAFailedStragglerAdoptionStillHandsTheWorkspacesMerges(t *testing.T) {
+	// Arrange: FIRST was being handed over and nobody adopted it, and its
+	// straggler adoption fails before it reaches the merges (its views
+	// cannot be published).
+	h := newHarness(t)
+	first, _ := joinedWithOneOfTwo(t, h)
+	publish := h.c.deps.PublishViews
+	h.c.deps.PublishViews = func(ctx context.Context, ws ids.WorkspaceID) error {
+		if ws == first {
+			return errors.New("views refused")
+		}
+		return publish(ctx, ws)
+	}
+
+	// Act: the incumbent exits, and the stragglers are adopted.
+	h.incumbentExits()
+	<-h.c.tookOverSignal()
+	h.c.stragglerAdoptions.Wait()
+
+	// Assert: the failure is recorded, the merges were taken all the same,
+	// and the takeover's review no longer leaves them to an adoption.
+	if calls := h.merges.called(); !slices.Contains(calls, "adopt "+string(first)) {
+		t.Fatalf("merge calls = %v, want the straggler's merges taken", calls)
+	}
+	if h.c.adoptionHandsMerges(first) {
+		t.Fatal("adoptionHandsMerges = true after the failed straggler adoption handed the merges, want false")
+	}
+	var failed bool
+	for _, rec := range levelRecords(records(h.log, opAdopt), "error") {
+		if rec.Message == "a workspace whose handover never finished could not have its session adopted; it is served without one" {
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatalf("adopt ERROR records = %+v, want the failed straggler adoption recorded", levelRecords(records(h.log, opAdopt), "error"))
 	}
 }

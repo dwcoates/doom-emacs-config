@@ -2103,7 +2103,7 @@ func TestReviewQueuesOffersEveryQueueToThePump(t *testing.T) {
 	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
 
 	// Act
-	err := h.o.ReviewQueues(context.Background())
+	err := h.o.ReviewQueues(context.Background(), nothingHanded)
 
 	// Assert
 	want := []wsm.RepoKey{h.repoKey(), other}
@@ -2123,7 +2123,7 @@ func TestReviewQueuesTakesUpAMergeNoHandoverGaveThisDaemon(t *testing.T) {
 	h.o.forgetMoved(theWorkspace)
 
 	// Act
-	err := h.o.ReviewQueues(context.Background())
+	err := h.o.ReviewQueues(context.Background(), nothingHanded)
 
 	// Assert
 	if err != nil {
@@ -2138,6 +2138,48 @@ func TestReviewQueuesTakesUpAMergeNoHandoverGaveThisDaemon(t *testing.T) {
 	}
 }
 
+func TestReviewQueuesLeavesAMergeToTheAdoptionHandingItsWorkspace(t *testing.T) {
+	// Arrange: an admitted merge this daemon does not hold, whose workspace
+	// an adoption of the handover still brings here.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.o.forgetMoved(theWorkspace)
+	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+	// Act
+	err := h.o.ReviewQueues(context.Background(), func(ws ids.WorkspaceID) bool { return ws == theWorkspace })
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReviewQueues: %v", err)
+	}
+	after, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("the queue went from %+v to %+v, want it left to the adoption", before, after)
+	}
+	if h.o.holds(theWorkspace) {
+		t.Fatal("the review took up a merge an adoption still hands here")
+	}
+	if !reflect.DeepEqual(kicked, []wsm.RepoKey{h.repoKey()}) {
+		t.Fatalf("kicks %v, want the queue still offered to the pump", kicked)
+	}
+	left := false
+	for _, r := range h.logs.Records() {
+		switch r.Message {
+		case "takes up a merge no handover gave this daemon":
+			t.Fatalf("the merge was taken up: %+v", r)
+		case "leaves a merge to the adoption still handing its workspace to this daemon":
+			left = r.Level == "info" && r.Operation == "daemon.merge.review"
+		}
+	}
+	if !left {
+		t.Fatalf("the merge left to its adoption was not recorded at INFO: %+v", h.logs.Records())
+	}
+}
+
 func TestReviewQueuesLeavesAMergeThisDaemonHoldsAlone(t *testing.T) {
 	// Arrange: a merge this daemon queued itself.
 	h := newHarness(t)
@@ -2145,7 +2187,7 @@ func TestReviewQueuesLeavesAMergeThisDaemonHoldsAlone(t *testing.T) {
 	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())
 
 	// Act
-	err := h.o.ReviewQueues(context.Background())
+	err := h.o.ReviewQueues(context.Background(), nothingHanded)
 
 	// Assert
 	after, _ := h.db.MergeQueue(context.Background(), h.repoKey())
@@ -2169,7 +2211,7 @@ func TestReviewQueuesSurfacesAnUnreadableQueue(t *testing.T) {
 	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
 
 	// Act
-	err := h.o.ReviewQueues(context.Background())
+	err := h.o.ReviewQueues(context.Background(), nothingHanded)
 
 	// Assert
 	if err == nil || len(kicked) != 0 {

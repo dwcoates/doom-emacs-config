@@ -570,8 +570,10 @@ func (o *orchestrator) isTakenAwayLocked(ws ids.WorkspaceID) bool {
 // ReviewQueues offers every repository with a merge queue to this daemon's
 // pump, which judges each from its durable rows: its pause flag, the merges a
 // restart or a transfer suspended, and its line. The takeover asks it once
-// the outgoing daemon is gone (rollout.MergeMover).
-func (o *orchestrator) ReviewQueues(ctx context.Context) error {
+// the outgoing daemon is gone (rollout.MergeMover). HANDEDLATER names the
+// workspaces whose merges an adoption of the handover still brings here
+// (AdoptWorkspace); the review leaves their entries to it.
+func (o *orchestrator) ReviewQueues(ctx context.Context, handedLater func(ids.WorkspaceID) bool) error {
 	const op = "daemon.merge.review"
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
@@ -586,11 +588,22 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 	// no boot. Its admitted entry then held the queue's head with nothing to
 	// resume it (2026-10-30, land-relationship-backfill: the queue stood
 	// still until a bounce). Every entry this daemon does not hold yet is
-	// recovered as a boot recovers it.
+	// recovered as a boot recovers it -- save one whose workspace an
+	// adoption of the handover still hands here. The handover's adoptions
+	// finish after the takeover, and each brings its workspace's merges
+	// through AdoptWorkspace once the workspace's session is here; taken up
+	// by the review first, a remediating merge was resumed with no session
+	// to await its repairing turn on, and returned to line while that turn
+	// still ran (2026-11-26 16:44:14, persistent-wifi-service).
 	for _, repo := range repos {
 		takenUp := false
 		for _, entry := range queues[wsm.RepoKey(repo)] {
 			if o.holds(entry.Workspace) {
+				continue
+			}
+			if handedLater(entry.Workspace) {
+				o.deps.Log.Global().Info(op, "leaves a merge to the adoption still handing its workspace to this daemon", dlog.Context{
+					"workspace": string(entry.Workspace), "repo": repo, "state": entry.State.String()})
 				continue
 			}
 			o.deps.Log.Global().Info(op, "takes up a merge no handover gave this daemon", dlog.Context{
