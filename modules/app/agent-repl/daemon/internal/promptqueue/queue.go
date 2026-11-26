@@ -455,16 +455,22 @@ func waitsOnSession(kind wsm.HoldKind) bool {
 // otherwise retired, because the hold actions' error arms say no more.
 func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.HeldPrompt, error) {
 	held, err := q.holdUnder(ctx, ws, turn)
-	if errors.Is(err, ErrNotHeld) {
+	switch {
+	case errors.Is(err, ErrNotHeld):
 		return wsm.HeldPrompt{}, ErrNoSuchHold
+	case err != nil:
+		return wsm.HeldPrompt{}, err
 	}
-	return held, err
+	return held, nil
 }
 
 // holdUnder resolves the hold TURN names in WS, retired or standing, telling
 // apart a turn WS never held under (ErrNoSuchHold), a hold the session took
 // (ErrAlreadyDelivered) and one otherwise retired (ErrNotHeld). It reads the
 // one row by turn, so a retired hold is never mistaken for one never held.
+// A retired hold's row is answered beside its error, so a caller can say how
+// it was retired. It is the one resolver of a named hold: standingHold,
+// heldForEdit and heldForFold all read through it.
 func (q *queue) holdUnder(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.HeldPrompt, error) {
 	held, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
 	switch {
@@ -473,9 +479,9 @@ func (q *queue) holdUnder(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 	case !found || held.Workspace != ws:
 		return wsm.HeldPrompt{}, ErrNoSuchHold
 	case held.Tombstone != nil && held.Tombstone.Kind == tombstoneDelivered:
-		return wsm.HeldPrompt{}, ErrAlreadyDelivered
+		return held, ErrAlreadyDelivered
 	case held.Tombstone != nil:
-		return wsm.HeldPrompt{}, ErrNotHeld
+		return held, ErrNotHeld
 	}
 	return held, nil
 }

@@ -266,22 +266,21 @@ func (q *queue) Editing(ws ids.WorkspaceID) (Edit, bool) {
 // dropped. Each refusal is logged at INFO: it is the user's own click on a card
 // the tray has not yet taken down, never a fault.
 func (q *queue) heldForEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger, op string) (wsm.HeldPrompt, error) {
-	held, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
-	if err != nil {
-		log.Error(op, "could not read the hold the edit names", dlog.Context{"cause": err.Error()})
-		return wsm.HeldPrompt{}, fmt.Errorf("read hold %q on %q: %w", turn, ws, err)
-	}
+	held, err := q.holdUnder(ctx, ws, turn)
 	switch {
-	case !found || held.Workspace != ws:
+	case errors.Is(err, ErrNoSuchHold):
 		log.Info(op, "the edit is refused: no hold was ever recorded under the turn", nil)
-		return wsm.HeldPrompt{}, ErrNoSuchHold
-	case held.Tombstone != nil && held.Tombstone.Kind == tombstoneDelivered:
+		return wsm.HeldPrompt{}, err
+	case errors.Is(err, ErrAlreadyDelivered):
 		log.Info(op, "the edit is refused: the prompt was already delivered", nil)
-		return wsm.HeldPrompt{}, ErrAlreadyDelivered
-	case held.Tombstone != nil:
+		return wsm.HeldPrompt{}, err
+	case errors.Is(err, ErrNotHeld):
 		log.Info(op, "the edit is refused: the prompt is no longer held",
 			dlog.Context{"tombstone": held.Tombstone.Kind})
-		return wsm.HeldPrompt{}, ErrNotHeld
+		return wsm.HeldPrompt{}, err
+	case err != nil:
+		log.Error(op, "could not read the hold the edit names", dlog.Context{"cause": err.Error()})
+		return wsm.HeldPrompt{}, err
 	}
 	if err := q.unclaimed(ws, held, log, op); err != nil {
 		return wsm.HeldPrompt{}, err
