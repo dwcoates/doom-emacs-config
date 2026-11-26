@@ -34,6 +34,9 @@ type BuildFailed struct {
 }
 
 func (e *BuildFailed) Error() string {
+	if e.Log == "" {
+		return fmt.Sprintf("deploy: the %s build failed: %s", e.Step, e.Detail)
+	}
 	return fmt.Sprintf("deploy: the %s build failed (output in %s): %s", e.Step, e.Log, e.Detail)
 }
 

@@ -1267,15 +1267,23 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
 1. build into `<state>/deploy/staging/<nonce>` (`ScriptBuilder`: `make -C
    proto all`, then `bin/build-frontend.sh --out <staging> <target>` for
    shim, webapp, daemon, store, sidecar, zettel, lock, and on macOS
-   `launcher`, staged as `cache-bin/Zettel.app.staged`, a name with no `.app` extension so macOS never registers the build as a second Zettel). A failure is `build_failed`
+   `launcher`, staged as `cache-bin/Zettel.app`, `LauncherStaged`). THE STAGED
+   LAYOUT NEVER CHANGES: the deploy is run by the running daemon, built from the
+   previous revision, which hashes and installs what the new revision's script
+   staged at the paths compiled into it, so a renamed staged path fails the
+   deploy (2026-11-26T09:02:38Z). The build in the persistent cache bin is
+   `Zettel.app.staged`, a name macOS never registers as a second Zettel; the
+   staging directory is transient. A failure is `build_failed`
    with the step, the tail of its output and the archived log; NOTHING is
-   installed or restarted.
+   installed or restarted. A staged artifact that cannot be hashed is
+   `build_failed` too, its detail saying the build reported success, with no
+   log.
 2. hash every staged artifact (`buildid`: binaries and the shim bundle by
    sha256, the webapp by its entry bundle's hash, elisp by the module-set hash
    held to `proto/vocab/elisp-build.json`);
 3. install atomically (copy beside, rename over; the shim bundle only while no
    spawn holds it; the launcher app's bundle swapped whole into
-   `~/Applications`, `Live.LauncherApp`, and a stray `cache-bin/Zettel.app` from an
+   `~/Applications`, `Live.LauncherApp`, and a stray `Zettel.app` in the live cache bin from an
    older build removed with an INFO record, `removeStrayLauncherApp`);
 4. decide, component by component, against each RUNNING process's reported
    build: store/sidecar by their build report (`agentrepl/logging/buildreport`)

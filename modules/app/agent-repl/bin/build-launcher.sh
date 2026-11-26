@@ -5,11 +5,13 @@
 # at ~/Applications/Zettel.app, register it with LaunchServices, and restart
 # its launchd agent (app.zettel.launcher) onto the new build.
 #
-# THE BUILD IS NEVER NAMED *.app: macOS registers any .app it finds, so a build
-# standing beside the installed ~/Applications/Zettel.app listed a second Zettel
-# in System Settings (Notifications, Focus). A leftover Zettel.app beside OUT,
-# from a build before this, is removed and named, so a machine heals on its
-# next build.
+# THE BUILD IN THE CACHE BIN IS NEVER NAMED *.app: macOS registers any .app it
+# finds, so a build standing beside the installed ~/Applications/Zettel.app
+# listed a second Zettel in System Settings (Notifications, Focus). A leftover
+# Zettel.app beside OUT, from a build before this, is removed and named, so a
+# machine heals on its next build. A deploy's staging copy IS named Zettel.app
+# (OUT ends in it), because the running daemon, built from the previous
+# revision, reads it there; that OUT is never removed as its own stray.
 #
 # THE BUNDLE IS ASSEMBLED, NEVER COMMITTED: the executable is SwiftPM's
 # release build, the Info.plist is launcher/Bundle/Info.plist, and the icon is
@@ -75,7 +77,7 @@ rm -rf "$OUT"
 mv "$OUT.new" "$OUT"
 echo "[build-launcher] built $OUT"
 STRAY="$(dirname "$OUT")/Zettel.app"
-if [ -e "$STRAY" ]; then
+if [ "$STRAY" != "$OUT" ] && [ -e "$STRAY" ]; then
     rm -rf "$STRAY"
     echo "[build-launcher] removed the stray $STRAY, which macOS would list beside the installed Zettel"
 fi

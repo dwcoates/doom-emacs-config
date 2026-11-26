@@ -123,7 +123,7 @@ never committed as an image.
 ## Building and installing
 
 `bin/build-launcher.sh` builds the release products, assembles the bundle,
-signs it with the local identity (`bin/lib-signing.sh`; the build stands at `~/.cache/agent-repl/bin/Zettel.app.staged`, never named `*.app`, because macOS registers any `.app` it finds and System Settings then listed two Zettels; a leftover cache `Zettel.app` is removed and named at the next build or deploy), and installs it at `~/Applications/Zettel.app` (swapped in by
+signs it with the local identity (`bin/lib-signing.sh`; the build in the cache bin stands at `~/.cache/agent-repl/bin/Zettel.app.staged`, never named `*.app`, because macOS registers any `.app` it finds and System Settings then listed two Zettels; a leftover cache `Zettel.app` is removed and named at the next build or deploy. A deploy's staging copy is `cache-bin/Zettel.app` in the transient staging directory: the path the running daemon, built from the previous revision, reads, which never changes), and installs it at `~/Applications/Zettel.app` (swapped in by
 rename), registers it with LaunchServices, and restarts the service. The deploy
 stages it through `bin/build-frontend.sh launcher` (`--out`, no install) and
 installs it itself (`daemon/AGENTS.md`, Deploy). `bin/requirements.sh` installs

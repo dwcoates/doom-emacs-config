@@ -161,6 +161,8 @@ func TestTheDeployVerbFailsLoudly(t *testing.T) {
 			resp: success(&agentreplv1.DeployComponentOutcome{Component: agentreplv1.DeployComponent_DEPLOY_COMPONENT_SHIM}), wantText: "no arm"},
 		{name: "a build failure", addr: "127.0.0.1:1\n", resp: refusal(&agentreplv1.DeployError{Cause: &agentreplv1.DeployError_BuildFailed{
 			BuildFailed: &agentreplv1.DeployBuildFailed{Step: "webapp", Detail: "error TS2322", Log: "/l"}}}), wantText: "the webapp build failed (output in /l):\nerror TS2322"},
+		{name: "a build failure with no log", addr: "127.0.0.1:1\n", resp: refusal(&agentreplv1.DeployError{Cause: &agentreplv1.DeployError_BuildFailed{
+			BuildFailed: &agentreplv1.DeployBuildFailed{Step: "launcher", Detail: "the staged launcher could not be hashed"}}}), wantText: "the launcher build failed:\nthe staged launcher could not be hashed"},
 		{name: "already deploying", addr: "127.0.0.1:1\n", resp: refusal(&agentreplv1.DeployError{Cause: &agentreplv1.DeployError_AlreadyDeploying{
 			AlreadyDeploying: &agentreplv1.DeployAlreadyDeploying{}}}), wantText: "already running"},
 		{name: "already rolling out", addr: "127.0.0.1:1\n", resp: refusal(&agentreplv1.DeployError{Cause: &agentreplv1.DeployError_AlreadyRollingOut{

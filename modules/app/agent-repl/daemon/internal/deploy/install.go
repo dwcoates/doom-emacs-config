@@ -41,11 +41,14 @@ type Live struct {
 // Live.Applications.
 const LauncherBundle = "Zettel.app"
 
-// LauncherStaged is the name the launcher's built bundle stands under in the
-// staging cache bin. It carries no .app extension, so macOS never registers
-// the build as a second Zettel beside the installed one (System Settings
-// listed both, and notifications could be attributed to either).
-const LauncherStaged = "Zettel.app.staged"
+// LauncherStaged is the name under which `build-frontend.sh --out` stages the
+// launcher's bundle in the staging cache bin. It is read by the running
+// daemon, which was built from the previous revision, so it never changes:
+// the deploy of 2026-11-26T09:02:38Z failed when it did. The staging
+// directory is transient, so its .app name never lists a second Zettel; the
+// persistent cache bin's build is named Zettel.app.staged by build-frontend.sh
+// itself, and a stray Zettel.app there is removed (removeStrayLauncherApp).
+const LauncherStaged = "Zettel.app"
 
 // LauncherExecutable is the launcher's executable inside its bundle: the
 // file its build is named by.
@@ -265,7 +268,7 @@ func stampsBeside(stagedDir, liveDir, prefix string) map[string]string {
 }
 
 // removeStrayLauncherApp deletes a Zettel.app bundle left in the live cache
-// bin by a build from before the staged bundle lost its .app name. macOS
+// bin by a build from before the cache bin's build lost its .app name. macOS
 // registers any .app it finds, so the leftover is a second Zettel in System
 // Settings. The record names what was removed; nothing stands there once a
 // machine has healed, so a clean cache bin logs nothing.

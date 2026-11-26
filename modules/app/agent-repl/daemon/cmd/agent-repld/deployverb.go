@@ -138,6 +138,9 @@ func describeRefusal(e *agentreplv1.DeployError) string {
 	switch cause := e.GetCause().(type) {
 	case *agentreplv1.DeployError_BuildFailed:
 		b := cause.BuildFailed
+		if b.GetLog() == "" {
+			return fmt.Sprintf("the %s build failed:\n%s", b.GetStep(), b.GetDetail())
+		}
 		return fmt.Sprintf("the %s build failed (output in %s):\n%s", b.GetStep(), b.GetLog(), b.GetDetail())
 	case *agentreplv1.DeployError_AlreadyDeploying:
 		return "a deploy is already running; ask again when it ends"
