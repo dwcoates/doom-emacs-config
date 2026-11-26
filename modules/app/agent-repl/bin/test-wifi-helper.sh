@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test-wifi-helper.sh: the Wi-Fi helper's decisions (wifi-helper/standing.swift),
 # its Location Services seats (wifi-helper/seats.swift), its command line
-# (wifi-helper/args.swift) and its hotspot join (wifi-helper/hotspot.swift), each compiled with
+# (wifi-helper/args.swift), its hotspot join (wifi-helper/hotspot.swift) and its sharingd
+# session (wifi-helper/sharing.swift), each compiled with
 # its tests (wifi-helper/test-<source>.swift) and run here, each of their cases
 # reported through lib-harness-report.sh.
 #
@@ -19,12 +20,15 @@ HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../wifi-helper" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# run_tests SOURCE FRAMEWORK: SOURCE.swift compiled with test-SOURCE.swift
-# against FRAMEWORK, and its cases reported.
+# run_tests SOURCE FRAMEWORK [WITH...]: SOURCE.swift compiled with
+# test-SOURCE.swift and each source it builds on (WITH, by name) against
+# FRAMEWORK, and its cases reported.
 run_tests() {
-  local source="$1" framework="$2" build_out out rc
+  local source="$1" framework="$2" build_out out rc with=()
+  shift 2
+  for dep in "$@"; do with+=("$HELPER_DIR/$dep.swift"); done
   if ! build_out="$(swiftc -parse-as-library -swift-version 5 -module-cache-path "$TMP/cache" -o "$TMP/$source-tests" \
-    "$HELPER_DIR/$source.swift" "$HELPER_DIR/test-$source.swift" -framework "$framework" 2>&1)"; then
+    "$HELPER_DIR/$source.swift" ${with[@]+"${with[@]}"} "$HELPER_DIR/test-$source.swift" -framework "$framework" 2>&1)"; then
     fail "the helper's $source compiles with its tests" "$build_out"
     return
   fi
@@ -76,4 +80,5 @@ run_tests standing CoreLocation
 run_tests seats Foundation
 run_tests args Foundation
 run_tests hotspot Foundation
+run_tests sharing CoreWLAN hotspot
 harness_finish

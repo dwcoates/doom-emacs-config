@@ -398,4 +398,9 @@ quiet state, not the switch.
     `join_ms`).
   - A join is bounded at 42s, three times the 14s measured end to end; the
     helper bounds each step inside it (browse 6s, ask 4s, scan 9s, join 20s).
+  - MACOS'S OWN AUTO-JOIN MAY TAKE THE HOTSPOT FIRST: the hotspot is a saved
+    network, and on 2026-11-26 macOS joined it 2.1s after the phone started
+    it, before the helper's scan ended. The helper checks before its scan and
+    before its join, and a hotspot already joined is answered `joined` with
+    `joined_by: macos`, never joined a second time.
 

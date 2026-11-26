@@ -22,9 +22,12 @@ final class SharingPhones: NSObject, HotspotPhones {
     private var heard: [AnyObject] = []
     private let heardPhone = DispatchSemaphore(value: 0)
 
-    private init(session: NSObject) {
+    // init drives SESSION, sharingd's SFRemoteHotspotSession (connect) or a
+    // test's stand-in for it.
+    init(session: NSObject) {
         self.session = session
         super.init()
+        session.perform(NSSelectorFromString("setDelegate:"), with: self)
     }
 
     // connect builds the session, or answers which piece of the private API is
@@ -42,9 +45,7 @@ final class SharingPhones: NSObject, HotspotPhones {
                 return .failure(HotspotFailure(detail: "SFRemoteHotspotSession does not answer \(selector)"))
             }
         }
-        let phones = SharingPhones(session: session)
-        session.perform(NSSelectorFromString("setDelegate:"), with: phones)
-        return .success(phones)
+        return .success(SharingPhones(session: session))
     }
 
     // session:updatedFoundDevices: is sharingd's word on the phones it hears,
@@ -96,7 +97,13 @@ final class SharingPhones: NSObject, HotspotPhones {
         // THE COMPLETION ANSWERS THE HOTSPOT'S INFO, or nil and an error
         // (2026-11-26: SFRemoteHotspotInfo with name, password and channel).
         return awaiting("sharingd's ask to enable \(phone.name)'s hotspot", within: within) { answer in
-            call(session, selector, device) { info, error in answer(hotspotCredentials(info: info, error: error)) }
+            // THE BLOCK IS BOUND BEFORE THE CALL, so it is an escaping
+            // closure: sharingd keeps it until the phone answers, and a block
+            // written inline in the call is non-escaping, which Swift traps
+            // on the moment sharingd keeps it (2026-11-26 14:20:40, the
+            // helper's first lid-closed join).
+            let completion: Completion = { info, error in answer(hotspotCredentials(info: info, error: error)) }
+            call(session, selector, device, completion)
         }
     }
 }
@@ -105,6 +112,8 @@ final class SharingPhones: NSObject, HotspotPhones {
 // helper's Location Services permission is what lets a scan name networks.
 struct CoreWLANRadio: HotspotRadio {
     let iface: CWInterface
+
+    func current() -> String? { iface.ssid() }
 
     func find(ssid: String, within: TimeInterval) -> Result<AnyObject, HotspotFailure> {
         bounded("the scan for \(ssid)", within: within) {

@@ -27,10 +27,13 @@ type helperHotspotJoin struct {
 	Network     string   `json:"network"`
 	Error       string   `json:"error"`
 	PhonesHeard []string `json:"phones_heard"`
-	BrowseMs    *int64   `json:"browse_ms"`
-	EnableMs    *int64   `json:"enable_ms"`
-	ScanMs      *int64   `json:"scan_ms"`
-	JoinMs      *int64   `json:"join_ms"`
+	// JoinedBy is "macos" when macOS's own auto-join took the hotspot before
+	// the helper's join.
+	JoinedBy string `json:"joined_by"`
+	BrowseMs *int64 `json:"browse_ms"`
+	EnableMs *int64 `json:"enable_ms"`
+	ScanMs   *int64 `json:"scan_ms"`
+	JoinMs   *int64 `json:"join_ms"`
 }
 
 // hotspotJoined is the stage of a join that took.

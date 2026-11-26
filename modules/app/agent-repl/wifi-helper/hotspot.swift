@@ -37,9 +37,10 @@ protocol HotspotPhones {
     func enable(_ phone: HotspotPhone, within: TimeInterval) -> Result<HotspotCredentials, HotspotFailure>
 }
 
-// HotspotRadio is the Wi-Fi interface: a scan for one network by name, and a
-// join of the network it found.
+// HotspotRadio is the Wi-Fi interface: the network it is joined to, a scan
+// for one network by name, and a join of the network it found.
 protocol HotspotRadio {
+    func current() -> String?
     func find(ssid: String, within: TimeInterval) -> Result<AnyObject, HotspotFailure>
     func join(_ network: AnyObject, password: String?, within: TimeInterval) -> Result<Void, HotspotFailure>
 }
@@ -58,6 +59,10 @@ struct HotspotAnswer: Encodable, Equatable {
     var error: String?
     // phones_heard names every phone sharingd heard, when none matched.
     var phones_heard: [String]?
+    // joined_by is "macos" when macOS's own auto-join took the hotspot once
+    // the phone started it, before the helper's join; nil when the helper
+    // joined it, or nothing did.
+    var joined_by: String?
     var browse_ms: Int?
     var enable_ms: Int?
     var scan_ms: Int?
@@ -123,12 +128,24 @@ func joinHotspot(named name: String, phones: HotspotPhones, radio: HotspotRadio,
             return answer.at(.enableFailed)
         }
         answer.network = credentials.ssid
+        // MACOS'S OWN AUTO-JOIN MAY TAKE THE HOTSPOT FIRST: the hotspot is a
+        // saved network, and macOS joined it 2.1s after the phone started it
+        // (2026-11-26 14:20:42.8-14:20:44.8), before this scan would have
+        // ended. A second join of the network already joined is never made.
+        if alreadyOn(credentials.ssid, radio) {
+            answer.joined_by = "macos"
+            return answer.at(.joined)
+        }
         let scan = elapsed()
         let found = radio.find(ssid: credentials.ssid, within: bounds.scan)
         answer.scan_ms = scan()
         guard case .success(let network) = found else {
             if case .failure(let why) = found { answer.error = why.detail }
             return answer.at(.notVisible)
+        }
+        if alreadyOn(credentials.ssid, radio) {
+            answer.joined_by = "macos"
+            return answer.at(.joined)
         }
         let join = elapsed()
         let joined = radio.join(network, password: credentials.password, within: bounds.join)
@@ -145,8 +162,13 @@ extension HotspotAnswer {
     // at answers this answer ended at STAGE.
     func at(_ stage: HotspotStage) -> HotspotAnswer {
         HotspotAnswer(stage: stage.rawValue, network: network, error: error, phones_heard: phones_heard,
-                      browse_ms: browse_ms, enable_ms: enable_ms, scan_ms: scan_ms, join_ms: join_ms)
+                      joined_by: joined_by, browse_ms: browse_ms, enable_ms: enable_ms, scan_ms: scan_ms, join_ms: join_ms)
     }
+}
+
+// alreadyOn reports whether RADIO is joined to SSID now.
+func alreadyOn(_ ssid: String, _ radio: HotspotRadio) -> Bool {
+    radio.current().map { sameHotspotName($0, ssid) } ?? false
 }
 
 // hotspotCredentials reads sharingd's enable answer: the hotspot's info, or why not.

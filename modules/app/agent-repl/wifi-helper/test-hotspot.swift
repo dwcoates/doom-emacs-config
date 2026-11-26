@@ -24,8 +24,15 @@ final class FakePhones: HotspotPhones {
 final class FakeRadio: HotspotRadio {
     var found: Result<AnyObject, HotspotFailure> = .failure(HotspotFailure(detail: "unscripted"))
     var joined: Result<Void, HotspotFailure> = .failure(HotspotFailure(detail: "unscripted"))
+    // currents answers current() in turn, repeating the last; nil, on no network.
+    var currents: [String?] = [nil]
     var scanned: [String] = []
     var passwords: [String?] = []
+    func current() -> String? {
+        let c = currents[0]
+        if currents.count > 1 { currents.removeFirst() }
+        return c
+    }
     var bounds: [TimeInterval] = []
     func find(ssid: String, within: TimeInterval) -> Result<AnyObject, HotspotFailure> {
         scanned.append(ssid)
@@ -154,6 +161,23 @@ struct HotspotTests {
               creds(hotspotCredentials(info: nil, error: nil)), "failed the phone did not start its hotspot: no hotspot and no error")
         check("info naming no network is a failure",
               creds(hotspotCredentials(info: FakeInfo(name: "", password: "secret", channel: nil), error: nil)).hasPrefix("failed sharingd's hotspot info names no network"), true)
+        do {
+            let (phones, radio) = ready()
+            radio.currents = ["Dodge's iPhone"]
+            let got = joinHotspot(named: "Dodge's iPhone", phones: phones, radio: radio, elapsed: ticks(5))
+            check("a hotspot macOS joined once the phone started it is not scanned for or joined again",
+                  radio.scanned + radio.passwords.map { $0 ?? "-" }, [])
+            check("a hotspot macOS joined first answers joined by macOS", got,
+                  HotspotAnswer(stage: "joined", network: "Dodge\u{2019}s iPhone", joined_by: "macos", browse_ms: 5, enable_ms: 5))
+        }
+        do {
+            let (phones, radio) = ready()
+            radio.currents = [nil, "Dodge\u{2019}s iPhone"]
+            let got = joinHotspot(named: "Dodge's iPhone", phones: phones, radio: radio, elapsed: ticks(5))
+            check("a hotspot macOS joined during the scan is not joined again", radio.passwords.count, 0)
+            check("a hotspot macOS joined during the scan answers joined by macOS", got,
+                  HotspotAnswer(stage: "joined", network: "Dodge\u{2019}s iPhone", joined_by: "macos", browse_ms: 5, enable_ms: 5, scan_ms: 5))
+        }
         check("names match across apostrophes", sameHotspotName("Dodge\u{2019}s iPhone", "Dodge's iPhone"), true)
         check("different names do not match", sameHotspotName("Dodge's iPad", "Dodge's iPhone"), false)
         check("an empty name matches nothing", sameHotspotName("", ""), false)
