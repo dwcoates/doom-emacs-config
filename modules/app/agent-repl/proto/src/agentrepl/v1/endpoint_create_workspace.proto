@@ -651,7 +651,7 @@ message CreateWorkspaceError {
     // A workspace the placement gathers is not one the repository holds.
     CreateWorkspaceGatherUnknownWorkspace gather_unknown_workspace = 60;
     // A workspace the placement gathers is known but cannot be gathered: it
-    // is closed, a child, a main workspace, a merge workspace, already in a
+    // is closed, a child, a main workspace, already in a
     // subsection, of another repository, or named twice.
     CreateWorkspaceGatherNotGatherable gather_not_gatherable = 61;
     // The requester is its repository's deploy mediator, which never

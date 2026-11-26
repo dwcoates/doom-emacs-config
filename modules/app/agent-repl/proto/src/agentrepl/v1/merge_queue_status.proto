@@ -72,23 +72,21 @@ message MergeQueueStatusSize {
 
 // ONE MERGE OFF ITS QUEUE: it left without landing, and its request -- its
 // branch, its version increment and changelog line, its deploy hooks and its
-// cleanup flags -- stands until it is requeued or discarded. An async merge's
-// merge workspace stays open, hidden, under the merge's name while it stands
-// here, so the name is never free for a new request: a new async merge asked
-// for under it is refused, naming this merge, so the caller requeues it.
+// cleanup flags -- stands until it is requeued or discarded.
 message MergeQueueStatusOffQueue {
-  // The workspace whose merge this is: the workspace landing its own branch,
-  // or an async merge's merge workspace. RequeueMerge and DiscardMerge take
-  // this ref.
+  // The workspace whose merge this is, landing its own branch. RequeueMerge
+  // and DiscardMerge take this ref.
   workspace.v1.WorkspaceRef workspace = 1;
   // The merge's name, as the queue listed it while it stood in line: the
-  // landing workspace's name, or an async merge's own name (its merge
-  // workspace's). `merge-queue requeue` and `merge-queue discard` take it.
+  // landing workspace's name. `merge-queue requeue` and `merge-queue
+  // discard` take it.
   string name = 2;
   // The branch the request lands.
   string branch = 3;
-  // What kind of merge this is, exactly as an entry in line says it.
-  MergeQueueStatusEntryKind kind = 4;
+  // Tag 4 (`kind`) is RETIRED with the async merge: every merge is a
+  // workspace landing its own branch, so there is no kind to tell.
+  reserved 4;
+  reserved "kind";
   // Why it left the queue.
   MergeQueueStatusOffQueueCause cause = 5;
   // When it left the queue, epoch ms. Never zero.
@@ -111,24 +109,21 @@ message MergeQueueStatusOffQueueCause {
     MergeQueueStatusOffQueueCauseRestartFailed restart_failed = 4;
     // The daemon went away under it and the restart could not put it back.
     MergeQueueStatusOffQueueCauseDaemonShutdown daemon_shutdown = 5;
-    // An async merge whose preparing instruction failed.
-    MergeQueueStatusOffQueueCausePickFailed pick_failed = 6;
     // A deploy whose finish stage failed before it was put in line.
     MergeQueueStatusOffQueueCauseFinishFailed finish_failed = 7;
     // The merge it was placed behind left the queue without landing.
     MergeQueueStatusOffQueueCauseAheadDidNotLand ahead_did_not_land = 8;
     // Its workspace was backlogged while it stood at its cold gate.
     MergeQueueStatusOffQueueCauseBackloggedAtColdGate backlogged_at_cold_gate = 9;
-    // ADOPTED: an async merge's merge workspace found open with no request
-    // standing, left by an exit from before requests outlived their place in
-    // line. Its request's values were never kept, so it records no version
-    // increment, changelog line or deploy hooks: a requeue onto a versioned
-    // main branch must supply the increment (RequeueMergeRequest.version).
-    MergeQueueStatusOffQueueCauseAdopted adopted = 10;
     // ITS OWN AGENT GAVE IT UP from a repair turn the queue gave it
     // (agentrepl.v1.UpdateMergeQueueRequest.give_up). (Added 2026-11-17.)
     MergeQueueStatusOffQueueCauseGaveUp gave_up = 11;
   }
+  // Tags 6 (`pick_failed`, an async merge whose preparing instruction failed)
+  // and 10 (`adopted`, an async merge's merge workspace found open with no
+  // request) are RETIRED with the async merge.
+  reserved 6, 10;
+  reserved "pick_failed", "adopted";
 }
 // Evicted. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseEvicted {}
@@ -140,16 +135,12 @@ message MergeQueueStatusOffQueueCauseFailed {}
 message MergeQueueStatusOffQueueCauseRestartFailed {}
 // Daemon shutdown. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseDaemonShutdown {}
-// Pick failed. No fields: the merge's bubble carries the failure's account.
-message MergeQueueStatusOffQueueCausePickFailed {}
 // Finish failed. No fields: the merge's bubble carries the failure's account.
 message MergeQueueStatusOffQueueCauseFinishFailed {}
 // The merge ahead did not land. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseAheadDidNotLand {}
 // Backlogged at its cold gate. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseBackloggedAtColdGate {}
-// Adopted with no request values. No fields: the arm is the fact.
-message MergeQueueStatusOffQueueCauseAdopted {}
 // Given up by its own agent. No fields: the arm is the fact, and the agent's
 // reason is in its own reply and the daemon's record.
 message MergeQueueStatusOffQueueCauseGaveUp {}
@@ -228,17 +219,16 @@ message MergeQueueStatusAdvanceMediatingFixing {
 
 // One merge in line.
 message MergeQueueStatusEntry {
-  // The workspace whose merge this is: the one landing its own branch, or an
-  // async merge's merge workspace once it exists. For an async merge waiting
-  // to start, the REQUESTER (whose feed carries its bubble).
+  // The workspace whose merge this is, landing its own branch.
   workspace.v1.WorkspaceRef workspace = 1;
-  // That workspace's name, or, for an async merge waiting to start, the name
-  // its merge workspace will carry.
+  // That workspace's name.
   string name = 2;
   // The branch that lands.
   string branch = 3;
-  // What kind of merge this is.
-  MergeQueueStatusEntryKind kind = 4;
+  // Tag 4 (`kind`) is RETIRED with the async merge: every merge is a
+  // workspace landing its own branch.
+  reserved 4;
+  reserved "kind";
   // Whether it runs or waits.
   MergeQueueStatusEntryStage stage = 5;
   // TRUE when it was put in line at the front (agentrepl.v1
@@ -246,23 +236,6 @@ message MergeQueueStatusEntry {
   bool placed_at_front = 6;
 }
 
-// What kind of merge an entry is.
-message MergeQueueStatusEntryKind {
-  // THE ARM IS THE KIND.
-  oneof kind {
-    // A workspace landing its own branch (MergeWorkspace).
-    MergeQueueStatusEntryKindOwnBranch own_branch = 1;
-    // An async merge (CreateWorkspaceAsyncMerge).
-    MergeQueueStatusEntryKindAsyncMerge async_merge = 2;
-  }
-}
-// A workspace landing its own branch. No fields.
-message MergeQueueStatusEntryKindOwnBranch {}
-// An async merge.
-message MergeQueueStatusEntryKindAsyncMerge {
-  // The workspace that asked for it, which is told how it ended.
-  workspace.v1.WorkspaceRef requester = 1;
-}
 
 // Whether an entry runs or waits.
 message MergeQueueStatusEntryStage {

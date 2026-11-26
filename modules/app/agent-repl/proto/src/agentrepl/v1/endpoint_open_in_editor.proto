@@ -137,8 +137,7 @@ message OpenInEditorUnknownMergeTestLog {
     // The token is not one the daemon mints (no lease, or no round number).
     OpenInEditorUnknownMergeTestLogMalformed malformed = 1;
     // The token names a merge whose bubble is not drawn in the asking
-    // workspace's feed: its own merges, and the async merges it requested,
-    // are the bubbles it draws.
+    // workspace's feed: its own merges are the bubbles it draws.
     OpenInEditorUnknownMergeTestLogNotDrawnHere not_drawn_here = 2;
     // The merge is one this feed draws, but its log is gone: the log
     // retention pass removed it.

@@ -2,8 +2,7 @@
 // file a repository commits at its main checkout root to say what happens at
 // each point of one of its workspaces' lives: when the workspace is CREATED
 // (agentrepl.v1.CreateWorkspace), when it is FINISHED
-// (agentrepl.v1.FinishWorkspace) and its deploy runs, and when an async merge
-// of one of its branches deploys (agentrepl.v1.CreateWorkspaceAsyncMerge).
+// (agentrepl.v1.FinishWorkspace) and its deploy runs.
 //
 // THE FILE IS READ AT EVERY USE, never cached, so an edit takes effect on the
 // next create or deploy without a daemon restart. The daemon converts the
@@ -11,8 +10,8 @@
 // REFUSED: a misspelled key is a refusal with the key named, never a silent
 // default. Keys are the field names below in snake_case.
 //
-// A REPOSITORY WITHOUT THE FILE HAS NO DEPLOY. `workspace finished` and an
-// async merge in it are refused, naming the file; there is no default
+// A REPOSITORY WITHOUT THE FILE HAS NO DEPLOY. `workspace finished` in it is
+// refused, naming the file; there is no default
 // destination. A create in it runs only the built-in creation defaults.
 //
 // THE STAGES, in the order a workspace meets them:
@@ -30,9 +29,8 @@
 //   post_deploy  its hooks, in order; never held
 //
 // and then the daemon's own last steps, which no config changes: the report to
-// an async merge's requester, closing the deploy's OWNER (the finished
-// workspace, or the async merge's hidden merge workspace) and removing its
-// worktree. A deploy whose hook fails FAILS: its owner is not closed, and the
+// a landing child's parent, closing the deploy's OWNER (the finished
+// workspace) and removing its worktree. A deploy whose hook fails FAILS: its owner is not closed, and the
 // failure is handed back to the workspace that follows it, which is prompted to
 // investigate. The three deploy stages run inside the repository's queue, one
 // deploy at a time unless `concurrent` names a leading run of them that deploys
@@ -89,9 +87,7 @@ message LifecycleConfig {
   // is registered, before the session's first prompt. A failed script FAILS
   // THE CREATE: the create is undone, as any failed create is, and reported
   // (agentrepl.v1.CreateWorkspaceError.creation_hook_failed). The `runs_for`
-  // of a creation hook reads the workspace's landing target. An async merge's
-  // hidden merge workspace runs no creation stage: the queue makes it, and
-  // its request names every hook it runs.
+  // of a creation hook reads the workspace's landing target.
   optional LifecycleStageHooks creation = 6;
   // The finish stage: hooks run when a workspace calls `workspace finished`
   // (agentrepl.v1.FinishWorkspace), once the turn that called it has ended,
@@ -100,8 +96,7 @@ message LifecycleConfig {
   // hooks are turns of the finishing workspace, drawn in its own feed
   // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_FINISH_HOOK). A failed hook
   // withdraws the deploy before it is put in line and hands the failure back
-  // to the workspace. An async merge has no finish stage. UNSET: both kinds
-  // run their built-in defaults.
+  // to the workspace. UNSET: both kinds run their built-in defaults.
   optional LifecycleStageHooks finish = 7;
   // The first deploy stage: hooks, then the built-in local merge. Never held.
   // REQUIRED: an empty `pre_deploy: {}` states a deploy with no first stage.

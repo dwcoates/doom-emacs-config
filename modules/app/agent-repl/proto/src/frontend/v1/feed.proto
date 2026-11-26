@@ -3661,18 +3661,12 @@ message FeedChildBorder {
 //   │ │  daemon unit ✓   webapp ● …   log: ~/…/merge-logs/…-tests-2.log│ │
 //   │ └───────────────────────────────────────────────────────────────┘ │
 //
-// The bubble lives in the REQUESTING workspace's feed, and ONLY there. A SYNC
-// (in-place) merge runs in that workspace: its own session does the conflict
-// resolution and the fixing, and those turns draw in the bubble's agentic tabs
-// and nowhere else; the bubble is PINNED to the feed's bottom while the merge
-// is in flight, because the merge is the only thing happening there. An ASYNC
-// (detached) merge runs in a HIDDEN merge workspace forked from the requester:
-// that workspace's turns draw in its own feed as ordinary turns, and are also
-// streamed, re-identified, into the bubble's agentic tabs here; the bubble is
-// PLACED where it was drawn, never pinned, so the conversation moves on past
-// it and several async merges never stack at the feed's bottom. The merge
-// workspace's own feed carries no bubble. The requester's feed also carries
-// the handback marker once an async merge ends.
+// The bubble lives in the MERGING workspace's own feed, and ONLY there: the
+// workspace's own session does the conflict resolution and the fixing, and
+// those turns draw in the bubble's agentic tabs and nowhere else. The bubble
+// is PINNED to the feed's bottom while the merge is in flight, because the
+// merge is the only thing happening there. The workspace that made a child
+// draws the child's bubble (FeedChild), never its merge.
 message FeedMerge {
   FeedMergeHead head = 1;
   // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
@@ -3723,59 +3717,25 @@ message FeedMergeHead {
   FeedMergeRuntime runtime = 3;
   FeedMergeFold fold = 4;
   // Tag 5 RETIRED (optional FeedMergeWorkspaceSwitch workspace_switch): the
-  // switch exists only for an async merge, so it rides the async arm of
-  // `mode`.
+  // switch to a hidden merge workspace went with the async merge.
   reserved 5;
   // The agent-repl version this merge landed as. PRESENT once a merge onto
   // agent-repl's own master that carried a version increment has landed and
   // its version tag exists, and from then on for the bubble's whole life,
   // folded or not; UNSET on every other merge, and while the merge runs.
   optional FeedMergeVersion version = 6;
-  // HOW THE MERGE RUNS: in place in the requesting workspace (sync), or in a
-  // hidden merge workspace forked from it (async). Set by the daemon on every
-  // head it publishes, and fixed for the bubble's whole life. The daemon's
-  // default fold reads it (frontend.v1.FeedMergeFold): an async bubble starts
-  // and stays folded until the reader opens it. UNSET only on a durable row
-  // recorded before the head carried its mode; such a row is drawn with the
-  // sync defaults and no switch.
-  optional FeedMergeMode mode = 7;
+  // Tag 7 (`mode`, sync or async) is RETIRED with the async merge: every
+  // merge runs in place in its own workspace.
+  reserved 7;
+  reserved "mode";
   // The branch line: what is merged, then where to, drawn source, arrow,
   // target ("ABC/fix-flaky-test → master"). Set on every head the daemon
   // publishes.
   FeedMergeBranchLine branch_line = 8;
 }
 
-// How a merge runs. THE ARM IS THE MODE, and what only one mode has rides
-// that mode's arm.
-message FeedMergeMode {
-  // In place, or detached. Exactly one is set on every head the daemon
-  // publishes.
-  oneof mode {
-    // The one-shot, in-place merge of the requesting workspace's own branch.
-    FeedMergeModeSync sync = 1;
-    // The detached merge run in a hidden merge workspace.
-    FeedMergeModeAsync async = 2;
-  }
-}
 
-// A SYNC merge: it runs in the workspace whose feed holds the bubble, its
-// head is pinned to the feed's bottom while it is in flight, and its bubble
-// is open by default. It has no other workspace, so no switch.
-message FeedMergeModeSync {}
 
-// An ASYNC merge: it runs in a hidden merge workspace forked from the
-// requester, its head is placed where it was first drawn, and its bubble is
-// folded by default, at every state and on every redraw, until the reader
-// opens it.
-message FeedMergeModeAsync {
-  // The control that switches to the merge workspace. PRESENT once that
-  // workspace is VISIBLE — revealed (its merge failed, its agent asked the
-  // user something, the user interrupted it, or the user selected it) or
-  // landed (a landed merge workspace is an ordinary closed workspace) — and
-  // from then on for the bubble's whole life. UNSET while the merge workspace
-  // is hidden, since there is nothing to switch to.
-  optional FeedMergeWorkspaceSwitch workspace_switch = 1;
-}
 
 // The version a landed merge produced ("0.4.0"), split into three runs so
 // the one number the merge incremented is drawn apart from the rest: the
@@ -3808,44 +3768,9 @@ message FeedMergeVersionTrailing {
   string text = 1;
 }
 
-// The head's switch to the merge workspace: a prominent button while the
-// workspace exists, and a statement of its removal once the daemon has
-// cleaned it up (a merge workspace idle for 15 calendar days is removed, and
-// the bubble outlives it).
-message FeedMergeWorkspaceSwitch {
-  // The button's text, daemon-composed and drawn verbatim ("open merge
-  // workspace", or, once removed, "merge workspace removed").
-  FeedMergeWorkspaceSwitchLabel label = 1;
-  // Whether there is a workspace to switch to. The two are exclusive: a
-  // removed workspace has no ref a switch could name.
-  oneof availability {
-    // The workspace exists, open or closed.
-    FeedMergeWorkspaceSwitchAvailable available = 2;
-    // The daemon removed the workspace; the button is drawn disabled.
-    FeedMergeWorkspaceSwitchRemoved removed = 3;
-  }
-}
 
-// The switch's label element.
-message FeedMergeWorkspaceSwitchLabel {
-  // Drawn verbatim.
-  string text = 1;
-}
 
-// The merge workspace exists. Clicking the switch calls
-// agentrepl.v1.SelectWorkspace with `target`, the same ordinary workspace
-// switch the sidebar row makes; a CLOSED merge workspace (one whose branch
-// landed) is revived by that call, so the switch never needs a second verb.
-message FeedMergeWorkspaceSwitchAvailable {
-  // The merge workspace, echoed verbatim on the switch.
-  workspace.v1.WorkspaceRef target = 1;
-}
 
-// The merge workspace was removed after 15 calendar days without activity.
-message FeedMergeWorkspaceSwitchRemoved {
-  // When the daemon removed it, epoch milliseconds.
-  int64 removed_at_ms = 1;
-}
 
 // The kind glyph, a name from the shared vocabulary ("merge").
 message FeedMergeGlyph {
@@ -3876,8 +3801,7 @@ message FeedMergeBranchLineTarget {
   // The checkout the merge lands in, drawn verbatim.
   string text = 1;
   // The pull request the merge deploys. PRESENT only when the merging
-  // workspace, or for an async merge the workspace that asked for it, owns
-  // exactly one GitHub pull request that was not closed unmerged, stored as
+  // workspace owns exactly one GitHub pull request that was not closed unmerged, stored as
   // an owned link (agentrepl.v1.WorkspaceLinkOwned): a repository whose
   // finish stage opens a pull request and whose deploy adds it to the GitHub
   // merge queue stores it that way. UNSET on every other merge, so
@@ -3918,8 +3842,7 @@ message FeedMergeUpdate {
   // the queue) and is being worked on. The daemon resolves it from the queue
   // entry's own state, the same fact the head's clock origin
   // (FeedMergeRuntime.started_at_ms) switches on, so the badge and the clock
-  // never disagree. An async merge's resolving turn, which runs before the
-  // merge joins the queue, is work underway and draws `merging`.
+  // never disagree.
   oneof stage {
     FeedMergeUpdateWaiting waiting = 1;
     FeedMergeUpdateMerging merging = 2;
@@ -4017,9 +3940,8 @@ message FeedMergeFold {
   bool folded = 1;
   // WHO DECIDED `folded`. Unset is a malformed row.
   oneof decided_by {
-    // The daemon's default for the merge: folded for every async merge
-    // (frontend.v1.FeedMergeHead.mode), and for a sync merge folded for a
-    // success, open for everything else.
+    // The daemon's default for the merge: folded for a success, open for
+    // everything else.
     FeedMergeFoldByDaemon daemon = 2;
     // The reader's explicit fold or unfold, recorded through
     // agentrepl.v1.FoldMergeBubble; it outranks every default.
@@ -4072,9 +3994,7 @@ message FeedMergeFoldByReader {}
 // their content in the row, replaced whole per push. AGENTIC tabs
 // (resolving, hook_prompt, conflict_resolution, tests_run_fixing) are
 // containers: their content is the sub-feed rows parented to them: the
-// requesting workspace's own session for a sync merge, routed by the daemon's
-// output address, and the hidden merge workspace's session for an async
-// merge, mirrored here from that workspace's feed. PARENT tabs (rebasing,
+// merging workspace's own session, routed by the daemon's output address. PARENT tabs (rebasing,
 // tests, resolving_conflicts, fixing_tests) carry their own state (and the
 // rebasing tab its narration), and their content is the subtab rows parented
 // to them.
@@ -4094,7 +4014,7 @@ message FeedMergeFoldByReader {}
 // queue, then one hook tab per `pre_deploy` hook, then rebasing | tests |
 // committing when the config has a local merge, then the `deploy` hook's tab
 // (absent when the repository is held or has none), then one per `post_deploy`
-// hook. An async merge with an instruction opens with its resolving tab.
+// hook.
 // agent-repl's own deploy is queue | rebasing | tests | committing | deploy.
 //
 // NOTHING PARKS. A conflict resolution or a fixing loop that gives up FAILS
@@ -4121,7 +4041,6 @@ message FeedMergeTab {
     FeedMergeTabConflictResolution conflict_resolution = 19;
     FeedMergeTabFixingTests fixing_tests = 20;
     FeedMergeTabCommitting committing = 10;
-    FeedMergeTabResolving resolving = 12;
     // HISTORY ONLY: a branch already merged upstream, in a bubble recorded
     // before the deploy queue. No deploy draws it.
     FeedMergeTabUpdatingMain updating_main = 11;
@@ -4141,6 +4060,10 @@ message FeedMergeTab {
   // tab, and a fixing attempt a subtab of the fixing-tests tab.
   reserved 3, 4, 5, 7, 8;
   reserved "merge", "conflicts", "fixes", "pre_prompt", "post_prompt";
+  // Tag 12 (`resolving`, an async merge's instruction turn) is RETIRED with
+  // the async merge: a child's commission is its own prompt, in its own feed.
+  reserved 12;
+  reserved "resolving";
 }
 
 // The tab's drawn label, resolved by the daemon.
@@ -4226,29 +4149,6 @@ message FeedMergeTabQueue {
   FeedMergeQueue queue = 3;
 }
 
-// AGENTIC: an async merge's resolving turn -- the first turn of its merge
-// workspace, carrying out the requester's instruction
-// (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction) on the merge's branch and
-// resolving whatever does not apply on its own. Present only on a merge that
-// carries an instruction, as its first tab, left of queue. Live while the
-// turn runs; settled succeeded when the turn ended with at least one commit
-// ahead of the target and a clean worktree, failed otherwise (which FAILS the
-// merge and reveals the merge workspace). The merge joins the queue once this
-// tab settles succeeded. Content: sub-feed rows parented to this row,
-// mirrored from the merge workspace's feed.
-message FeedMergeTabResolving {
-  oneof state {
-    FeedMergeTabLive live = 1;
-    FeedMergeTabSettled settled = 2;
-    // The resolving turn is held on the user: the merge workspace's session
-    // has a permission ask or a question batch open, which also reveals that
-    // workspace.
-    FeedMergeTabWaitingOnUser waiting_on_user = 3;
-    // Held: the merge is suspended at this tab, or its queue holds every
-    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
-    FeedMergeTabHeld on_hold = 4;
-  }
-}
 
 // PARENT: the branch being rebased onto the target's tip, in the worktree
 // checked out on the branch — every replay of the merge, one tab. Its subtabs
@@ -5180,13 +5080,11 @@ message FeedMergeQueueEntry {
     FeedMergeQueueMerging merging = 3;
     FeedMergeQueueWaiting waiting = 4;
   }
-  // AN ASYNC MERGE'S BUBBLE, set only for an async merge (owner ruling,
-  // 2026-10-17): its entry is the HIDDEN merge workspace the daemon forked to
-  // carry it, which a click must never select or reveal. The click selects
-  // the requester instead and reveals this bubble in its feed
-  // (SelectWorkspaceRequest.reveal). Unset for a sync merge, whose entry is
-  // the requesting workspace itself and whose click selects it.
-  optional FeedMergeQueueBubble bubble = 5;
+  // Tag 5 (`bubble`, where an async merge's bubble stood) is RETIRED with
+  // the async merge: every entry is a workspace's own merge, whose click
+  // selects it.
+  reserved 5;
+  reserved "bubble";
   // WHERE THE ENTRY'S MERGE LANDS (owner request, 2026-10-23), drawn in the
   // queue table's target column.
   FeedMergeQueueTarget target = 6;
@@ -5200,12 +5098,6 @@ message FeedMergeQueueTarget {
   string text = 1;
   // The worktree's full path on the daemon's host, shown on hover.
   string dir = 2;
-}
-// Where an async merge's bubble stands: the requester's workspace and the
-// bubble's head row on its root feed.
-message FeedMergeQueueBubble {
-  workspace.v1.WorkspaceRef requester = 1;
-  FeedId row = 2;
 }
 // The entry's workspace, a jump target across workspaces.
 message FeedMergeQueueWorkspace {

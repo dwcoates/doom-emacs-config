@@ -313,3 +313,69 @@ next:
     cursor says it can be clicked, and only while the menu exists.
 - **Consequences**: the topbar resolver needs every child's standing, summary
   and close time, keyed by parent.
+
+### 5. The retirement sweep
+
+- **What changed**: everything only the async merge used is retired, with
+  its tags and names reserved:
+  - `agentrepl.v1.MergeQueueStatusEntry.kind` and
+    `agentrepl.v1.MergeQueueStatusOffQueue.kind`, with the
+    `agentrepl.v1.MergeQueueStatusEntryKind` messages. Every merge is now a
+    workspace landing its own branch.
+  - The off-queue causes `pick_failed` and `adopted`.
+  - `agentrepl.v1.RequeueMergeRequest.version`, with its three refusals.
+    Only an adopted async request lacked its values.
+  - `agentrepl.v1.DiscardMergeSuccess`'s kind oneof. A discard now drops
+    only the request.
+  - `agentrepl.v1.FoundWorkspace.merge`, with
+    `agentrepl.v1.FoundWorkspaceMerge`.
+  - `conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_PICK`. Value 33 is
+    reserved.
+  - `frontend.v1.FeedMergeHead.mode`, with the `frontend.v1.FeedMergeMode`
+    and `frontend.v1.FeedMergeWorkspaceSwitch` families.
+  - `frontend.v1.FeedMergeTab.resolving`, with
+    `frontend.v1.FeedMergeTabResolving`.
+  - `frontend.v1.FeedMergeQueueEntry.bubble`, with
+    `frontend.v1.FeedMergeQueueBubble`.
+  - `frontend.v1.RosterRow.async_merging`, with
+    `frontend.v1.RosterRowAsyncMerging`.
+  - `frontend.v1.RosterMergeQueueSubject.mode` and `.merge`, with the
+    `frontend.v1.RosterMergeQueueMode` family.
+- **Kept, re-documented**
+  - `conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK` and its
+    feed badge, `frontend.v1.FeedMergeHandbackBadge`. They still carry a
+    workspace's own failed one-shot merge back to it.
+  - `conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER`, which
+    now names `agentrepl.v1.CreateWorkspaceOneShot.compact_requester_after`.
+- **Comments**: every comment in `agentrepl.v1`, `frontend.v1`,
+  `conversation.v1` and `repoconfig.v1` that described async merges, merge
+  workspaces or their hidden reveal is rewritten or removed.
+- **Obviated-declaration sweep**: a package-wide pass found no message or
+  enum orphaned by this change. Nothing references only the retired shapes.
+  - The unreferenced top-level types it lists (for example
+    `repoconfig.v1.LifecycleConfig` and `frontend.v1.FailureKind`) are roots
+    read by name or by code, and predate this change.
+- **Consequences**
+  - `render-colors.json`'s `async_merge_mark` section goes with the roster
+    marker.
+  - The sidebar's queue rows draw no "(requester)" suffix.
+  - Old merge workspaces still in the registry become ordinary closed
+    workspaces with no mark.
+
+## Consequences recap
+
+- Async merges are gone. A workspace lands other work as a one-shot child cut
+  from that work's branch.
+- A child's branch is a snapshot taken at create time.
+- A child landing a subagent's branch can fork that subagent's own
+  conversation. This is pending the vetting item.
+- Every child has a bubble in its originator's feed. The bubble shows the
+  child's summaries and status, and selects the child on a click on its name.
+- The footer lists open children, and the topbar summary's click menu lists
+  the rest.
+- The queue, the sidebar and the CLI know one kind of merge.
+
+## Frozen contract
+
+Design complete (autonomous). The frozen contract is the commit that adds this
+section.

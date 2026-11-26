@@ -8,8 +8,8 @@
 // describes it.
 //
 // WITH A LEDGER, THE ROLLOUT IS REGISTERED, NOT STARTED. The deploy named by
-// `deploy` is still running (its hook is what called), and its report to an
-// async merge's requester is composed only as it ends. So the daemon records
+// `deploy` is still running (its hook is what called), and its report to the
+// landing child's parent is composed only as it ends. So the daemon records
 // that the deploy's landing rolls out, and fires the rollout at the deploy's
 // teardown, after the report is owed to it: the report then arrives only once
 // the build carrying the landing is running. Landings that arrive while a
