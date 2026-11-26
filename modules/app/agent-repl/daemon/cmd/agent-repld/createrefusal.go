@@ -46,6 +46,8 @@ func describeCreateRefusal(e *agentreplv1.CreateWorkspaceError) (string, error) 
 			standing = "open"
 		}
 		return fmt.Sprintf("the name %s is already the name or branch of the %s workspace at %s, which has not landed", h.GetBranch(), standing, h.GetWorkspace().GetDir()), nil
+	case *agentreplv1.CreateWorkspaceError_NameReserved:
+		return fmt.Sprintf("the name %s is claimed by a create in flight; ask again once that create settles", r.NameReserved.GetBranch()), nil
 	case *agentreplv1.CreateWorkspaceError_NameBranchExists:
 		return fmt.Sprintf("the branch %s already exists (at %s), and no workspace the daemon serves holds it; choose another name", r.NameBranchExists.GetBranch(), r.NameBranchExists.GetHead()), nil
 	case *agentreplv1.CreateWorkspaceError_InvalidName:

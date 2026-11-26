@@ -1273,8 +1273,8 @@ func (*SetWorkspaceNameTaken_Workspace) isSetWorkspaceNameTaken_Holder() {}
 
 func (*SetWorkspaceNameTaken_Pending) isSetWorkspaceNameTaken_Holder() {}
 
-// The name is reserved by a pending async merge or claimed by a create in
-// flight, so a workspace will be registered under it. DELIBERATELY EMPTY.
+// The name is claimed by a create in flight, so a workspace will be
+// registered under it. DELIBERATELY EMPTY.
 type SetWorkspaceNameTakenPending struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

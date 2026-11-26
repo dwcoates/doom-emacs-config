@@ -302,7 +302,7 @@ func TestTheDeployersStoreHolderIsTheOneHoldingTheStoresSocket(t *testing.T) {
 			}
 			p := deployerParamsFor(t, exe)
 			p.Rollout, p.Progress, p.Faults = idleRollout{}, noProgress{}, &deployFaults{}
-			p.Reports = &detachedForwarder{}
+			p.Reports = &reportsForwarder{}
 			p.Store = tt.socket
 			manifest := `{"requirements": [{"id": "store-holder", "kind": "socket_holder", "control": "/sock/c.sock", "sockets": [{"name": "store", "unix": "/sock/store.sock"}]}]}`
 			if err := os.WriteFile(filepath.Join(p.Checkout, "requirements.json"), []byte(manifest), 0o600); err != nil {
@@ -414,7 +414,7 @@ func TestTheBootingDeployerClosesTheDeployFaultsAnEarlierDaemonLeft(t *testing.T
 				Evidence: health.DeployFailure{Step: health.DeployStepBuild}.Evidence()}}
 			p := deployerParamsFor(t, exe)
 			p.Rollout, p.Progress, p.Faults, p.Joining = idleRollout{}, noProgress{}, faults, tc.joining
-			p.Reports = &detachedForwarder{}
+			p.Reports = &reportsForwarder{}
 
 			// Act
 			if _, _, err := buildDeployer(context.Background(), p); err != nil {

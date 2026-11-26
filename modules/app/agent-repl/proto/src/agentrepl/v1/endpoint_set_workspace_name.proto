@@ -229,6 +229,6 @@ message SetWorkspaceNameTaken {
   }
 }
 
-// The name is reserved by a pending async merge or claimed by a create in
-// flight, so a workspace will be registered under it. DELIBERATELY EMPTY.
+// The name is claimed by a create in flight, so a workspace will be
+// registered under it. DELIBERATELY EMPTY.
 message SetWorkspaceNameTakenPending {}

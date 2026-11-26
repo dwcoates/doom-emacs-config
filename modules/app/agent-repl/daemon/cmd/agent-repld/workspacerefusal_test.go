@@ -229,7 +229,7 @@ var workspaceSettingRefusals = func() []describedRefusal {
 					want: "the name x/y is already the name or branch of the workspace at /w/y"},
 				refusalCase{name: "name_taken/pending", err: armed(name, "name_taken", &agentreplv1.SetWorkspaceNameTaken{Name: "x/y",
 					Holder: &agentreplv1.SetWorkspaceNameTaken_Pending{Pending: &agentreplv1.SetWorkspaceNameTakenPending{}}}),
-					want: "the name x/y is reserved by a pending async merge or claimed by a create in flight"},
+					want: "the name x/y is claimed by a create in flight"},
 				refusalCase{name: "merging", err: armed(name, "merging", nil),
 					want: "a merge holds or names ws, and its branch and directory cannot move until the merge has landed or left the queue"},
 				refusalCase{name: "branch_published", err: armed(name, "branch_published", &agentreplv1.SetWorkspaceNameBranchPublished{Upstream: "origin/y"}),

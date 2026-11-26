@@ -7,15 +7,14 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/landingreports"
 	"agent-repld/internal/merge"
-	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/rollout"
@@ -639,15 +638,11 @@ func TestVerbsForwarderRepublishRosterBeforeTheVerbsIsAnError(t *testing.T) {
 	}
 }
 
-// mergeVerbs is a workspace.Verbs whose live methods are the merge
-// orchestrator's two reaches into the verbs: the name claim and the interrupt.
+// mergeVerbs is a workspace.Verbs whose live method is the merge
+// orchestrator's reach into the verbs: the interrupt.
 type mergeVerbs struct {
 	workspace.Verbs
 	interrupted []ids.WorkspaceID
-}
-
-func (v *mergeVerbs) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
-	return "agent/" + name, func() {}, false, nil
 }
 
 func (v *mergeVerbs) Interrupt(_ context.Context, ws ids.WorkspaceID, _ workspace.InterruptTarget, _ bool) (workspace.InterruptOutcome, error) {
@@ -693,10 +688,6 @@ func TestVerbsForwarderMergeReachesBeforeTheVerbsAreErrors(t *testing.T) {
 		call func(f *verbsForwarder) error
 		want string
 	}{
-		{name: "a name claim", call: func(f *verbsForwarder) error {
-			_, _, _, err := f.ClaimMergeName(context.Background(), "/r", "fix")
-			return err
-		}, want: "agent-repld: an async merge's name was checked before the workspace verbs existed"},
 		{name: "a merge tab interrupt", call: func(f *verbsForwarder) error {
 			_, err := f.interruptTurn(context.Background(), "ws-1")
 			return err
@@ -722,12 +713,11 @@ func TestVerbsForwarderMergeReachesTheBoundVerbs(t *testing.T) {
 	f.bind(target)
 
 	// Act.
-	branch, _, taken, claimErr := f.ClaimMergeName(context.Background(), "/r", "fix")
 	running, interruptErr := f.interruptTurn(context.Background(), "ws-1")
 
 	// Assert.
-	if claimErr != nil || branch != "agent/fix" || taken || interruptErr != nil || !running || len(target.interrupted) != 1 {
-		t.Fatalf("claim = %q, %v, %v; interrupt = %v, %v (%v); want both carried to the verbs", branch, taken, claimErr, running, interruptErr, target.interrupted)
+	if interruptErr != nil || !running || len(target.interrupted) != 1 {
+		t.Fatalf("interrupt = %v, %v (%v); want it carried to the verbs", running, interruptErr, target.interrupted)
 	}
 }
 
@@ -785,81 +775,104 @@ func TestVerbsForwarderStatus(t *testing.T) {
 	}
 }
 
-// boundDetached answers a detached forwarder bound to a service over a fresh
-// in-memory state client holding one owed landing report.
-func boundDetached(t *testing.T) (*detachedForwarder, wsm.DB, *dlog.TestSurfaces) {
+// boundReports answers a reports forwarder bound to the landing reports over
+// a fresh in-memory state client.
+func boundReports(t *testing.T) (*reportsForwarder, wsm.DB, *dlog.TestSurfaces) {
 	t.Helper()
 	db, err := wsm.OpenInMemory(context.Background())
 	if err != nil {
 		t.Fatalf("OpenInMemory: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if err := db.OweHandBack(context.Background(), wsm.OwedHandBack{MergeWorkspace: "ws-merge", Requester: "ws-requester",
-		MergeName: "m", Branch: "b", Summary: "s", IdempotencyKey: "k", OwedAt: time.Unix(1, 0)}); err != nil {
-		t.Fatalf("OweHandBack: %v", err)
-	}
 	logs := dlog.NewTestSurfaces()
-	f := &detachedForwarder{}
-	f.bind(mergeworkspace.New(mergeworkspace.Deps{DB: db, Log: logs, Deploys: discardDeploys{}}))
+	f := &reportsForwarder{}
+	f.bind(landingreports.New(landingreports.Deps{DB: db, Log: logs, Deploys: discardDeploys{}}))
 	return f, db, logs
 }
 
-func TestDetachedForwarderCoversTheOwedReportsThroughTheBoundService(t *testing.T) {
+func TestReportsForwarderCoversTheLandingsThroughTheBoundService(t *testing.T) {
 	// Arrange
-	f, db, _ := boundDetached(t)
+	f, _, logs := boundReports(t)
 
 	// Act
-	err := f.CoverOwed(context.Background())
+	err := f.CoverLandings(context.Background())
 
 	// Assert
-	covered, readErr := db.OwedHandBacks(context.Background(), true)
-	if err != nil || readErr != nil || len(covered) != 1 {
-		t.Fatalf("CoverOwed = %v; covered %+v, %v; want the report covered", err, covered, readErr)
+	if err != nil || !slices.ContainsFunc(logs.Records(), func(r dlog.Record) bool {
+		return r.Level == "info" && r.Message == "the deploy covers the landings before it"
+	}) {
+		t.Fatalf("CoverLandings = %v; records %+v; want the service's own record of the cover", err, logs.Records())
 	}
 }
 
-func TestDetachedForwarderCoversNothingBeforeTheService(t *testing.T) {
-	// Arrange
-	f := &detachedForwarder{}
+func TestReportsForwarderReachesNothingBeforeTheService(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(f *reportsForwarder) error
+	}{
+		{name: "a cover", call: func(f *reportsForwarder) error { return f.CoverLandings(context.Background()) }},
+		{name: "a handback", call: func(f *reportsForwarder) error {
+			return f.HandBack(context.Background(), "ws-1", wsm.Workspace{ID: "ws-1"}, merge.DetachedOutcome{Kind: merge.DetachedFailed})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := tt.call(&reportsForwarder{})
 
-	// Act
-	err := f.CoverOwed(context.Background())
-
-	// Assert
-	if err == nil {
-		t.Fatal("CoverOwed before the service = nil, want the error")
+			// Assert
+			if err == nil || err.Error() != "agent-repld: a landing report was asked for before the landing reports existed" {
+				t.Fatalf("%s before the service = %v, want the error", tt.name, err)
+			}
+		})
 	}
 }
 
-func TestDetachedForwarderPaysThroughTheBoundService(t *testing.T) {
-	// Arrange: a service whose state read fails, so the payment is visible
-	// in its own record without a prompt path behind it.
-	f, db, logs := boundDetached(t)
+func TestReportsForwarderEndsADeployThroughTheBoundService(t *testing.T) {
+	// Arrange: a service whose state read fails, so the deploy's end is
+	// visible in its own record without a prompt path behind it.
+	f, db, logs := boundReports(t)
 	db.Close()
 
 	// Act
-	f.PayOwed(context.Background(), false, nil)
+	f.DeployEnded(context.Background(), false, nil)
 
 	// Assert
 	if !slices.ContainsFunc(logs.Records(), func(r dlog.Record) bool {
-		return r.Level == "error" && r.Message == "could not read the owed landing reports; they stay owed"
+		return r.Level == "error" && r.Message == "could not take the landings the deploy carries; its notice names none of them"
 	}) {
-		t.Fatalf("records = %+v, want the service's own record of the payment", logs.Records())
+		t.Fatalf("records = %+v, want the service's own record of the deploy's end", logs.Records())
 	}
 }
 
-func TestDetachedForwarderPayingBeforeTheServicePanics(t *testing.T) {
+func TestReportsForwarderHandsBackThroughTheBoundService(t *testing.T) {
+	// Arrange: a released merge, which the service reports nowhere.
+	f, _, logs := boundReports(t)
+
+	// Act
+	err := f.HandBack(context.Background(), "ws-1", wsm.Workspace{ID: "ws-1"},
+		merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Cause: merge.CauseUserDrop})
+
+	// Assert
+	if err != nil || !slices.ContainsFunc(logs.Records(), func(r dlog.Record) bool {
+		return r.Level == "info" && r.Message == "a released merge hands no report back: whoever released it already knows"
+	}) {
+		t.Fatalf("HandBack = %v; records %+v; want the service's own record of the skip", err, logs.Records())
+	}
+}
+
+func TestReportsForwarderEndingADeployBeforeTheServicePanics(t *testing.T) {
 	// Arrange
-	f := &detachedForwarder{}
+	f := &reportsForwarder{}
 	defer func() {
 		// Assert
 		if recover() == nil {
-			t.Fatal("PayOwed before the service returned, want a panic: the graph's order is broken")
+			t.Fatal("DeployEnded before the service returned, want a panic: the graph's order is broken")
 		}
 	}()
 
 	// Act
-	f.PayOwed(context.Background(), true, nil)
+	f.DeployEnded(context.Background(), true, nil)
 }
 
 func TestFreshBootSettle(t *testing.T) {

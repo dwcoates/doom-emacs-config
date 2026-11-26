@@ -625,8 +625,8 @@ export const SetWorkspaceNameTakenSchema: GenMessage<SetWorkspaceNameTaken> = /*
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 17);
 
 /**
- * The name is reserved by a pending async merge or claimed by a create in
- * flight, so a workspace will be registered under it. DELIBERATELY EMPTY.
+ * The name is claimed by a create in flight, so a workspace will be
+ * registered under it. DELIBERATELY EMPTY.
  *
  * @generated from message agentrepl.v1.SetWorkspaceNameTakenPending
  */
