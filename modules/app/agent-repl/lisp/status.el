@@ -397,10 +397,7 @@ system\='s rather than the agent\='s, which is exactly why red is wrong for
 it: a merging workspace\='s turn ENDED before its merge began, and red
 would claim a turn was still running.  What purple shares with red is
 only the actionability claim — the user cannot act on the workspace
-until the merge resolves.  An async merge of the workspace\='s own
-branch, in a hidden merge workspace, is no status: it paints only the
-tab\='s [N] run this purple (`agent-repl-status-async-merge-tab-bracket\=',
-owner request 2026-10-13).
+until the merge resolves.
 
 It is purple on every surface: the tab bar, the sidebar and the footer
 \(owner ruling, 2026-09-28).
@@ -760,14 +757,6 @@ Emacs\='s corner of the fixture\='s `one_shot_glyph_arms\=', asserted
 against it: the one-shot works, and every other arm, `:compacting\='
 included, draws as any workspace\='s does.")
 
-(defconst agent-repl-status-async-merge-tab-bracket "purple"
-  "The color NAME of a tab\='s [N] run while its branch merges async.
-Emacs\='s corner of the fixture\='s `async_merge_mark.tab_bracket\=',
-asserted against it.  `RosterRowAsyncMerging\=' says the workspace\='s own
-branch merges in a hidden merge workspace; the tab paints its `[N] \=' run
-with this background and keeps its name on the status background (owner
-request, 2026-10-13).  No glyph is drawn for it.")
-
 (defconst agent-repl-status-merge-glyphs
   '((:merge-queued    . "merge")
     (:merging         . "merge")
@@ -1114,19 +1103,6 @@ second answer to a question only the daemon answers."
     (agent-repl--log-decision (list 'tab-state ws) arm
                               ws "elisp.status.tab-state: ws={ws} arm={arm}" :ws ws :arm arm)
     arm))
-
-(defun agent-repl-status-tab-async-merging (ws)
-  "Return non-nil while WS\='s roster row carries the async-merging marker.
-The marker (`RosterRowAsyncMerging\=') is the daemon\='s: WS\='s own branch
-merges async in a hidden merge workspace.  nil before the roster has
-spoken about WS, exactly as `agent-repl-status-tab-state\=' is."
-  (let ((merging (and (fboundp 'agent-repl-roster-async-merging-for-ws)
-                      (agent-repl-roster-async-merging-for-ws ws)
-                      t)))
-    (agent-repl--log-decision (list 'tab-async-merging ws) merging
-                              ws "elisp.status.tab-async-merging: ws={ws} async-merging={async_merging}"
-                              :ws ws :async_merging merging)
-    merging))
 
 (defun agent-repl-status-tab-unread-turn-end (ws)
   "Return the unread turn end under WS\='s `idle_async' row, or nil.
@@ -1697,22 +1673,6 @@ Keys in the returned plist: :bg :fg :bracket-bg :bracket-fg :underline
                                       (plist-get status :fg)))
                 spec)))))
 
-(defun agent-repl--tab-spec-async-merge (spec)
-  "Return SPEC with its [N] bracket painted for an async merge.
-The bracket alone takes the background named by
-`agent-repl-status-async-merge-tab-bracket\=' (owner request, 2026-10-13),
-whatever STATE and selection painted there; every other key of SPEC, the
-name\='s ground among them, is kept, so the name still says the
-workspace\='s own status.  The one space after `[N]\=' belongs to the name
-\(owner request, 2026-10-13): `agent-repl--render-tab\=' always draws it in
-the name\='s face, so the tab reads as purple `[N]\=' then ` <name>\=' on
-the status ground."
-  (let ((bg (cdr (assoc agent-repl-status-async-merge-tab-bracket
-                        agent-repl--color-by-name))))
-    (append (list :bracket-bg bg
-                  :bracket-fg (agent-repl--tab-bar-legible-fg bg))
-            spec)))
-
 (defun agent-repl--tab-spec-bracket-only (state selected)
   "Return appearance spec applying STATE's color to the [N] bracket only.
 Pulls bracket-bg/bracket-fg/weight from STATE's palette row and leaves
@@ -2185,10 +2145,7 @@ workspace the roster does report on, or a `:ready' workspace whose
 panels are not open), the spec is built via
 `agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
 arm's color.  The bracket label is the tab's number INDEX and nothing
-else: state reaches the bracket as COLOR.  While the row carries the
-async-merging marker the `[N]' bracket takes the async-merge purple
-instead \(`agent-repl--tab-spec-async-merge'), and the space after it and
-the name keep the status.  While a FULL `idle_async' tab carries the
+else: state reaches the bracket as COLOR.  While a FULL `idle_async' tab carries the
 unread-turn-end marker, the `[N]' bracket keeps the yellow and the name
 takes the unread turn end's color \(`agent-repl--tab-name-state').
 
@@ -2214,9 +2171,6 @@ the selection highlight and the next step brings it back."
                             (agent-repl--tab-spec-bracket-only
                              bracket-state selected)
                           (agent-repl--tab-spec display-state selected)))
-         (spec          (if (agent-repl-status-tab-async-merging name)
-                            (agent-repl--tab-spec-async-merge spec)
-                          spec))
          (label         (number-to-string index))
          (face          (agent-repl--tab-face
                          (agent-repl--tab-name-state name display-state)

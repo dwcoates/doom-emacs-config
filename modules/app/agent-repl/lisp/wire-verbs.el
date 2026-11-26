@@ -902,10 +902,11 @@ a catalog, so model M could not be named."
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field.  The
-async-merge arms, `origin_fetch_failed' and `unknown_landing_target' are
-not decoded: an async merge, a create cut from origin and a create naming
-a landing target are an agent\='s requests, never the editor\='s, so one
-answering an editor create is a breach."
+source-branch, subagent and close-after arms, `origin_fetch_failed' and
+`unknown_landing_target' are not decoded: a create cut from a source
+branch, forking a subagent, closing another workspace, cut from origin or
+naming a landing target is an agent\='s request, never the editor\='s, so
+one answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
     (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation forkSourceHasNoFinishedTurn nameReserved nameHeld nameBranchExists invalidName unknownContextWorkspace unknownOwner unknownRequester parentNotOpen transferringAway standingDown modelNotInCatalog modelCatalogUnknown lifecycleConfigInvalid creationHookFailed))
     (list :cause
@@ -2091,9 +2092,9 @@ The merge a placement asked to stand behind is in no queue."
 (defconst agent-repl-wire-verbs--off-queue-cause-arms
   '((evicted . :evicted) (dequeued . :dequeued) (failed . :failed)
     (restartFailed . :restart-failed) (daemonShutdown . :daemon-shutdown)
-    (pickFailed . :pick-failed) (finishFailed . :finish-failed)
+    (finishFailed . :finish-failed)
     (aheadDidNotLand . :ahead-did-not-land)
-    (backloggedAtColdGate . :backlogged-at-cold-gate) (adopted . :adopted)
+    (backloggedAtColdGate . :backlogged-at-cold-gate)
     (gaveUp . :gave-up))
   "Every arm of MergeQueueStatusOffQueueCause, as (WIRE-SYMBOL . KEYWORD).
 Each arm is an empty message: the arm is the cause.")
