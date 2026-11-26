@@ -335,6 +335,27 @@ func TestCaptureDisplacedEndsOnlyTheTurn(t *testing.T) {
 	}
 }
 
+// TestCaptureDisplacedReportsNothingWhenNoTurnIsInFlight covers a live session
+// that is idle: nothing is read, marked or ended.
+func TestCaptureDisplacedReportsNothingWhenNoTurnIsInFlight(t *testing.T) {
+	// Arrange
+	const ws = ids.WorkspaceID("ws-1")
+	f := newFleetFixture(t)
+	f.db.openTurns = []wsm.Turn{{ID: "turn-1", Workspace: ws, Text: "keep going"}}
+	f.fleet.remember(ws, &live{client: f.client, watcher: &fakeWatcher{}})
+
+	// Act
+	_, captured, err := f.fleet.CaptureDisplaced(context.Background(), ws)
+
+	// Assert
+	if err != nil || captured {
+		t.Fatalf("CaptureDisplaced = (captured %v, error %v), want a clean false", captured, err)
+	}
+	if len(f.db.putTurns) != 0 || len(f.client.killTurns) != 0 {
+		t.Fatalf("marks %+v, kills %d, want nothing marked or ended on an idle session", f.db.putTurns, len(f.client.killTurns))
+	}
+}
+
 // TestRaiseColdGateRefusesWithoutColdFacts covers the gate with nothing to
 // draw: the shim's own numbers are what the card shows.
 func TestRaiseColdGateRefusesWithoutColdFacts(t *testing.T) {
