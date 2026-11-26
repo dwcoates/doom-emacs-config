@@ -179,20 +179,6 @@ type Resolver interface {
 	// (wsm.Turn.Address), handed over as it is recorded, so the live draw and
 	// every replay (TurnAddresses) place the turn from one fact.
 	AddressTurn(ws ids.WorkspaceID, turn ids.TurnID, addr *sessionwatcher.OutputAddress)
-	// SetOutputMirror installs the mirror a lease holder wants the turns IT
-	// starts drawn at TOO, in another workspace's feed (an async merge
-	// workspace's merge turns, in the requester's bubble); nil withdraws it.
-	// Like SetOutputAddress it moves no row (turnmirror.go).
-	SetOutputMirror(ws ids.WorkspaceID, m *wsm.MirrorAddress)
-	// OutputMirror answers a copy of the mirror standing for one workspace,
-	// nil when none stands. The prompt queue reads it as it records a turn
-	// the lease holder started.
-	OutputMirror(ws ids.WorkspaceID) *wsm.MirrorAddress
-	// MirrorTurn records the mirror one turn is also drawn at, nil for none:
-	// the mirror the prompt queue recorded on the turn (wsm.Turn.Mirror),
-	// handed over as it is recorded, so the live draw and every replay
-	// (TurnMirrors) mirror the turn from one fact.
-	MirrorTurn(ws ids.WorkspaceID, turn ids.TurnID, m *wsm.MirrorAddress)
 	// SenderTurn records the workspace whose agent sent one turn's prompt, nil
 	// for a prompt no agent sent: the sender the prompt queue recorded on the
 	// turn (wsm.Turn.SentBy), handed over as it is recorded, so the live draw
@@ -441,10 +427,6 @@ type Resolver interface {
 	// restates the row with it (mergefold.go). False is a row that is not a
 	// merge head this daemon holds.
 	SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool
-	// MarkMergeWorkspaceRemoved restates every switch in WS's feeds that takes
-	// the user to MERGEWS as removed, and answers how many rows it restated
-	// (mergeworkspace.go).
-	MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, removedAtMS int64) int
 	// TakeTurnEnding answers what a turn's LIVE end said — the final answer's
 	// prose, the errored ending's line, the terminal's failure class — and
 	// forgets it. False is a turn whose ending was not drawn live here. The
@@ -521,13 +503,6 @@ type Deps struct {
 	// nil adds no address, which is what a test that is not about addressed
 	// turns wants.
 	TurnAddresses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.OutputAddress, error)
-	// TurnMirrors answers the mirror each named turn was recorded with
-	// (wsm.DB.TurnMirrors), for the turns that have one. A replay takes each
-	// into the table the live draw mirrors by (turnmirror.go).
-	//
-	// nil adds no mirror, which is what a test that is not about mirrored
-	// turns wants.
-	TurnMirrors func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error)
 	// TurnSenders answers the workspace whose agent sent each named turn's
 	// prompt (wsm.DB.TurnSenders), for the turns that have one. A replay takes
 	// each into the table the live draw heads agent-sent prompts by
@@ -572,18 +547,6 @@ type Deps struct {
 	// into this resolver. nil tells nobody, which is what a test that is not
 	// about the footer wants.
 	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
-	// MergeRow is told every merge bubble row the feed holds, as it stands
-	// after each publication: a merge head on the root feed, and every tab
-	// row on a merge's sub-feed, each with the merge's ledger id.
-	// MergeRowRetired is told each one the feed retires, a reset's included.
-	// They are the footer's ⇄ chip and panel's whole source, so the footer
-	// draws exactly the merges the feed draws (mergerows.go).
-	//
-	// CALLED WITH THE RESOLVER'S LOCK HELD, as EntryPlaced is: the receiver
-	// must never call back into this resolver. nil tells nobody, which is what
-	// a test that is not about the footer wants.
-	MergeRow        func(ws ids.WorkspaceID, lease ids.LeaseID, row *frontendv1.FeedRow)
-	MergeRowRetired func(ws ids.WorkspaceID, lease ids.LeaseID, id string)
 	// Commands answers the workspace's standing slash-command catalog
 	// (commandcatalog.Catalogs, the one table ListSlashCommands also reads),
 	// and false while none has been stated. A user-prompt row's `commands`

@@ -149,7 +149,7 @@ func (r *resolver) resolveArms(rc rowContext) (arms, judged map[ids.WorkspaceID]
 // Open section row's parent is the row it is drawn under (the Open tree's
 // nesting, transparent ancestors and repository blocks included), and it is
 // covered when its region is folded or an ancestor's children are; every
-// other workspace (hidden, closed, a hidden merge workspace, a thread) is not
+// other workspace (backlogged, closed, a thread) is not
 // open. The caller holds r.mu.
 func (r *resolver) visibilityInputs(repos []openRepo, rc rowContext, arms map[ids.WorkspaceID]string) []wsm.VisibilityInput {
 	inputs := make([]wsm.VisibilityInput, 0, len(r.state.reg.Workspaces))
