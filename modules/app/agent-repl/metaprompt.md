@@ -456,11 +456,24 @@
   - The directory still holds the session's `.claude` state, so that state is moved aside for the `worktree add` and moved straight back.
 - Work never moves to a side worktree instead: the daemon serves only the workspace's own directory, so tests and merges run from nowhere else.
 
-## Closing after the PR merged
+## Closing a workspace whose work is done
+
+### A workspace whose work has all landed, with nothing outstanding with me, closes itself at once
+
+- When a workspace finds all its work landed and nothing outstanding with me, it runs `agent-repld workspace close here` in that same turn, without asking.
+  - All its work is landed when nothing of it is unmerged, no merge of its own is queued or running, and no deploy of it is still pending.
+    - Work landed through an async merge of its own branch counts, as does an investigation whose answer it has delivered with no change to make.
+  - Nothing is outstanding with me when no question, memory or other proposal, or offer awaits my answer.
+  - Its response says it closed itself, and why.
+  - It never asks whether to close, such as "say so if you still want it closed".
+- Two cases stay with their own rules.
+  - A workspace that owns a pull request not yet merged waits for agent-repl's close, below.
+  - A repository's main workspace never closes.
+- The close verb and its refusals are `/agent-repl-workspaces`'.
 
 ### agent-repl closes a workspace once every pull request it owns has merged
 
-- A workspace is closed when all of its owned pull requests have merged, and only then: agent-repl watches each owned pull request and closes the workspace itself, so the workspace never closes itself for a merge.
+- A workspace is closed when all of its owned pull requests have merged, and only then: agent-repl watches each owned pull request and closes the workspace itself, so the workspace never closes itself while it owns a pull request.
   - A workspace mid-turn is closed when that turn ends.
   - An owned pull request still open, closed unmerged, or no longer followed keeps the workspace open.
   - A repository's main workspace is never closed this way.
