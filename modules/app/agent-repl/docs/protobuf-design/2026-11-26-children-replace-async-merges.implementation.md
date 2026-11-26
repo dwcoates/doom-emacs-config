@@ -46,13 +46,13 @@ ticked when its commit lands on the branch `main-white-foreground-selection`.
   - The new refusals: `unknown_source_branch`, `unknown_subagent` and
     `unknown_close_after`
 - [x] B2. A child's landing report to its parent is one line.
-- [ ] B3. The feed: a `frontend.v1.FeedChild` row in the originator's root
+- [x] B3. The feed: a `frontend.v1.FeedChild` row in the originator's root
   feed at create time, re-published on any change to the child's roster
   status, summary, standing, links, close or removal
-- [ ] B4. The footer: `frontend.v1.FooterChipChildren` and
+- [x] B4. The footer: `frontend.v1.FooterChipChildren` and
   `frontend.v1.FooterExpandedChildren` from the open children's roster rows
   and summaries
-- [ ] B5. The topbar: `frontend.v1.TopbarTitleChildMenu` from the children
+- [x] B5. The topbar: `frontend.v1.TopbarTitleChildMenu` from the children
   that are not open, most recent close first
 
 ## Phase C: webapp
@@ -218,3 +218,16 @@ log of the branch first.
     (`offqueue.go` name-off-queue refusal, `tabs.go` pick and reveal heads,
     `rosterqueue.go`, `transfer.go`).
 - Next: B3 to B5, then phases C to E.
+
+### Status at the fourth checkpoint
+
+- B3 to B5 are `internal/children`: one tracker fed by the roster's registry
+  (`sidebar.WithRegistrySink`), its arm moves with their colors
+  (`sidebar.WithArmSink`) and the summary keeper (`summaryFan`), drawing the
+  `frontend.v1.FeedChild` row (`feedid.KindChild`), the footer's open children
+  and the topbar's menu of the rest. Wired late-bound in `graph.go`
+  (`childrenForwarder`).
+- Not drawn yet, both optional on the wire: the target's pull request
+  (`FeedChildTarget.pull_request`) and the merged version
+  (`FeedChildStandingMerged.version`).
+- Next: phases C to E, then the open cleanups above.

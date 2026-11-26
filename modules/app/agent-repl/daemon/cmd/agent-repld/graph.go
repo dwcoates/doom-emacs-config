@@ -26,6 +26,7 @@ import (
 	"agent-repld/internal/chat"
 	"agent-repld/internal/checkout"
 	"agent-repld/internal/chessboard"
+	"agent-repld/internal/children"
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/clock"
@@ -628,7 +629,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterViewed(p.DB, p.Surfaces.Global()),
 		rosterStatusChanges(p.DB, p.Surfaces.Global()),
 		rosterVisibility(p.DB, p.Surfaces.Global()))
+	// THE CHILDREN TRACKER draws into the feed resolver built below, so the
+	// roster reaches it late-bound (childrenForwarder).
+	childrenRef := &childrenForwarder{}
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
+		sidebar.WithRegistrySink(childrenRef.SetRegistry),
+		sidebar.WithArmSink(childrenRef.SetArm),
 		sidebar.WithResultSink(rosterDurable.ResultSink()),
 		sidebar.WithViewedSink(rosterDurable.ViewedSink()),
 		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
@@ -927,6 +933,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the feed resolver: %w", err)
 	}
 	faultSurfaces.attachFeed(feedResolver)
+	childrenRef.bind(children.New(children.Deps{
+		Feed: feedResolver, Footer: footerResolver, Topbar: topbarResolver,
+		Home: paths.Home, Now: time.Now, Log: log,
+	}))
 
 	// ---- the forwarders, and the fleet they let exist first ----
 
@@ -950,7 +960,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// for one from the prompt corpus.
 	summaries := wssummary.New(wssummary.Deps{
 		Store:      p.DB,
-		Topbar:     topbarResolver,
+		Topbar:     summaryFan{topbar: topbarResolver, children: childrenRef},
 		PromptsDir: paths.PromptsDir,
 		Log:        log,
 	})

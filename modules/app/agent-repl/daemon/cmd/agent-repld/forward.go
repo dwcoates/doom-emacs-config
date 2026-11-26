@@ -2,6 +2,7 @@ package main
 
 import (
 	"agent-repld/internal/cachelapse"
+	"agent-repld/internal/children"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/server"
 	"agent-repld/internal/workspace"
@@ -973,4 +975,43 @@ func (f *moveForwarder) MoveOwed(ctx context.Context, ws ids.WorkspaceID) (bool,
 		return false, errMoveApplierUnbound
 	}
 	return m.MoveOwed(ctx, ws)
+}
+
+// childrenForwarder carries the roster's registries and arm moves, and the
+// summary keeper's summaries, to the children tracker, which draws into the
+// feed resolver built after the roster. The roster renders nothing before a
+// registry, and the first registry is installed at the boot's bring-up, after
+// the graph that binds the tracker, so a fact reaching it unbound is a defect
+// in the graph's order, and panics.
+type childrenForwarder struct {
+	lateBound[*children.Tracker]
+}
+
+func (f *childrenForwarder) tracker() *children.Tracker {
+	target, ok := f.load()
+	if !ok {
+		panic("agent-repld: a child's fact arrived before the children tracker existed")
+	}
+	return target
+}
+
+// SetRegistry reaches the tracker (sidebar.RegistrySink).
+func (f *childrenForwarder) SetRegistry(reg sidebar.Registry) { f.tracker().SetRegistry(reg) }
+
+// SetArm reaches the tracker (sidebar.ArmSink).
+func (f *childrenForwarder) SetArm(ws ids.WorkspaceID, arm, tone string) {
+	f.tracker().SetArm(ws, arm, tone)
+}
+
+// summaryFan installs every summary in the topbar and hands it to the
+// children tracker, the summary keeper's one Topbar.
+type summaryFan struct {
+	topbar   topbar.Resolver
+	children *childrenForwarder
+}
+
+// SetSummary installs SUMMARY in both.
+func (f summaryFan) SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary) {
+	f.topbar.SetSummary(ws, summary)
+	f.children.tracker().SetSummary(ws, summary)
 }

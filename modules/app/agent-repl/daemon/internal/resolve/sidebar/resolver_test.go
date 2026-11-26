@@ -1414,3 +1414,31 @@ func TestTheArmSinkIsToldNothingWhenNoArmMoves(t *testing.T) {
 		t.Fatalf("reports = %+v, want none", got)
 	}
 }
+
+func TestTheRegistrySinkIsToldEveryWholeRegistryInstalled(t *testing.T) {
+	tests := []struct {
+		name    string
+		install func(r sidebar.Resolver, reg sidebar.Registry)
+	}{
+		{name: "a registry", install: func(r sidebar.Resolver, reg sidebar.Registry) { r.SetRegistry(reg) }},
+		{name: "a registry with the selection", install: func(r sidebar.Resolver, reg sidebar.Registry) {
+			r.SetRegistrySelected(reg, theWS, sidebar.SelectStamp{})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var told []sidebar.Registry
+			r, _ := newResolver(t, sidebar.WithRegistrySink(func(reg sidebar.Registry) { told = append(told, reg) }))
+			reg := registry(workspace(string(theWS), "one"))
+
+			// Act
+			tt.install(r, reg)
+
+			// Assert
+			if len(told) != 1 || len(told[0].Workspaces) != 1 || told[0].Workspaces[0].ID != theWS {
+				t.Fatalf("told = %+v, want the one registry installed", told)
+			}
+		})
+	}
+}

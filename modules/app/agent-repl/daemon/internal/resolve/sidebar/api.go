@@ -518,6 +518,10 @@ type ViewedSink func(ws ids.WorkspaceID, arm string)
 // in the same report, and returns at once just as the ResultSink does.
 type StatusChangeSink func(ws ids.WorkspaceID, at time.Time)
 
+// RegistrySink is told every whole registry the roster installs (SetRegistry,
+// SetRegistrySelected), after it is installed and off the resolver's lock.
+type RegistrySink func(reg Registry)
+
 // ArmSink is told every move of a workspace's published status arm, with the
 // arm's canonical color name (render-colors.json's `roster_status`). It is
 // called off the resolver's lock, in the same report as the StatusChangeSink,
@@ -547,6 +551,11 @@ func WithQuiet(g *viewquiet.Gate) Option {
 // WithViewedSink installs the sink the resolver tells its viewed changes.
 func WithViewedSink(sink ViewedSink) Option {
 	return func(r *resolver) { r.viewedChanges = sink }
+}
+
+// WithRegistrySink installs the sink the resolver tells every registry.
+func WithRegistrySink(sink RegistrySink) Option {
+	return func(r *resolver) { r.registries = sink }
 }
 
 // WithArmSink installs the sink the resolver tells every arm move.

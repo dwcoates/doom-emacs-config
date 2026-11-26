@@ -7,16 +7,23 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/children"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/landingreports"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -1178,5 +1185,63 @@ func TestFoldSweepForwarderSweepingBeforeItIsBoundIsAnError(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.foldsweep.sweep"}); !ok {
 		t.Fatal("the unbound sweep was not recorded at error")
+	}
+}
+
+// childRowsFeed records every row upserted into a feed, for the children forwarder.
+type childRowsFeed struct{ rows []*frontendv1.FeedRow }
+
+func (f *childRowsFeed) UpsertDurable(_ ids.WorkspaceID, _ feedid.Feed, row *frontendv1.FeedRow) {
+	f.rows = append(f.rows, row)
+}
+
+type discardOpenChildren struct{}
+
+func (discardOpenChildren) SetOpenChildren(ids.WorkspaceID, []footer.OpenChild) {}
+
+type discardClosedChildren struct{}
+
+func (discardClosedChildren) SetClosedChildren(ids.WorkspaceID, []topbar.ClosedChild) {}
+
+func TestChildrenForwarderCarriesARegistryToTheBoundTracker(t *testing.T) {
+	// Arrange
+	feed := &childRowsFeed{}
+	f := &childrenForwarder{}
+	f.bind(children.New(children.Deps{Feed: feed, Footer: discardOpenChildren{}, Topbar: discardClosedChildren{},
+		Now: time.Now, Log: dlog.NewTestLogger()}))
+	parent := ids.WorkspaceID("ws-parent")
+
+	// Act
+	f.SetRegistry(sidebar.Registry{Workspaces: []wsm.Workspace{{ID: parent}, {ID: "ws-child", Parent: &parent}}})
+
+	// Assert
+	if len(feed.rows) != 1 || feed.rows[0].GetChild() == nil {
+		t.Fatalf("rows = %v, want the child's bubble drawn", feed.rows)
+	}
+}
+
+func TestChildrenForwarderPanicsOnAFactBeforeTheTracker(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(f *childrenForwarder)
+	}{
+		{name: "a registry", call: func(f *childrenForwarder) { f.SetRegistry(sidebar.Registry{}) }},
+		{name: "an arm move", call: func(f *childrenForwarder) { f.SetArm("ws-1", "ready", "green") }},
+		{name: "a summary", call: func(f *childrenForwarder) {
+			summaryFan{children: f}.children.tracker().SetSummary("ws-1", wsm.WorkspaceSummary{})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("the fact reached an unbound forwarder without a panic")
+				}
+			}()
+
+			// Act
+			tt.call(&childrenForwarder{})
+		})
 	}
 }

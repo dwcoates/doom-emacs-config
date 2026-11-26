@@ -96,6 +96,9 @@ const (
 	// KindHotReload is one deploy's hot reload (frontend.v1.FeedHotReload),
 	// on the deploy mediator's root feed. Keyed by the deploy's start.
 	KindHotReload RowKind = "hot_reload"
+	// KindChild is a child workspace's bubble in its parent's root feed
+	// (frontend.v1.FeedChild), keyed by the child (internal/children).
+	KindChild RowKind = "child"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -118,6 +121,7 @@ var AllRowKinds = []RowKind{
 	KindIngress,
 	KindFixGate,
 	KindHotReload,
+	KindChild,
 }
 
 func knownKind(k RowKind) bool {

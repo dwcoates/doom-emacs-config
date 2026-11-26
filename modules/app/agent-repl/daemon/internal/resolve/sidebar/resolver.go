@@ -94,6 +94,11 @@ type core struct {
 	// the lock is released.
 	pendingStatusChanges []statusChange
 
+	// registries is told every whole registry the roster installs, so the
+	// children tracker reads the very registry the rows are drawn from
+	// (internal/children). nil tells nobody.
+	registries RegistrySink
+
 	// armChanges is told every move of a workspace's published status arm,
 	// with the arm's canonical color, so the children tracker draws a child
 	// exactly as its row (internal/children). nil tells nobody.
@@ -835,6 +840,14 @@ func (r *resolver) SetRegistry(reg Registry) {
 			r.installRegistry(reg)
 			return true
 		})
+	r.tellRegistry(reg)
+}
+
+// tellRegistry hands REG, just installed, to the registry sink, off the lock.
+func (r *resolver) tellRegistry(reg Registry) {
+	if r.registries != nil {
+		r.registries(reg)
+	}
 }
 
 // SetRegistrySelected installs the durable half and the user's selection in
@@ -856,6 +869,7 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp S
 			r.installSelected(ws, stamp)
 			return true
 		})
+	r.tellRegistry(reg)
 }
 
 // SetSelection installs a select's change into the registry the roster
