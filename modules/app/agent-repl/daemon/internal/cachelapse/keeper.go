@@ -193,6 +193,10 @@ type Deps struct {
 	// gate holds no cadence to project a lapse from, and its conversation is
 	// already cold, so the gate's facts are its lapse (gateLapse).
 	ColdGate func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
+	// ContextTokens answers the tokens of context the topbar's chip states
+	// for WS, 0 when the vendor reported none (topbar.Resolver.ContextTokens).
+	// A workspace at or below SmallContextTokens is not kept warm.
+	ContextTokens func(ws ids.WorkspaceID) int64
 	// Hold answers until when WS's resource allocation holds its idle shim
 	// up (sidebar.Resolver.ShimHold): every idle park waits on it, and the
 	// roster tells the keeper of each change (ShimHoldChanged).
@@ -408,6 +412,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the shim fleet")
 	case deps.ColdGate == nil:
 		return nil, errors.New("cachelapse: the keeper needs the standing cold gates")
+	case deps.ContextTokens == nil:
+		return nil, errors.New("cachelapse: the keeper needs the workspaces' context sizes")
 	case deps.Hold == nil:
 		return nil, errors.New("cachelapse: the keeper needs the shim holds")
 	case deps.StandDowns == nil:
