@@ -12,9 +12,11 @@
 // THE OWNERSHIP RULE, which the landing-target arms make structural: a branch
 // cut from the primary branch lands only on the primary branch, and a branch
 // cut from a workspace's branch lands only into that workspace. The one way
-// a named branch reaches a target other than its own is the async merge
-// (CreateWorkspaceAsyncMerge), whose source and target are its own; it takes
-// any branch, whichever workspace owns it.
+// other work reaches a target is a create cut from a SOURCE BRANCH
+// (WorkspaceSourceBranch): the new workspace's own branch is cut from that
+// branch's tip, and the new workspace lands it into its landing target like
+// any of its own work. Any existing branch may be a source, whichever
+// workspace owns it.
 
 syntax = "proto3";
 
@@ -74,6 +76,15 @@ message WorkspaceContextOrigin {
     // the requesting turn ends, and the fork then carries that turn
     // (CreateWorkspaceResponse.waiting_for_requester_turn).
     WorkspaceContextOriginFork fork = 2;
+    // A fork of a SUBAGENT's own conversation: the transcript the subagent
+    // wrote under its spawning workspace's session, as it stood when the
+    // subagent last finished. Chosen when the new workspace takes over a
+    // subagent's work, such as landing the branch it made, because that
+    // subagent holds the context the work was done in and its spawning
+    // workspace holds only the subagent's report. A subagent the daemon finds
+    // under no workspace's session of the create's repository is refused
+    // (`unknown_subagent`).
+    WorkspaceContextOriginSubagent subagent = 3;
   }
 }
 // A fresh conversation. No fields.
@@ -82,6 +93,33 @@ message WorkspaceContextOriginFresh {}
 message WorkspaceContextOriginFork {
   // The workspace to fork, as the roster served it.
   workspace.v1.WorkspaceRef workspace = 1;
+}
+// The subagent whose conversation is forked.
+message WorkspaceContextOriginSubagent {
+  // The vendor's id for the subagent, as its spawning session reported it
+  // ("a6e95de73147f1ce5"). Opaque. The daemon finds the spawning workspace
+  // by locating the subagent's transcript under that workspace's session, so
+  // the spawning workspace is a fact read from disk, never stated a second
+  // time. REQUIRED: blank is refused as invalid.
+  string agent_id = 1;
+}
+
+// ---- Source branch: other work a new workspace starts from ----
+
+// An existing branch a new workspace is cut from, in place of its landing
+// target's tip. THE NEW WORKSPACE'S OWN BRANCH IS A SNAPSHOT: it is cut at
+// the source branch's tip as the create runs, so what the workspace starts
+// from, and lands, is fixed then. Commits the source branch gains afterwards
+// are not the new workspace's, and the source branch is never moved, renamed
+// or deleted by the create. The new workspace lands into its landing target
+// (WorkspaceLandingTarget) as any workspace does.
+message WorkspaceSourceBranch {
+  // The branch, as git spells it in the create's repository: a workspace's
+  // branch, a subagent's, or one an agent cut by hand. Any existing branch is
+  // admitted, whichever workspace has it checked out. REQUIRED: blank is
+  // refused as invalid, and a branch that does not exist is refused
+  // (`unknown_source_branch`).
+  string branch = 1;
 }
 
 // ---- Relationship: how a new workspace stands to the work it was made for ----
