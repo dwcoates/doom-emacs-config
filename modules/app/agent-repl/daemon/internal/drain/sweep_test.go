@@ -2170,3 +2170,31 @@ func TestAParkObservesItsIdleTimeThoughItsCallerHasLeft(t *testing.T) {
 		}
 	}
 }
+
+// TestRunEndsWhenTheSweepAfterItsWaitFails pins the loop's exit on a failed
+// sweep: the cadence's wait elapses, the sweep cannot list the workspaces, and
+// Run returns that error with the read recorded once, at error, under the
+// sweep's operation.
+func TestRunEndsWhenTheSweepAfterItsWaitFails(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.DB = resumeFailingDB{DB: d.DB, list: errFake} })
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.Run(context.Background()) }()
+	waitForWait(t, h)
+	h.clock.Tick()
+	err := <-done
+
+	// Assert
+	if !errors.Is(err, errFake) {
+		t.Fatalf("Run err = %v, want the sweep's list failure %v", err, errFake)
+	}
+	var got []string
+	for _, rec := range records(h.log, opSweep) {
+		got = append(got, rec.Level+": "+rec.Message)
+	}
+	if want := "error: could not list the workspaces to sweep"; len(got) != 1 || got[0] != want {
+		t.Fatalf("sweep records = %v, want exactly [%s]", got, want)
+	}
+}
