@@ -667,6 +667,54 @@ func TestARegistryThatCannotBeReadEndsTheSweepAtError(t *testing.T) {
 	}
 }
 
+// TestAWorkspaceListThatCannotBeReadEndsTheSweep pins the registry's second
+// read: a failure ends the sweep at ERROR with the read's error returned, and
+// the same failure under a cancelled context is the daemon's exit, recorded at
+// INFO with the context's error returned; neither touches git.
+func TestAWorkspaceListThatCannotBeReadEndsTheSweep(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		wantErr   error
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "the read failed while serving", wantErr: errScripted, wantLevel: "error", wantMsg: "the workspaces could not be read; nothing is swept"},
+		{name: "the daemon's exit cancelled the read", cancelled: true, wantErr: context.Canceled, wantLevel: "info", wantMsg: "the sweep stopped with the daemon"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			w := newWorld(t)
+			w.addRepo("repo")
+			w.registry.workspacesErr = errScripted
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancelled {
+				cancel()
+			}
+
+			// Act.
+			report, err := w.reaper().Sweep(ctx)
+
+			// Assert.
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Sweep = %v, want %v", err, tt.wantErr)
+			}
+			var got []string
+			for _, r := range w.records("", opSweep) {
+				got = append(got, r.Level+": "+r.Message)
+			}
+			if want := tt.wantLevel + ": " + tt.wantMsg; len(got) != 1 || got[0] != want {
+				t.Fatalf("sweep records = %v, want exactly [%s]", got, want)
+			}
+			if len(report.Removed) != 0 || len(w.git.called()) != 0 {
+				t.Fatalf("Removed = %v, git calls %v, want nothing swept", report.Removed, w.git.called())
+			}
+		})
+	}
+}
+
 func TestAWorktreeWhoseActivityCannotBeReadIsKeptAtError(t *testing.T) {
 	// Arrange.
 	w := newWorld(t)
