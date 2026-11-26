@@ -42,7 +42,7 @@ export function isHandoverArm(arm: string): arm is HandoverArm {
  * the one workspace, so there `transferring_away` is its terminal "this
  * workspace moved" notice (rpc/moved.ts), never a quiet state.
  */
-export function standsAsHandover(arm: string, ctx: DaemonContext): arm is HandoverArm {
+export function standsAsHandover(arm: string, ctx: Pick<DaemonContext, "clientAt">): arm is HandoverArm {
   return arm === "notYetAdopted" || (arm === "transferringAway" && ctx.clientAt !== undefined);
 }
 

@@ -13,6 +13,18 @@ Its brief names this file, and it is the mediator's to write.
 
 ## Notes
 
+- Handover groups that are older than the three most recent deploys and
+  recover on their own: `daemon.server.await_streams_ended`, `go_away`,
+  `streams_unwritten`, `await_quiet` are the predecessor's exit-deadline
+  records (first 2026-11-18); `daemon.handover.quiesce`,
+  `daemon.rollout.transfer`, `daemon.promptqueue.bounce` with "lease already
+  held by merge" (first 2026-11-20) is a handover hold refused by a merge
+  lease, and the workspace is re-offered and taken up by the successor;
+  `daemon.logsites.pass` cut by `context canceled` at the predecessor's exit
+  is expected and is INFO since 2026-11-26. A reader's `ReportUserInteraction`
+  answered `notYetAdopted` mid-rendezvous is the handover's lifecycle state
+  and is INFO (`feed.interaction-handover`) since 2026-11-26; any other arm
+  of that call is still an ERROR refusal.
 - `daemon.sidebar.merge_queue`, "the deploy mediator is one the registry does
   not carry": ignorable when the user has removed the deploy mediator
   workspace. The daemon makes a new mediator at the next deploy. In any other

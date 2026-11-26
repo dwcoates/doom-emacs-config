@@ -5,7 +5,9 @@ import { create } from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  ReportUserInteractionNotYetAdoptedSchema,
   ReportUserInteractionResponseSchema,
+  ReportUserInteractionTransferringAwaySchema,
   type ReportUserInteractionRequest,
   type ReportUserInteractionResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_user_interaction_pb";
@@ -18,7 +20,7 @@ import { createLocalFailures } from "../../src/failure/local.js";
 import type { AgentReplClient } from "../../src/rpc/client.js";
 import { workspaceRef } from "../../src/rpc/workspace-ref.js";
 import { READER_INPUTS } from "../../src/scroll.js";
-import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords, type LogCapture } from "../log-capture.js";
 
 let sent: ReportUserInteractionRequest[];
 let answer: () => Promise<ReportUserInteractionResponse>;
@@ -154,6 +156,54 @@ describe("installFeedInteractionReport", () => {
     // Assert
     expect((await forwardedRecord(capture, "feed.interaction-refused")).level.case).toBe("error");
     expect(sent).toHaveLength(2);
+  });
+
+  it("records a not-yet-adopted handover arm at info, never as a refusal", async () => {
+    // Arrange
+    answer = async () =>
+      create(ReportUserInteractionResponseSchema, {
+        result: {
+          case: "error",
+          value: { cause: { case: "notYetAdopted", value: create(ReportUserInteractionNotYetAdoptedSchema, {}) } },
+        },
+      });
+
+    // Act
+    input("pointerdown");
+    await flush();
+
+    // Assert
+    const records = await forwardedRecords(capture);
+    const handover = records.filter((r) => r.operation === "feed.interaction-handover");
+    expect(handover).toHaveLength(1);
+    expect(handover[0]?.level.case).toBe("info");
+    expect(handover[0]?.context).toEqual(expect.objectContaining({ input: "pointerdown", arm: "notYetAdopted" }));
+    expect(records.filter((r) => r.operation === "feed.interaction-refused")).toEqual([]);
+  });
+
+  it("records a transferring-away arm on a workspace page at error, as that page's move notice", async () => {
+    // Arrange: the workspace page's context has no clientAt.
+    answer = async () =>
+      create(ReportUserInteractionResponseSchema, {
+        result: {
+          case: "error",
+          value: {
+            cause: {
+              case: "transferringAway",
+              value: create(ReportUserInteractionTransferringAwaySchema, { address: "127.0.0.1:9" }),
+            },
+          },
+        },
+      });
+
+    // Act
+    input();
+    await flush();
+
+    // Assert
+    const records = await forwardedRecords(capture);
+    expect(records.find((r) => r.operation === "feed.interaction-refused")?.level.case).toBe("error");
+    expect(records.filter((r) => r.operation === "feed.interaction-handover")).toEqual([]);
   });
 
   it("records a report a quiesced page could not send at info", async () => {
