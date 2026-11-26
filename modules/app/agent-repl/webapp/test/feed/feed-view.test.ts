@@ -687,6 +687,29 @@ describe("createFeedController: the newest separation bounds the feed", () => {
     expect(record.context).toMatchObject({ row: "cut" });
   });
 
+  it("keeps the rows paged back above a divider it holds when the divider is pushed again", () => {
+    // Arrange: an older row's key sorts above the cut, and the walk loaded it.
+    const older = responseRow("older");
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(separationRow("cut"));
+    controller.applyPage(page([older]), "prepend");
+    // Act: the daemon pushes the held divider again.
+    controller.upsert(separationRow("cut"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["older", "cut"]);
+  });
+
+  it("truncates when a held row is pushed again as a divider that bounds the feed", () => {
+    // Arrange: a held marker that cut nothing.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), separationRow("cut", "compactionFailed")]), "replace");
+    // Act
+    controller.upsert(separationRow("cut", "cleared"));
+    // Assert
+    expect(drawnIds(host)).toEqual(["cut"]);
+  });
+
   it("records the drop at INFO with the count it dropped", async () => {
     const capture = captureLogRecords();
     const { controller } = fixture();

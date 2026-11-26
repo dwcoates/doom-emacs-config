@@ -72,13 +72,12 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 	// prompt first arrives, so its sender learns it did not go (an agent's
 	// command prints the refusal). A prompt already waiting has no sender
 	// listening, so it waits out the gate whatever its origin.
-	if q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(sub.WS); gated {
-			if !sub.fromWait && !waitsOutColdGate(sub.Origin) {
-				return Disposition{}, q.refuseAtColdGate(ctx, sub.WS, opArrival, "the prompt", log)
-			}
-			return q.awaitArrival(ctx, sub, wsm.WaitColdGate, "the session is parked at its cold gate: "+detail, log)
+	detail, gate := q.coldGate(sub.WS)
+	if gate == GateStanding {
+		if !sub.fromWait && !waitsOutColdGate(sub.Origin) {
+			return Disposition{}, q.refuseAtColdGate(ctx, sub.WS, opArrival, "the prompt", log)
 		}
+		return q.awaitArrival(ctx, sub, wsm.WaitColdGate, "the session is parked at its cold gate: "+detail, log)
 	}
 	if q.isDraining(sub.WS) {
 		return q.awaitArrival(ctx, sub, wsm.WaitBounce, "the workspace is draining for a bounce", log)
@@ -100,6 +99,11 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 		if q.deps.Revive == nil {
 			log.Log(refusalLevel(ctx, dlog.LevelWarn), opArrival, logsite.Msg("the workspace has no session to deliver to"), nil)
 			return Disposition{}, noSession(causeNoRevival)
+		}
+		// AN ANSWERED COLD GATE IS ALREADY BRINGING THE SESSION UP, and its
+		// coming up is the edge this wait ends on. No revival starts beside it.
+		if gate == GateAnswering {
+			return q.awaitArrival(ctx, sub, wsm.WaitSession, "the cold gate's answer is bringing the session up", log)
 		}
 		disposition, err := q.awaitArrival(ctx, sub, wsm.WaitSession, "the workspace has no shim; its session is revived", log)
 		if err != nil {

@@ -43,9 +43,12 @@ import (
 // delivery now, the hold that names why, and the reason in words for the
 // record. waiting is false when the session serves.
 func (q *queue) sessionWait(ws ids.WorkspaceID) (kind wsm.HoldKind, why string, waiting bool) {
-	if q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(ws); gated {
-			return wsm.HoldColdGate, "the session is parked at its cold gate: " + detail, true
+	switch detail, gate := q.coldGate(ws); gate {
+	case GateStanding:
+		return wsm.HoldColdGate, "the session is parked at its cold gate: " + detail, true
+	case GateAnswering:
+		if !q.deps.SessionStarted(ws) {
+			return wsm.HoldReconnect, "the cold gate's answer is bringing the session up", true
 		}
 	}
 	if _, ok := q.deps.Client(ws); !ok {

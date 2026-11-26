@@ -162,11 +162,18 @@ func (r *resolver) retireOptimisticClear(s *wsState, turn ids.TurnID, why string
 // second delivery UPSERTS the first's row, which is what every other family
 // here already does.
 //
+// A COMPACTION FAILURE IS WARNED ONCE, at its live arrival: REPLAY is a
+// history page's redraw of an entry already recorded, and a live delivery of a
+// row already drawn is the other plane's copy of the same cut. Each of those
+// draws its marker and records it at DEBUG, so the shared log holds the
+// failure once rather than at every open of the feed (2026-11-25: a failure
+// of 2026-11-24 18:36 read as two fresh failures beside a revival).
+//
 // A DELIVERY WITH NO POINTER still draws, on the counter, and says so: a
 // producer that states no position is a fault to see rather than a row to
 // drop, and the duplicate it may leave is strictly better than a missing
 // divider.
-func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, pointer *conversationv1.HistoryPointer) {
+func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, pointer *conversationv1.HistoryPointer, replay bool) {
 	log := r.logger(s.id)
 	at, ok := r.place(s, agent)
 	if !ok {
@@ -189,6 +196,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 
 	var confirmedClearTurn ids.TurnID
 	var confirmsClear bool
+	var compactionFailed bool
 
 	separation := &frontendv1.FeedSessionSeparation{}
 	switch arm := cut.GetCut().(type) {
@@ -232,9 +240,7 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// account: the footer raises no line for it (owner ruling,
 		// 2026-10-06).
 		reason := arm.CompactionFailed.GetError()
-		log.Warn("daemon.feed.compaction_failed",
-			"a compaction failed and nothing was cut; the feed draws its outcome marker",
-			dlog.Context{"agent": agent.GetValue(), "error": reason})
+		compactionFailed = true
 		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: markerLabelCompactionFailed}
 		separation.Kind = &frontendv1.FeedSessionSeparation_CompactionFailed{
 			CompactionFailed: &frontendv1.FeedContextCutCompactionFailed{Error: reason, Marker: r.compactionFailedMarker(s, reason)},
@@ -250,6 +256,19 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		Kind: feedid.KindSeparation,
 		ID:   cutRowID,
 	})
+
+	if compactionFailed {
+		reason := cut.GetCompactionFailed().GetError()
+		if _, drawn := r.feed(s, at.feed).rows[id.GetValue()]; replay || drawn {
+			log.Debug("daemon.feed.compaction_failed",
+				"a compaction failure already recorded was drawn again as its outcome marker",
+				dlog.Context{"agent": agent.GetValue(), "error": reason, "replay": replay, "drawn": drawn})
+		} else {
+			log.Warn("daemon.feed.compaction_failed",
+				"a compaction failed and nothing was cut; the feed draws its outcome marker",
+				dlog.Context{"agent": agent.GetValue(), "error": reason})
+		}
+	}
 
 	log.Debug("daemon.feed.separation",
 		"a session separation divider was drawn",

@@ -781,10 +781,16 @@ export function createFeedController(
       operation: "feed.row-replaced",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     }, { id });
+    // A DIVIDER ALREADY HELD HAS ALREADY TRUNCATED: a re-push of it (a second
+    // delivery, a redraw on a moved opening) truncates nothing, so the rows a
+    // reader paged back to above it stay (2026-11-25 11:23:02: a re-pushed
+    // compaction divider dropped the 47 rows the walk had just loaded, and the
+    // view kept their scroll offset over an empty feed).
+    const boundedBefore = separationBoundsFeed(held.row);
     if (settlesPinned(held, row, key)) settle(held, id, key);
     else keepKey(held, id, key);
     updateHeld(held, row);
-    truncateAtSeparation(row, id);
+    if (!boundedBefore) truncateAtSeparation(row, id);
     announce();
   }
 

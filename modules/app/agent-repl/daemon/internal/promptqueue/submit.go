@@ -430,16 +430,22 @@ func holderName(h wsm.LeaseHolder) string {
 	}
 }
 
+// coldGate answers where WS's cold gate stands, and a standing gate's detail
+// (ColdGateFunc). With no ColdGate dep no workspace is ever read as gated.
+func (q *queue) coldGate(ws ids.WorkspaceID) (string, GateState) {
+	if q.deps.ColdGate == nil {
+		return "", GateNone
+	}
+	return q.deps.ColdGate(ws)
+}
+
 // refuseAtColdGate answers the refusal a standing cold gate gives WHAT (the
 // submission, the act) on WS, recorded under OP at INFO (DEBUG for a
 // re-drive), or nil when no gate stands. It is the one cold-gate refusal, so
 // every entry names the gate the same way.
 func (q *queue) refuseAtColdGate(ctx context.Context, ws ids.WorkspaceID, op, what string, log dlog.Logger) error {
-	if q.deps.ColdGate == nil {
-		return nil
-	}
-	detail, gated := q.deps.ColdGate(ws)
-	if !gated {
+	detail, gate := q.coldGate(ws)
+	if gate != GateStanding {
 		return nil
 	}
 	log.Log(refusalLevel(ctx, dlog.LevelInfo), op, logsite.Msg("the session is parked at its cold gate, so {what} is refused by the gate's own name"),
@@ -515,6 +521,14 @@ const (
 // spawning a second bring-up, and its own hold is released by the same sweep.
 func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) {
 	revivalChanged := logsite.Msg("the workspace revival state changed")
+	// AN ANSWERED COLD GATE OWNS THE BRING-UP (GateAnswering): its resume is
+	// bringing the session up, and that session coming up releases every
+	// reconnect hold. A revival beside it would find the answered gate, start
+	// nothing, and read the missing session as a revival that lied.
+	if _, gate := q.coldGate(ws); gate == GateAnswering {
+		log.Info(opSubmit, "a cold gate's answer is bringing the session up; no revival starts beside it", nil)
+		return
+	}
 	s := q.state(ws)
 	q.mu.Lock()
 	if s.reviving {
@@ -580,13 +594,20 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 		// client is the gate's state, never a revival that lied. Its prompts
 		// move under the gate's hold (sessionWait) exactly as a session's
 		// would under its own.
-		if q.deps.ColdGate != nil {
-			if _, gated := q.deps.ColdGate(ws); gated {
-				q.releaseReconnectHolds(ctx, ws, log)
-				return
-			}
+		_, gate := q.coldGate(ws)
+		if gate == GateStanding {
+			q.releaseReconnectHolds(ctx, ws, log)
+			return
 		}
 		if _, ok := q.deps.Client(ws); !ok {
+			// A COLD GATE ANSWERED WHILE THE REVIVAL RAN owns the bring-up: the
+			// fleet's start finds the answered gate and starts nothing beside
+			// it, and the answer's session coming up releases these holds
+			// (2026-11-25 11:20:56: read as a revival that lied).
+			if gate == GateAnswering {
+				log.Info(opSubmit, "a cold gate's answer took the bring-up while the revival ran; its session coming up delivers the held prompts", nil)
+				return
+			}
 			// A SESSION THAT CAME UP AND HAS SINCE DIED is not a revival that
 			// lied: its shim was reaped between the bring-up and this read, and
 			// the departure edge (decideDeparture) owns what follows -- a
@@ -966,11 +987,9 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCau
 	// succeeded and left a shim with no session, waiting on the user's answer;
 	// saying "revived" here is how the 2026-10-10 record came to read as a
 	// served session.
-	if q.deps.ColdGate != nil {
-		if detail, gated := q.deps.ColdGate(ws); gated {
-			log.Info(opSubmit, "the revival brought the shim up parked at its cold gate; the prompts wait for the gate's answer", dlog.Context{"detail": detail})
-			return true, nil
-		}
+	if detail, gate := q.coldGate(ws); gate == GateStanding {
+		log.Info(opSubmit, "the revival brought the shim up parked at its cold gate; the prompts wait for the gate's answer", dlog.Context{"detail": detail})
+		return true, nil
 	}
 	log.Info(opSubmit, "revived the workspace's session for the submission", nil)
 	return true, nil

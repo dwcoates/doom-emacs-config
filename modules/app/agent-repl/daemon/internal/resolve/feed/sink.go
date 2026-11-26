@@ -313,7 +313,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	s := r.state(ws)
 	defer s.placingEntry(place)()
 	defer s.drawingEntry(turn)()
-	r.drawContextCut(s, agent, cut, at)
+	r.drawContextCut(s, agent, cut, at, false)
 }
 
 // OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is

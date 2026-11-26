@@ -3390,6 +3390,27 @@ func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
 	return held.served.Detail, true
 }
 
+// ColdGateStage answers, in ONE read under the fleet's lock, where WS's cold
+// gate stands: STANDING with its detail while unanswered (as ColdGateDetail
+// answers it), or ANSWERING once an answer has taken it and its resume is
+// bringing the session up. Neither is no gate at all. The prompt queue reads
+// both in one step, so an answer cannot be taken between a read that finds no
+// standing gate and a read that finds no answer under way (2026-11-25 11:20:56:
+// a revival started beside a compact answer found neither a gate nor a session
+// and recorded a revival that lied).
+func (f *Fleet) ColdGateStage(ws ids.WorkspaceID) (detail string, standing, answering bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	held, ok := f.coldGates[ws]
+	if !ok {
+		return "", false, false
+	}
+	if held.answering {
+		return "", false, true
+	}
+	return held.served.Detail, true, false
+}
+
 // recordBook records the book the shim stated for WS
 // (shim.v1.StartSessionResponse.book): the store agent the workspace's
 // conversation is filed under, which its history is read from with no shim up

@@ -266,6 +266,43 @@ func TestAnArrivalToAWorkspaceWithNoShimRevivesItAndGoesWhenItComesUp(t *testing
 	noWaits(t, h)
 }
 
+// TestAnArrivalWhileAColdGateAnswerBringsTheSessionUpWaitsWithNoRevival pins
+// that an answered gate owns the bring-up: the arrival waits on the session
+// the answer brings up, starts no revival beside it, and goes when it comes up.
+func TestAnArrivalWhileAColdGateAnswerBringsTheSessionUpWaitsWithNoRevival(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.gateAnswering.Store(true)
+
+	// Act
+	got, err := h.q.Submit(context.Background(), notice("t1"))
+	h.waitRevivals()
+
+	// Assert
+	if err != nil || got.Waiting == nil || *got.Waiting != wsm.WaitSession {
+		t.Fatalf("Submit = (%+v, %v), want t1 waiting on the session", got, err)
+	}
+	if h.revivals != 0 {
+		t.Fatalf("revivals = %d, want none beside the gate's answer", h.revivals)
+	}
+	waitsUnder(t, h, "t1", wsm.WaitSession)
+	if waits := h.db.arrivalWaits(t); waits[0].Why != "the cold gate's answer is bringing the session up" {
+		t.Fatalf("wait why = %q, want the answer named", waits[0].Why)
+	}
+
+	// Act: the answer's session comes up.
+	h.gateAnswering.Store(false)
+	h.noSession = false
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if !started(h, "t1") {
+		t.Fatalf("started = %v, want t1 started once the answer's session serves", h.sender.started())
+	}
+	noWaits(t, h)
+}
+
 func TestAnArrivalToASessionNotStartedWaitsAndGoesWhenItComesUp(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
