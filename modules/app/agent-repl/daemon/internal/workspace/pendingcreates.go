@@ -171,13 +171,17 @@ func (t *CreateTicket) Spec() CreateSpec {
 // Joined reports whether the request joined a create already pending.
 func (t *CreateTicket) Joined() bool { return t.joined }
 
-// ID is the pending create the ticket names; empty for a merge workspace,
-// which is never pending (its name was reserved by its request).
-func (t *CreateTicket) ID() PendingCreateID {
+// ID is the pending create the ticket names.
+func (t *CreateTicket) ID() PendingCreateID { return t.entryOrPanic().id }
+
+// entryOrPanic is the pending create the ticket names. EVERY TICKET NAMES ONE
+// (EnterCreate, NewCreateTicket), so a ticket with none is a defect in
+// whoever minted it.
+func (t *CreateTicket) entryOrPanic() *pendingCreate {
 	if t.entry == nil {
-		return ""
+		panic("workspace: a create ticket names no pending create")
 	}
-	return t.entry.id
+	return t.entry
 }
 
 // pendingCreate is one create in the set.
@@ -253,14 +257,7 @@ func (v *verbs) EnterCreate(spec CreateSpec) *CreateTicket {
 // RunCreate runs the create TICKET names to its answer: the workspace, its
 // failure, or a *NetworkWaitError once it is held.
 func (v *verbs) RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Workspace, error) {
-	entry := ticket.entry
-	if entry == nil {
-		created, err := v.attemptCreate(ctx, ticket.spec)
-		if panicked := recordCreatePanic(v.deps.Log.Global().With(dlog.Context{"repo_dir": ticket.spec.RepoDir}), ticket.spec, err); panicked != nil {
-			panic(panicked.Value)
-		}
-		return created, err
-	}
+	entry := ticket.entryOrPanic()
 	log := v.deps.Log.Global().With(dlog.Context{"create_id": string(entry.id), "repo_dir": entry.spec.RepoDir})
 	if ticket.joined {
 		v.pending.mu.Lock()

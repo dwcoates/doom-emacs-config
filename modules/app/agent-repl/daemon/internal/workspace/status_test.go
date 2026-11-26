@@ -44,12 +44,6 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 		{name: "a child landing on the primary branch",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner},
 			want:   primary},
-		{name: "a merge workspace landing in its maker",
-			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, LandsInto: &maker, MergeOf: &wsm.MergeOrigin{Requester: owner}},
-			want:   into(maker, "/wt/maker")},
-		{name: "a merge workspace landing on the primary branch",
-			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, MergeOf: &wsm.MergeOrigin{Requester: owner}},
-			want:   primary},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,16 +246,12 @@ func TestStatusAnswersAClosedOrBackloggedWorkspace(t *testing.T) {
 }
 
 func TestStatusBackloggedAgreesWithWhatTheSidebarDraws(t *testing.T) {
-	merge := &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
 	tests := []struct {
 		name   string
 		record wsm.Workspace
 	}{
 		{name: "a shown workspace", record: wsm.Workspace{ID: "ws-1"}},
 		{name: "a backlogged workspace", record: wsm.Workspace{ID: "ws-1", Backlogged: true}},
-		{name: "a merge workspace its merge withholds", record: wsm.Workspace{ID: "ws-1", MergeOf: merge}},
-		{name: "a revealed merge workspace", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true}},
-		{name: "a revealed merge workspace the user hid", record: wsm.Workspace{ID: "ws-1", MergeOf: merge, MergeRevealed: true, Backlogged: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -283,28 +273,6 @@ func TestStatusBackloggedAgreesWithWhatTheSidebarDraws(t *testing.T) {
 				t.Errorf("Status backlogged = %v while the sidebar lists it open = %v", got.GetBacklogged(), tt.record.ListedOpen())
 			}
 		})
-	}
-}
-
-func TestStatusAfterAShowOfAHiddenMergeWorkspaceIsNotHidden(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	hiddenMergeWorkspace(t, f, "ws-merge", true)
-	f.db.jobs["ws-merge"] = wsm.CreationJob{Workspace: "ws-merge"}
-	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-merge": footerIdle()}
-
-	// Act
-	if err := f.verbs.SetBacklogged(context.Background(), "ws-merge", false); err != nil {
-		t.Fatalf("SetBacklogged: %v", err)
-	}
-	got, err := f.verbs.Status(context.Background(), "ws-merge")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if got.GetBacklogged() || !drawnOpen(t, f, "ws-merge") {
-		t.Fatalf("Status backlogged = %v, drawn open = %v; want shown in both", got.GetBacklogged(), drawnOpen(t, f, "ws-merge"))
 	}
 }
 
@@ -407,9 +375,6 @@ func TestStatusFails(t *testing.T) {
 			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1"}
 			f.db.summaryErr = errors.New("db gone")
 		}, message: "could not read the summary of the workspace whose status was asked"},
-		{name: "a merge workspace with no creation job", arrange: func(f *fixture) {
-			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", MergeOf: &wsm.MergeOrigin{Requester: "ws-0"}}
-		}, message: "a merge workspace has no creation job to say where it lands"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

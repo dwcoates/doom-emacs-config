@@ -457,7 +457,7 @@ func pathPresent(path string) (bool, error) {
 func (v *verbs) nameTaken(ctx context.Context, log dlog.Logger, name string, holder nameHolder) error {
 	if holder.Workspace == "" {
 		return refuseWith(log, rpcSetName, ArmNameTaken,
-			fmt.Sprintf("the name %q is reserved by a pending async merge or claimed by a create in flight", name), false,
+			fmt.Sprintf("the name %q is claimed by a create in flight", name), false,
 			map[string]any{"name": name, "holder": refusalarm.Nested("pending")})
 	}
 	ref := &workspacev1.WorkspaceRef{Id: string(holder.Workspace)}

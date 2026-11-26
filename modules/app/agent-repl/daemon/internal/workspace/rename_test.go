@@ -287,14 +287,11 @@ func TestSetNameRefusesANameAlreadyHeld(t *testing.T) {
 		{name: "a closed workspace's name", holder: "w2", arrange: func(t *testing.T, f *fixture) {
 			f.db.with(wsm.Workspace{ID: "w2", Name: "better-name", Branch: "better-name", Dir: t.TempDir(), Repo: "repo-1", Closed: true})
 		}},
-		{name: "a pending async merge's reservation", arrange: func(_ *testing.T, f *fixture) {
-			f.db.reserved = map[string]ids.WorkspaceID{"better-name": "w9"}
-		}},
-		{name: "a create's claim in flight", arrange: func(_ *testing.T, f *fixture) {
-			_, release, taken, err := f.verbs.ClaimMergeName(context.Background(), claimRepo(t, f), "better-name")
-			if err != nil || taken {
-				t.Fatalf("ClaimMergeName = %v, %v; want the name claimed", taken, err)
-			}
+		{name: "a create's claim in flight", arrange: func(t *testing.T, f *fixture) {
+			v := f.mutable(t)
+			v.names.mu.Lock()
+			release := v.claimLocked(MergeBranch("better-name"))
+			v.names.mu.Unlock()
 			t.Cleanup(release)
 		}},
 	}
@@ -354,10 +351,6 @@ func TestSetNameFailsLoudly(t *testing.T) {
 		{name: "when the store will not write", message: "could not record the workspace's new name", arrange: func(f *fixture) error {
 			f.db.setNameErr = errors.New("disk full")
 			return f.db.setNameErr
-		}},
-		{name: "when the names taken cannot be read", message: "could not read the names already taken; the workspace is not renamed", arrange: func(f *fixture) error {
-			f.db.reservedErr = errors.New("store closed")
-			return f.db.reservedErr
 		}},
 	}
 	for _, tt := range tests {
@@ -571,16 +564,8 @@ func TestSetNameRefusesAMoveItCannotMake(t *testing.T) {
 		{name: "a merge in a queue lands its branch", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
 			f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"r": {{Workspace: "m1", Source: wsm.MergeSource{Branch: "ABC/sample"}}}}
 		}},
-		{name: "it is a merge's own workspace", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
-			ws := f.db.workspaces["w1"]
-			ws.MergeOf = &wsm.MergeOrigin{}
-			f.db.workspaces["w1"] = ws
-		}},
 		{name: "a merge holds its lease", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
 			f.db.lease = &wsm.Lease{Holder: wsm.HolderMerge}
-		}},
-		{name: "an async merge waits on its branch", arm: ArmMerging, arrange: func(_ *testing.T, f *fixture) {
-			f.db.asyncRequests = []wsm.AsyncMergeRequest{{Source: wsm.MergeSource{Branch: "ABC/sample"}}}
 		}},
 		{name: "its branch tracks a remote one", arm: ArmBranchPublished, field: "upstream", arrange: func(_ *testing.T, f *fixture) {
 			f.git.existingBranches = map[string]bool{"ABC/sample": true}

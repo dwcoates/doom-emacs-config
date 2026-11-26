@@ -139,9 +139,8 @@ const (
 	// ArmNamingFailed is a creation that supplied no name and whose headless
 	// naming call could not mint one.
 	ArmNamingFailed = "naming_failed"
-	// ArmNameReserved refuses a supplied name a pending async merge reserved,
-	// or one another allocation is claiming (CreateWorkspaceError
-	// .name_reserved). Its `branch` field names the branch.
+	// ArmNameReserved refuses a supplied name another allocation is claiming
+	// (CreateWorkspaceError.name_reserved). Its `branch` field names the branch.
 	ArmNameReserved = "name_reserved"
 	// ArmNameHeld refuses a supplied create name a registered workspace that
 	// has not landed already holds (agentrepl.v1.CreateWorkspaceError

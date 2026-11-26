@@ -1753,24 +1753,6 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 	}
 }
 
-func TestCreateRefusesABaseOutsideAMergeWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := standardSpec(t, f)
-	spec.BaseRef = "some-branch"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "only a merge workspace is cut from a named base") {
-		t.Fatalf("Create = %v, want the invariant's failure", err)
-	}
-	if !loggedAtError(f, opCreate) || len(f.git.created) != 0 {
-		t.Fatalf("records %+v, worktrees %v: want the failure logged at error and nothing built", f.log.logger.Records(), f.git.created)
-	}
-}
-
 func TestCreateWithAnUnresolvableSourceTipFailsBeforeBuilding(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -3121,7 +3103,6 @@ func TestCreateAsksToGatherOnlyWithEnoughUnsectionedWorkspaces(t *testing.T) {
 		{name: "a closed one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Closed = true }}, want: false},
 		{name: "a sectioned one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Subsection = &sub }}, want: false},
 		{name: "a child does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Parent = &parent }}, want: false},
-		{name: "a merge workspace does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.MergeOf = &wsm.MergeOrigin{} }}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
