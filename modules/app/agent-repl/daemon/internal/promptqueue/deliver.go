@@ -293,7 +293,6 @@ var mergeStartedOrigins = map[string]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR.String():     true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION.String():   true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION.String():    true,
-	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK.String():            true,
 }
 
 // startedByMerge reports whether a recorded origin is one the merge
