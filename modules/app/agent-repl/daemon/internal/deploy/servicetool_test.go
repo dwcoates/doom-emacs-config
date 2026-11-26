@@ -140,6 +140,11 @@ func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 		{name: "a holder ensure's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
 			argv: workEnv + " /m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{out: "install: bootstrap failed", code: 1},
 			wantErr: "requirements.sh ensure-holder socket-holder-store exited 1: install: bootstrap failed"},
+		{name: "a service ensure's zero exit brings the service up", run: func(r ScriptRequirements) error { return r.EnsureService(context.Background(), WifiLabel) },
+			argv: workEnv + " /m/bin/requirements.sh ensure-service com.agentrepl.persistent-wifi", answer: runAnswer{code: 0}},
+		{name: "a service ensure's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.EnsureService(context.Background(), WifiLabel) },
+			argv: workEnv + " /m/bin/requirements.sh ensure-service com.agentrepl.persistent-wifi", answer: runAnswer{out: "ensure-service: service-persistent-wifi: building persistent-wifi failed", code: 1},
+			wantErr: "requirements.sh ensure-service com.agentrepl.persistent-wifi exited 1: ensure-service: service-persistent-wifi: building persistent-wifi failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

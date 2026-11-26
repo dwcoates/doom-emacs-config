@@ -291,6 +291,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Restarts:        p.Restarts,
 		ResourceWindows: p.Windows,
 		Define:          requirements.Define,
+		EnsureService:   requirements.EnsureService,
 		EnsureHolder:    ensurer.EnsureID,
 		HolderServing:   ensurer.ServingID,
 		StoreHolder:     storeHolder,

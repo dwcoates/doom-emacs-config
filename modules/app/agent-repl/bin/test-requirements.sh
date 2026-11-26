@@ -1565,6 +1565,107 @@ test_ensure_holder_needs_an_id() {
   else fail "ensure-holder no id" "rc=$RC" "$OUT"; fi
 }
 
+# ensure-service is the daemon's boot step for a service added since this
+# machine's install: its program built when absent, its definition written, and
+# the service loaded when the service manager does not hold it.
+test_ensure_service_builds_a_missing_binary_writes_the_definition_and_loads() {
+  service_case
+  run ensure-service com.example.svc
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist"
+  if [ "$RC" -eq 0 ] && ran "build svc" && [ -x "$CASE/home/.cache/agent-repl/bin/svc" ] && [ -f "$plist" ] \
+     && ran "launchctl bootstrap gui/$(id -u) $plist" && ! ran "launchctl bootout" \
+     && has "ensure-service: built svc into $CASE/home/.cache/agent-repl/bin/svc" \
+     && has "ensure-service: wrote $plist" && has "ensure-service: com.example.svc is loaded"; then
+    pass "ensure-service builds a missing binary, writes the rendered plist and loads the service"
+  else fail "ensure-service missing binary" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_with_its_binary_present_builds_nothing_and_leaves_a_loaded_service() {
+  service_case
+  run ensure-service com.example.svc
+  : >"$CASE/transcript"
+  run ensure-service com.example.svc
+  if [ "$RC" -eq 0 ] && ! ran "build" && ! ran "launchctl bootout" && ! ran "launchctl bootstrap" \
+     && has "ensure-service: $CASE/home/.cache/agent-repl/bin/svc is installed; nothing was built" \
+     && has "ensure-service: com.example.svc is already loaded; nothing was reloaded"; then
+    pass "ensure-service with its binary installed builds nothing and leaves a loaded service as it is"
+  else fail "ensure-service binary present" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_with_its_binary_present_loads_an_unloaded_service() {
+  service_case
+  mkdir -p "$CASE/home/.cache/agent-repl/bin"
+  printf '#!/bin/sh\n' >"$CASE/home/.cache/agent-repl/bin/svc"
+  chmod +x "$CASE/home/.cache/agent-repl/bin/svc"
+  run ensure-service com.example.svc
+  if [ "$RC" -eq 0 ] && ! ran "build" && ran "launchctl bootstrap gui/$(id -u)" \
+     && has "ensure-service: com.example.svc is loaded"; then
+    pass "ensure-service with its binary installed builds nothing and loads the unloaded service"
+  else fail "ensure-service binary present, unloaded" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_fails_when_its_build_fails() {
+  service_case
+  write_stub build 'exit 1'
+  run ensure-service com.example.svc
+  if [ "$RC" -eq 1 ] && has "ensure-service: svc: building svc failed" && ! ran "launchctl" \
+     && [ ! -e "$CASE/home/Library/LaunchAgents/com.example.svc.plist" ]; then
+    pass "ensure-service whose build fails says so, and writes and loads nothing"
+  else fail "ensure-service build failure" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_builds_nothing_for_a_command_service() {
+  command_service_case
+  tool svcd ""
+  run ensure-service com.example.svcd
+  if [ "$RC" -eq 0 ] && ! ran "build" && ran "launchctl bootstrap gui/$(id -u)" \
+     && has "ensure-service: com.example.svcd runs svcd, which is on PATH; nothing was built"; then
+    pass "ensure-service builds nothing for a command service and loads it"
+  else fail "ensure-service command service" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_refuses_a_command_service_whose_command_is_missing() {
+  command_service_case
+  run ensure-service com.example.svcd
+  if [ "$RC" -eq 1 ] && has "ensure-service: svcd: svcd is not on PATH; install it first" && ! ran "launchctl"; then
+    pass "ensure-service refuses a command service whose command is not on PATH, and loads nothing"
+  else fail "ensure-service command missing" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_refuses_an_unknown_label() {
+  service_case
+  run ensure-service com.example.nothing
+  if [ "$RC" -eq 1 ] && has "ensure-service: no service entry on darwin is labelled com.example.nothing" \
+     && ! ran "build" && ! ran "launchctl"; then
+    pass "ensure-service refuses a label no service entry carries, and builds and loads nothing"
+  else fail "ensure-service unknown label" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_service_needs_a_label() {
+  service_case
+  run ensure-service
+  if [ "$RC" -eq 2 ] && has "ensure-service needs a service label"; then
+    pass "ensure-service without a label is a usage error"
+  else fail "ensure-service without a label" "rc=$RC" "$OUT"; fi
+}
+
+test_ensure_service_from_a_linked_worktree_never_touches_a_service() {
+  service_case
+  # git answers the case's module as a linked worktree of another checkout.
+  write_stub git '
+if [ "$3" = worktree ] && [ "$4" = list ]; then
+  printf "worktree /main/checkout\nHEAD 0\nbranch refs/heads/master\n\nworktree %s\nHEAD 0\nbranch refs/heads/feature\n" "${STUB_DIR%/stubs}/module"
+  exit 0
+fi
+echo "stub git: unexpected git $*" >&2
+exit 1'
+  run ensure-service com.example.svc
+  if [ "$RC" -eq 1 ] && has "ensure-service: svc: not installed from the linked worktree" && has "main checkout (/main/checkout) only" \
+     && ! ran "build svc" && ! ran "launchctl"; then
+    pass "ensure-service from a linked worktree builds, renders and loads no service"
+  else fail "ensure-service from a linked worktree" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
 # define-service writes the definition install renders, from the same entry,
 # and neither builds nor loads: the daemon's deploy starts the service itself.
 test_define_service_writes_the_rendered_plist_without_building_or_loading() {

@@ -174,11 +174,18 @@ type Restarter struct {
 	// production one.
 	ResourceWindows restarttiming.Windows
 	// Define writes label's definition from its requirements entry, where
-	// Services.Definition finds it: a service added since this machine's
-	// install has none, and a deploy that ships it must bring it up.
-	// REQUIRED; ScriptRequirements.Define is the production one
-	// (bin/requirements.sh define-service).
+	// Services.Definition finds it, so a restart runs the definition its
+	// requirements render now (redefine). REQUIRED; ScriptRequirements.Define
+	// is the production one (bin/requirements.sh define-service).
 	Define func(ctx context.Context, label string) error
+	// EnsureService builds and installs label's program when it is not
+	// installed, writes its definition from its requirements entry, and
+	// starts it when the service manager does not hold it, leaving a held one
+	// running: a service added since this machine's install is built and
+	// installed before it is started, never started on a program that is not
+	// there. REQUIRED; ScriptRequirements.EnsureService is the production one
+	// (bin/requirements.sh ensure-service).
+	EnsureService func(ctx context.Context, label string) error
 	// EnsureHolder proves the socket holder ID serves, installing it when
 	// none does (holderensure.Ensurer.EnsureID). The store takes its sockets
 	// from StoreHolder, so the holder is ensured before the store starts or
@@ -428,11 +435,15 @@ func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 	if err := r.ensureStandaloneHolder(ctx, s, fields); err != nil {
 		return err
 	}
+	if err := r.ensureStandaloneInstalled(ctx, s, fields); err != nil {
+		return err
+	}
 	// A SERVICE THE MANAGER DOES NOT HOLD CANNOT BE KICKSTARTED (2026-11-16:
 	// the test service's first deploy failed with launchctl exit 113 and
-	// rolled the whole deploy back). It is loaded from its definition, written
-	// when missing (ensureLoaded), and a service just started from the
-	// installed build needs no restart.
+	// rolled the whole deploy back). It is loaded from its definition, or
+	// built, installed and loaded from its requirements entry when that is
+	// missing (ensureLoaded), and a service just started from the installed
+	// build needs no restart.
 	bootstrapped, err := r.ensureLoaded(ctx, s.Label, fields)
 	if err != nil {
 		return err
@@ -459,10 +470,14 @@ func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 // shim writes into it -- so the boot runs it beside the bring-ups, never
 // before a shim starts.
 func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) error {
-	if err := r.ensureStandaloneHolder(ctx, s, dlog.Context{s.Short: s.Label}); err != nil {
+	fields := dlog.Context{s.Short: s.Label}
+	if err := r.ensureStandaloneHolder(ctx, s, fields); err != nil {
 		return err
 	}
-	bootstrapped, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
+	if err := r.ensureStandaloneInstalled(ctx, s, fields); err != nil {
+		return err
+	}
+	bootstrapped, err := r.ensureLoaded(ctx, s.Label, fields)
 	if err != nil {
 		return err
 	}
@@ -482,11 +497,40 @@ func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) e
 // service S, and touches nothing that runs: a joining successor's step,
 // which must not restart a service the incumbent is still serving through.
 func (r *Restarter) EnsureStandaloneLoaded(ctx context.Context, s Standalone) error {
-	if err := r.ensureStandaloneHolder(ctx, s, dlog.Context{s.Short: s.Label}); err != nil {
+	fields := dlog.Context{s.Short: s.Label}
+	if err := r.ensureStandaloneHolder(ctx, s, fields); err != nil {
 		return err
 	}
-	_, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
+	if err := r.ensureStandaloneInstalled(ctx, s, fields); err != nil {
+		return err
+	}
+	_, err := r.ensureLoaded(ctx, s.Label, fields)
 	return err
+}
+
+// ensureStandaloneInstalled builds and installs standalone service S from its
+// requirements entry when its binary is not installed in CacheBin
+// (EnsureService), so nothing loads, starts or judges a service whose program
+// is not there: a definition written with no binary beside it (2026-11-26,
+// the persistent-wifi service) had launchd respawn it at exit 127 every 10s.
+// Its holder is ensured first (ensureStandaloneHolder).
+func (r *Restarter) ensureStandaloneInstalled(ctx context.Context, s Standalone, fields dlog.Context) error {
+	installed := filepath.Join(r.CacheBin, s.Service)
+	fields = dlog.Merge(fields, dlog.Context{"label": s.Label, "service": s.Service, "installed": installed})
+	_, err := os.Stat(installed)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		r.Log.Error(opServices, "the service's installed binary cannot be read", dlog.WithCause(fields, err))
+		return fmt.Errorf("deploy: read the installed %s %s: %w", s.Service, installed, err)
+	}
+	r.Log.Info(opServices, "the service's binary is not installed; it is built and installed from its requirements entry", fields)
+	if err := r.EnsureService(ctx, s.Label); err != nil {
+		r.failed(logsite.Msg("a service whose binary is not installed could not be built and installed from its requirements entry"), fields, err)
+		return fmt.Errorf("deploy: build and install %s from its requirements entry: %w", s.Label, err)
+	}
+	return nil
 }
 
 // ensureStandaloneHolder ensures the socket holder of standalone service S,
@@ -670,8 +714,9 @@ func (r *Restarter) runningStale(ctx context.Context, bootstrapped bool, compone
 }
 
 // ensureLoaded starts label from its installed definition when the service
-// manager does not hold it,
-// and reports whether it did.
+// manager does not hold it, and reports whether it did. A service with no
+// definition is built, installed and started from its requirements entry
+// (EnsureService).
 func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.Context) (bool, error) {
 	definition := r.Services.Definition(label)
 	fields = dlog.Merge(fields, dlog.Context{"label": label, "definition": definition})
@@ -683,28 +728,34 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	if loaded {
 		return false, nil
 	}
-	if _, err := os.Stat(definition); errors.Is(err, os.ErrNotExist) {
-		// A SERVICE ADDED SINCE THIS MACHINE'S INSTALL (2026-11-16: the test
-		// service shipped, and no deploy could start it, so no merge gate
-		// ran): its definition is written from its requirements entry, by
-		// the same renderer install uses, before it is started.
-		r.Log.Info(opServices, "a service is not loaded and has no definition; writing it from its requirements entry", fields)
-		if err := r.Define(ctx, label); err != nil {
-			r.failed(logsite.Msg("a service's definition could not be written from its requirements entry"), fields, err)
-			return false, fmt.Errorf("deploy: write the definition of %s: %w", label, err)
-		}
-		if _, err := os.Stat(definition); err != nil {
-			r.Log.Error(opServices, "a service's definition is still missing after it was written", dlog.WithCause(fields, err))
-			return false, fmt.Errorf("deploy: %s was written but %s is still unreadable: %w", label, definition, err)
-		}
-	} else if err != nil {
-		r.Log.Error(opServices, "a service is not loaded and its definition cannot be read", dlog.WithCause(fields, err))
-		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot be read: %w", label, definition, err)
+	_, statErr := os.Stat(definition)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		r.Log.Error(opServices, "a service is not loaded and its definition cannot be read", dlog.WithCause(fields, statErr))
+		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot be read: %w", label, definition, statErr)
 	}
 	if label == StoreLabel {
 		if err := r.ensureStoreHolder(ctx, fields); err != nil {
 			return false, err
 		}
+	}
+	if errors.Is(statErr, os.ErrNotExist) {
+		// A SERVICE ADDED SINCE THIS MACHINE'S INSTALL (2026-11-16: the test
+		// service shipped, and no deploy could start it, so no merge gate
+		// ran): it is brought up from its requirements entry, by the same
+		// renderer install uses. AND ITS PROGRAM IS BUILT AND INSTALLED FIRST
+		// (2026-11-26: the persistent-wifi service's first deploy was run by
+		// a daemon that predated it, so no binary was installed, and the
+		// definition alone had launchd respawn it at exit 127 every 10s).
+		r.Log.Info(opServices, "a service is not loaded and has no definition; it is built, installed and loaded from its requirements entry", fields)
+		if err := r.EnsureService(ctx, label); err != nil {
+			r.failed(logsite.Msg("a service could not be built, installed and loaded from its requirements entry"), fields, err)
+			return false, fmt.Errorf("deploy: bring up %s from its requirements entry: %w", label, err)
+		}
+		if _, err := os.Stat(definition); err != nil {
+			r.Log.Error(opServices, "a service's definition is still missing after it was written", dlog.WithCause(fields, err))
+			return false, fmt.Errorf("deploy: %s was written but %s is still unreadable: %w", label, definition, err)
+		}
+		return true, nil
 	}
 	r.Log.Info(opServices, "a service was not loaded; starting it", fields)
 	if err := r.Services.Start(ctx, label); err != nil {

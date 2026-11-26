@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -312,5 +313,62 @@ func TestFakeAudioOutputIsADeviceTheDaemonReads(t *testing.T) {
 	}
 	if device.Transport != audiooutput.TransportBuiltIn || device.DataSource != audiooutput.DataSourceInternalSpeakers {
 		t.Fatalf("FakeAudioOutput = %+v, want the built-in speakers", device)
+	}
+}
+
+func TestFakeRequirementsScriptAnswersEachVerbADeployRuns(t *testing.T) {
+	const label = "com.example.svc"
+	cases := []struct {
+		name       string
+		verb       string
+		standing   string
+		wantCode   int
+		wantExists bool
+		wantBody   string
+	}{
+		{name: "define-service writes a missing definition", verb: "define-service", wantExists: true},
+		{name: "ensure-service writes a missing definition", verb: "ensure-service", wantExists: true},
+		{name: "ensure-service never changes a definition that stands", verb: "ensure-service", standing: "<plist>standing</plist>", wantExists: true, wantBody: "<plist>standing</plist>"},
+		{name: "ensure-holder writes nothing", verb: "ensure-holder"},
+		{name: "an unknown verb is refused", verb: "install", wantCode: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			services := filepath.Join(dir, "services")
+			script := NewFakeRequirementsScript(t, filepath.Join(dir, "bin"))
+			definition := filepath.Join(services, label+".plist")
+			if runtime.GOOS == "linux" {
+				definition = filepath.Join(services, label+".service")
+			}
+			if tc.standing != "" {
+				writeFile(t, definition, tc.standing)
+			}
+			cmd := exec.Command(script, tc.verb, label)
+			cmd.Env = append(os.Environ(), "AGENT_REPL_LAUNCH_AGENTS_DIR="+services, "AGENT_REPL_SYSTEMD_USER_DIR="+services)
+
+			// Act
+			out, err := cmd.CombinedOutput()
+
+			// Assert
+			code := 0
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				code = exit.ExitCode()
+			} else if err != nil {
+				t.Fatalf("run the fake requirements script: %v", err)
+			}
+			if code != tc.wantCode {
+				t.Fatalf("%s exited %d (%s), want %d", tc.verb, code, out, tc.wantCode)
+			}
+			body, err := os.ReadFile(definition)
+			if exists := err == nil; exists != tc.wantExists {
+				t.Fatalf("definition exists = %v (%v), want %v", exists, err, tc.wantExists)
+			}
+			if tc.wantExists && string(body) != tc.wantBody {
+				t.Fatalf("definition = %q, want %q", body, tc.wantBody)
+			}
+		})
 	}
 }

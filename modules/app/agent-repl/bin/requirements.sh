@@ -11,6 +11,7 @@
 #   requirements.sh purge-legacy-hooks
 #   requirements.sh define-service LABEL
 #   requirements.sh ensure-holder ID
+#   requirements.sh ensure-service LABEL
 #
 # THE MANIFESTS ARE THE ONE RECORD. `requirements.json` at the module root
 # names agent-repl's own requirements and `includes` each system's manifest
@@ -153,7 +154,7 @@ say() { printf '[requirements] %s\n' "$*"; }
 err() { printf '[requirements] ERROR: %s\n' "$*" >&2; }
 
 usage() {
-  sed -n '5,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '5,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die_usage() {
@@ -1709,8 +1710,8 @@ install_git_hook() {
 
 # write_service_definition ENTRY: the directories the service runs in, the
 # files the entry ships beside its program, and its rendered definition, which
-# the service manager loads next. install's step, and the daemon's when a
-# deploy finds a service unloaded with no definition (define-service).
+# the service manager loads next. install's step, and the daemon's
+# (define-service, ensure-service).
 write_service_definition() {
   local e="$1" dest from to
   dest="$(service_definition "$e")"
@@ -1726,9 +1727,10 @@ write_service_definition() {
 }
 
 # cmd_define_service LABEL: write the definition of the service LABEL names,
-# from its entry, without building or loading anything. The daemon's deploy
-# runs it when the service manager holds no LABEL and no definition exists (a
-# service added since this machine's install), then starts the service from it.
+# from its entry, without building or loading anything. The daemon's restart
+# of a service runs it, so the service restarts on the definition its entry
+# renders now (a service added since this machine's install is brought up by
+# ensure-service instead, which also builds its program).
 cmd_define_service() {
   local label="$1" e
   e="$(printf '%s\n' "$ENTRIES" | jq -c --arg l "$label" --arg p "$(platform)" '
@@ -1763,6 +1765,53 @@ cmd_ensure_holder() {
   fi
   install_socket_holder "$e" || return 1
   say "ensure-holder: $(field "$e" .label) is loaded"
+}
+
+# cmd_ensure_service LABEL: bring up the service LABEL names from its entry,
+# the daemon's step when its boot finds the service unloaded with no
+# definition, or its installed binary absent (a service added since this
+# machine's install, whose first deploy a daemon that predated it ran: the
+# persistent-wifi service on 2026-11-26, which launchd then respawned at exit
+# 127 every 10s). Its program is built when it is not installed, its
+# definition is written, and it is loaded when the service manager does not
+# hold it. A held service is never reloaded here: the caller decides restarts.
+cmd_ensure_service() {
+  local label="$1" e binary
+  e="$(printf '%s\n' "$ENTRIES" | jq -c --arg l "$label" --arg p "$(platform)" '
+    select(.kind == "service" and .label == $l)
+    | select((.platforms == null) or (.platforms | index($p)))')"
+  if [ -z "$e" ]; then
+    err "ensure-service: no service entry on $(platform) is labelled $label"; return 1
+  fi
+  # THE SERVICES ARE EVERY WORKSPACE'S: built and installed from the main
+  # checkout only, as install_service is.
+  if in_linked_worktree "$MODULE_DIR"; then
+    err "ensure-service: $(field "$e" .id): not installed from the linked worktree $MODULE_DIR; the services every workspace shares are installed from the main checkout ($(module_main_worktree)) only"
+    return 1
+  fi
+  if [ -n "$(field "$e" .command)" ]; then
+    if ! find_program "$(field "$e" .command)" >/dev/null; then
+      err "ensure-service: $(field "$e" .id): $(field "$e" .command) is not on PATH; install it first"; return 1
+    fi
+    say "ensure-service: $label runs $(field "$e" .command), which is on PATH; nothing was built"
+  else
+    binary="$CACHE_ROOT/bin/$(field "$e" .binary)"
+    if [ -e "$binary" ]; then
+      say "ensure-service: $binary is installed; nothing was built"
+    else
+      mkdir -p "$CACHE_ROOT/bin"
+      "$BUILD_FRONTEND" "$(field "$e" .build_target)" || { err "ensure-service: $(field "$e" .id): building $(field "$e" .build_target) failed"; return 1; }
+      say "ensure-service: built $(field "$e" .build_target) into $binary"
+    fi
+  fi
+  write_service_definition "$e"
+  say "ensure-service: wrote $(service_definition "$e")"
+  if service_held "$label"; then
+    say "ensure-service: $label is already loaded; nothing was reloaded"
+    return 0
+  fi
+  service_load "$label" || { err "ensure-service: $(field "$e" .id): $SERVICE_FAILED_STEP failed"; return 1; }
+  say "ensure-service: $label is loaded"
 }
 
 # retire_services ENTRY: boot out and delete the definition of every service
@@ -2128,6 +2177,11 @@ main() {
     label="$1"
     shift
   fi
+  if [ "$verb" = ensure-service ]; then
+    [ "$#" -ge 1 ] || die_usage "ensure-service needs a service label"
+    label="$1"
+    shift
+  fi
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --profile)
@@ -2140,7 +2194,7 @@ main() {
     esac
   done
   case "$verb" in
-    check|install|uninstall|list|define-service|ensure-holder) resolve_package_manager ;;
+    check|install|uninstall|list|define-service|ensure-holder|ensure-service) resolve_package_manager ;;
   esac
   case "$verb" in
     check) load_manifests; prepare_entries; cmd_check ;;
@@ -2149,6 +2203,7 @@ main() {
     list) load_manifests; cmd_list ;;
     define-service) load_manifests; prepare_entries; cmd_define_service "$label" ;;
     ensure-holder) load_manifests; prepare_entries; cmd_ensure_holder "$label" ;;
+    ensure-service) load_manifests; prepare_entries; cmd_ensure_service "$label" ;;
     purge-legacy-hooks) command -v jq >/dev/null 2>&1 || { err "purge-hooks: jq is not installed; settings.json is never edited without it"; exit 2; }; purge_legacy_hook_entries ;;
     help|-h|--help) usage ;;
     *) die_usage "unknown verb: $verb" ;;

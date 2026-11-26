@@ -37,10 +37,17 @@ or unit is checked in, so the two can never disagree about a service.
   past three minutes while launchd waited).
 - The daemon restarts these services through the same service manager
   (`daemon/internal/deploy`, `ServiceManager`: `Launchctl`, `SystemdUser`),
-  finding each installed definition by its label. A service the manager does
-  not hold and whose definition is missing (one added since the machine's
-  install) has its definition written by `bin/requirements.sh define-service
-  <label>`, the same renderer, before the deploy starts it.
+  finding each installed definition by its label. A service the boot loads,
+  starts or judges has its installed binary present: one added since the
+  machine's install (the manager does not hold it and its definition is
+  missing, or a standalone's binary is absent from the cache) is built,
+  installed, defined by the same renderer and loaded by `bin/requirements.sh
+  ensure-service <label>` before anything starts it (`deploy.Restarter`'s
+  `ensureLoaded` and `ensureStandaloneInstalled`). A definition alone is not
+  enough: on 2026-11-26 the persistent-wifi service's first deploy ran on a
+  daemon that predated it, so its definition was written with no binary and
+  launchd respawned it at exit 127 every 10s. A restart rewrites a held
+  service's definition with `define-service <label>`.
 - A systemd unit logs by appending to the same files launchd writes
   (`StandardOutput=append:`), because the daemon reads the store's error log
   to tell a slow boot from a wedged one.
