@@ -13,6 +13,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacefind"
 	"agent-repld/internal/wsm"
 )
@@ -305,6 +306,7 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		}
 		return record.Ref()
 	}
+	shortSummary, longSummary := workspace.SummaryFields(f.Summary)
 	var merge *agentreplv1.FoundWorkspaceMerge
 	if ws.MergeOf != nil {
 		merge = &agentreplv1.FoundWorkspaceMerge{}
@@ -328,7 +330,8 @@ func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Worksp
 		Name:           ws.Name,
 		Branch:         ws.Branch,
 		Repository:     &workspacev1.RepositoryRef{Id: string(f.Repository.ID), Dir: f.Repository.Dir},
-		Summary:        f.Summary,
+		ShortSummary:   shortSummary,
+		LongSummary:    longSummary,
 		CreatedAtMs:    ws.CreatedAt.UnixMilli(),
 		LastActiveAtMs: f.LastActiveAt.UnixMilli(),
 		Standing:       standing,

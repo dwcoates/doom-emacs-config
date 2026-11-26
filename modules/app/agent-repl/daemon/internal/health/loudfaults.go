@@ -12,14 +12,14 @@ import (
 
 // THE DAEMON'S STANDING LOUD FAULTS, as Emacs is told them (owner request,
 // 2026-09-28). A failed deploy is surfaced on every client: the webview draws
-// it on its footer and its topbar, whose views already carry it, and Emacs
+// it on its footer, whose view already carries it, and Emacs
 // echoes it in the minibuffer. Emacs holds no per-workspace view that could
 // carry a daemon-scoped fault, so it is told on the one daemon-level stream it
 // holds, WatchDaemon, as `faults_standing`.
 //
-// "Loud" is exactly what the topbar's warning strip carries
-// (FaultTopbarLine): one rule decides which daemon-scoped faults every client
-// surfaces, so the two editors cannot disagree about what is worth saying.
+// "Loud" is one rule (FaultLoudLine): it decides which daemon-scoped faults
+// every Emacs surfaces, so no two clients disagree about what is worth
+// saying.
 //
 // THE PUBLICATION IS STATE, NOT AN EVENT: the whole standing set, replayed to
 // a late subscriber. An Emacs whose stream was severed while a deploy failed
@@ -54,18 +54,18 @@ func (l *LoudFaults) Topic() *publish.Topic[*agentreplv1.DaemonFaultsStanding] {
 	return &l.topic
 }
 
-// Opened adds a standing fault. A line with no topbar sentence is not loud,
+// Opened adds a standing fault. A line with no loud sentence is not loud,
 // and handing one here is the caller's defect: it is refused at ERROR rather
 // than told to Emacs as a blank. An id already standing is restated in place.
 func (l *LoudFaults) Opened(line FaultLine) {
-	fields := dlog.Context{"fault": string(line.ID), "kind": line.Kind, "line": line.Topbar}
-	if line.Topbar == "" {
-		l.log.Error(opLoudFaults, "a fault with no topbar line was handed on as loud; Emacs is not told it", fields)
+	fields := dlog.Context{"fault": string(line.ID), "kind": line.Kind, "line": line.Loud}
+	if line.Loud == "" {
+		l.log.Error(opLoudFaults, "a fault with no loud line was handed on as loud; Emacs is not told it", fields)
 		return
 	}
 	fault := &agentreplv1.DaemonStandingFault{
 		FaultId:    string(line.ID),
-		Line:       line.Topbar,
+		Line:       line.Loud,
 		Fault:      DaemonFaultOf(line.Record),
 		OpenedAtMs: line.At.UnixMilli(),
 	}

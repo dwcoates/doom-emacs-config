@@ -74,7 +74,7 @@ func findHarness(t *testing.T, opts ...option) *harness {
 		"ws-open":   {ID: "ws-open", Repo: repo.ID, Dir: "/src/open", Name: "open-one", Branch: "open-one", CreatedAt: created, LastActivityAt: ptrTo(time.UnixMilli(9_000))},
 		"ws-landed": {ID: "ws-landed", Repo: repo.ID, Dir: "/src/landed", Name: "landed-one", Branch: "landed-one", CreatedAt: created, Closed: true, MergedAt: &merged},
 	}
-	h.DB.summaries = map[ids.WorkspaceID]string{"ws-open": "Fix the footer"}
+	h.DB.summaries = map[ids.WorkspaceID]wsm.WorkspaceSummary{"ws-open": {Long: "The footer stalls. Fix its detail.", Short: "Fix the footer"}}
 	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{
 		"ws-open":   {Workspace: "ws-open", ConfigDir: "/home/.claude-work"},
 		"ws-landed": {Workspace: "ws-landed", ConfigDir: "/home/.claude"},
@@ -105,11 +105,11 @@ func TestFindWorkspacesAnswersEveryMatchWithItsSummary(t *testing.T) {
 		t.Fatalf("found = %v, want both workspaces in a complete extent", resp.Msg)
 	}
 	open, landed := found[0], found[1]
-	if open.GetName() != "open-one" || open.GetSummary() != "Fix the footer" || open.GetLastActiveAtMs() != 9_000 ||
+	if open.GetName() != "open-one" || open.GetShortSummary() != "Fix the footer" || open.GetLongSummary() != "The footer stalls. Fix its detail." || open.GetLastActiveAtMs() != 9_000 ||
 		open.GetStanding().GetOpen() == nil || open.GetRepository().GetDir() != "/src/repo" || open.GetWorkspace().GetDir() != "/src/open" {
 		t.Fatalf("first = %v, want the open workspace with its summary, most recently active first", open)
 	}
-	if landed.GetName() != "landed-one" || landed.Summary != nil || landed.GetStanding().GetLanded().GetLandedAtMs() != 5_000 || landed.GetCreatedAtMs() != 1_000 {
+	if landed.GetName() != "landed-one" || landed.ShortSummary != nil || landed.LongSummary != nil || landed.GetStanding().GetLanded().GetLandedAtMs() != 5_000 || landed.GetCreatedAtMs() != 1_000 {
 		t.Fatalf("second = %v, want the landed workspace with no summary", landed)
 	}
 }
@@ -151,8 +151,8 @@ func TestFindWorkspacesAnswersTheVendorTitleWhereNoSummaryStands(t *testing.T) {
 		t.Fatalf("FindWorkspaces: %v", err)
 	}
 	got := foundByName(resp)
-	if got["open-one"].GetSummary() != "Fix the footer" || got["landed-one"].GetSummary() != "Landed topbar work" {
-		t.Fatalf("summaries = %q, %q; want the agent's summary, then the vendor's title", got["open-one"].GetSummary(), got["landed-one"].GetSummary())
+	if got["open-one"].GetShortSummary() != "Fix the footer" || got["landed-one"].GetShortSummary() != "Landed topbar work" || got["landed-one"].LongSummary != nil {
+		t.Fatalf("summaries = %q, %q; want the agent's summary, then the vendor's title with no long summary", got["open-one"].GetShortSummary(), got["landed-one"].GetShortSummary())
 	}
 }
 

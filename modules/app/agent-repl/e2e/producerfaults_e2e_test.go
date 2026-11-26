@@ -24,9 +24,9 @@
 //     must not be left open forever.
 //   - `!fault-converter` / `!fault-recover` — session.proto's
 //     SessionFaultConverterDefect carried on SessionDiagnostics, which the
-//     daemon projects into topbar.proto's TopbarDegradedWindowWarningDetail
-//     (open, then closed). The malformed message itself reaches NO
-//     conversation.v1 arm, which is the point.
+//     daemon folds into the session's recorded faults that SessionHealth
+//     answers with (unhealthy, then healthy). The malformed message itself
+//     reaches NO conversation.v1 arm, which is the point.
 //   - `!keepalive`, `!residue`, `!away-summary`, `!context-tip`,
 //     `!tokens-reminder` — turns whose extra records are vendor bookkeeping:
 //     store.proto's StoreUnservedItem.vendor_specific residue, drawn by no
@@ -45,7 +45,10 @@ package e2e
 import (
 	"testing"
 
+	"connectrpc.com/connect"
+
 	"agentrepl/e2e/kit/stack"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -134,32 +137,6 @@ func pfAssertOnlyProseRows(t *testing.T, rows []*frontendv1.FeedRow, turn *conve
 	}
 }
 
-// pfOpenDegradedWindow answers the first OPEN degraded-window warning on a
-// topbar view, or nil.
-func pfOpenDegradedWindow(v *frontendv1.TopbarView) *frontendv1.TopbarDegradedWindowWarningDetail {
-	for _, warn := range v.GetWarnings().GetWarnings() {
-		if dw := warn.GetDegradedWindow(); dw != nil && dw.GetOpen() != nil {
-			return dw
-		}
-	}
-	return nil
-}
-
-// pfClosedDegradedWindow answers the CLOSED degraded-window warning naming
-// the SAME component and began_at_ms as `open` — that window, recovered.
-func pfClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarDegradedWindowWarningDetail) *frontendv1.TopbarDegradedWindowWarningDetail {
-	for _, warn := range v.GetWarnings().GetWarnings() {
-		dw := warn.GetDegradedWindow()
-		if dw == nil || dw.GetClosed() == nil {
-			continue
-		}
-		if dw.GetComponent().GetText() == open.GetComponent().GetText() && dw.GetBeganAtMs() == open.GetBeganAtMs() {
-			return dw
-		}
-	}
-	return nil
-}
-
 // pfQueryDiedWarnings names the daemon operations a dying vendor query
 // legitimately logs above INFO, so the harness's unconditional warning sweep
 // does not fail a test for the very fault it provoked: the session watcher's
@@ -221,61 +198,65 @@ func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 }
 
 // ===========================================================================
-// The converter fault window: `!fault-converter`, `!fault-recover`.
+// The converter fault: `!fault-converter`, `!fault-recover`.
 // ===========================================================================
 
-// testConverterRecoveryClosesTheDegradedWindow is the pair's second half:
-// after the defect, `!fault-recover` sends the SAME hook announcement
-// WELL-FORMED, and `fault-recover`'s arms line is "the diagnostics returning
-// to HEALTHY with the degraded window CLOSED carrying the dropped count the
-// fault left behind".
-//
-// The window is identified across the transition exactly as the store-outage
-// area identifies its own: by component plus began_at_ms, so this asserts
-// THAT window closed rather than merely that some closed window exists.
+// pfAwaitVerdictFolded awaits the daemon's record that it folded a shim
+// health verdict for WS into the session's faults, UNHEALTHY saying which
+// verdict. The record is written after the faults are recorded, so
+// SessionHealth asked after it answers that verdict.
+func pfAwaitVerdictFolded(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, what string, unhealthy bool) {
+	t.Helper()
+	w.Daemon.AwaitOwnRunLogRecord(what, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.cmd.lifecycle" && r.Context["workspace"] == ws.GetId() &&
+			r.Message == "the shim's health verdict was folded into the session faults" && r.Context["unhealthy"] == unhealthy
+	})
+}
+
+// pfSessionHealth answers the daemon's SessionHealth verdict for WS.
+func pfSessionHealth(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) *agentreplv1.SessionHealthSuccess {
+	t.Helper()
+	resp, err := w.Client().SessionHealth(w.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SessionHealth = (%v, %v), want a verdict", resp, err)
+	}
+	return resp.Msg.GetSuccess()
+}
+
+// testConverterDefectStandsUntilACleanTurn drives `!fault-converter`, whose
+// shim reports a converter defect on its health push, then `!fault-recover`,
+// an ordinary turn in which every message converts: the session stands
+// unhealthy with the shim's own fault, and the clean turn's healthy push
+// retracts it.
 //
 // Seam: shim-diagnostics
-func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
+func testConverterDefectStandsUntilACleanTurn(t *testing.T) {
 	// Arrange
 	w := stack.SharedWorld(t)
-	w.ExpectWarnings("daemon.health.open_fault")
 	ws, configDir := pfNewWorkspace(t, w)
-	topbar := w.WatchTopbar(ws)
-	defer topbar.Close()
+	w.ExpectWarningsFor(ws, "daemon.health.open_fault", "daemon.health.session")
 
+	// Act
 	stack.DriveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
-	openedView := pfAwaitView(t, w, topbar, "an open degraded window from the converter defect", func(v *frontendv1.TopbarView) bool {
-		return pfOpenDegradedWindow(v) != nil
-	})
-	opened := pfOpenDegradedWindow(openedView)
-	if opened == nil {
-		t.Fatalf("topbar push matched an open degraded window but re-scanning it found none")
+	pfAwaitVerdictFolded(t, w, ws, "the converter defect folded into the session's faults", true)
+
+	// Assert: the shim's own fault stands.
+	faults := pfSessionHealth(t, w, ws).GetUnhealthy().GetFaults()
+	if len(faults) == 0 || faults[0].GetShimReported() == nil {
+		t.Fatalf("SessionHealth faults = %v, want the shim-reported converter defect", faults)
 	}
 
 	// Act: an ordinary turn in which every message converts.
 	recoverTurn := stack.DriveScenarioToCompletion(t, w, ws, configDir, "fault-recover")
+	pfAwaitVerdictFolded(t, w, ws, "the clean turn's healthy verdict folded", false)
 
-	// Assert: the recovery turn concluded, and its WELL-FORMED hook drew no
-	// card either — bubbles.go's drawHook: "A succeeded hook draws NOTHING"
-	// (the same fact TestHookSucceeded pins).
+	// Assert: the recovery turn concluded, and the fault is retracted.
 	rows := openFeedPage(t, w, ws)
 	if ended := stack.TurnEndedRow(t, rows, recoverTurn); ended.GetConcluded() == nil {
 		t.Fatalf("recovery turn ended = %v, want a plain conclusion", ended)
 	}
-
-	// Assert: THAT window closed, carrying its dropped count.
-	closedView := pfAwaitView(t, w, topbar, "the same degraded window closing after the clean turn", func(v *frontendv1.TopbarView) bool {
-		return pfClosedDegradedWindow(v, opened) != nil
-	})
-	closed := pfClosedDegradedWindow(closedView, opened)
-	if closed == nil {
-		t.Fatalf("topbar push matched the closed window but re-scanning it found none")
-	}
-	if got, want := closed.GetClosed().GetEndedAtMs(), opened.GetBeganAtMs(); got < want {
-		t.Errorf("closed degraded window ended_at_ms = %d, want >= began_at_ms %d", got, want)
-	}
-	if got := closed.GetClosed().GetDroppedCount(); got < 1 {
-		t.Errorf("closed degraded window dropped_count = %d, want >= 1 (the one message the converter refused)", got)
+	if verdict := pfSessionHealth(t, w, ws); verdict.GetHealthy() == nil {
+		t.Fatalf("SessionHealth = %v, want healthy once the clean turn's verdict retracted the fault", verdict)
 	}
 }
 

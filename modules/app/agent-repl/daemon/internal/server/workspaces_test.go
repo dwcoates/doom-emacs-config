@@ -3140,7 +3140,10 @@ func TestCreateWorkspaceCarriesTheModelRefusalsOnTheirArms(t *testing.T) {
 
 // ---- SetWorkspaceSummary ---------------------------------------------------
 
-// TestSetWorkspaceSummaryHandsTheSummaryToTheVerb pins the summary reaching
+// footerLong is a long summary every handler test sends.
+const footerLong = "The footer stalls at a cold gate. Fix its detail."
+
+// TestSetWorkspaceSummaryHandsTheSummaryToTheVerb pins both parts reaching
 // the verb, and the verb's answer coming back as the success.
 func TestSetWorkspaceSummaryHandsTheSummaryToTheVerb(t *testing.T) {
 	// Arrange
@@ -3148,17 +3151,18 @@ func TestSetWorkspaceSummaryHandsTheSummaryToTheVerb(t *testing.T) {
 
 	// Act
 	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), Summary: "Fix the footer"}))
+		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), LongSummary: footerLong, ShortSummary: "Fix the footer"}))
 
 	// Assert
 	if err != nil {
 		t.Fatalf("SetWorkspaceSummary: %v", err)
 	}
-	if got := resp.Msg.GetSuccess().GetSummary(); got != "Fix the footer" {
-		t.Fatalf("result = %v, want success naming the summary", resp.Msg.GetResult())
+	if got := resp.Msg.GetSuccess(); got.GetShortSummary() != "Fix the footer" || got.GetLongSummary() != footerLong {
+		t.Fatalf("result = %v, want success naming both parts", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.summaries) != 1 || h.Verbs.summaries[0] != "Fix the footer" {
-		t.Fatalf("summaries = %q, want [Fix the footer]", h.Verbs.summaries)
+	want := []wsm.WorkspaceSummary{{Long: footerLong, Short: "Fix the footer"}}
+	if !slices.Equal(h.Verbs.summaries, want) {
+		t.Fatalf("summaries = %+v, want %+v", h.Verbs.summaries, want)
 	}
 }
 
@@ -3170,7 +3174,7 @@ func TestSetWorkspaceSummaryRefusesAnUnknownWorkspace(t *testing.T) {
 
 	// Act
 	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Summary: "Fix the footer"}))
+		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, LongSummary: footerLong, ShortSummary: "Fix the footer"}))
 
 	// Assert
 	if err != nil {
@@ -3180,29 +3184,49 @@ func TestSetWorkspaceSummaryRefusesAnUnknownWorkspace(t *testing.T) {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
 	if len(h.Verbs.summaries) != 0 {
-		t.Fatalf("summaries = %q, want none for an unknown workspace", h.Verbs.summaries)
+		t.Fatalf("summaries = %+v, want none for an unknown workspace", h.Verbs.summaries)
 	}
 }
 
 // TestSetWorkspaceSummaryMapsAnInvalidSummary pins the verb's invalid_summary
-// refusal reaching its arm with the summary and the reason.
+// refusal reaching its arm, with the refused part, its text and the reason.
 func TestSetWorkspaceSummaryMapsAnInvalidSummary(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.Verbs.setSummaryErr = &workspace.Refusal{Arm: workspace.ArmInvalidSummary, Reason: "two clauses",
-		Fields: map[string]any{"summary": "Fix it, then that", "reason": "a summary carries no comma"}}
-
-	// Act
-	resp, err := h.Client.SetWorkspaceSummary(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), Summary: "Fix it, then that"}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SetWorkspaceSummary: %v", err)
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		check   func(*agentreplv1.SetWorkspaceSummaryInvalidSummary) bool
+	}{
+		{name: "the long summary", refusal: &workspace.Refusal{Arm: workspace.ArmInvalidSummary, Reason: "one sentence",
+			Fields: map[string]any{"part": refusalarm.Nested("long_summary"), "long_summary": "Fix it.", "reason": "a long summary is 2 to 4 sentences, not 1"}},
+			check: func(e *agentreplv1.SetWorkspaceSummaryInvalidSummary) bool {
+				got := e.GetLongSummary()
+				return got.GetLongSummary() == "Fix it." && got.GetReason() == "a long summary is 2 to 4 sentences, not 1"
+			}},
+		{name: "the short summary", refusal: &workspace.Refusal{Arm: workspace.ArmInvalidSummary, Reason: "two clauses",
+			Fields: map[string]any{"part": refusalarm.Nested("short_summary"), "short_summary": "Fix it, then that", "reason": "a short summary carries no comma"}},
+			check: func(e *agentreplv1.SetWorkspaceSummaryInvalidSummary) bool {
+				got := e.GetShortSummary()
+				return got.GetShortSummary() == "Fix it, then that" && got.GetReason() == "a short summary carries no comma"
+			}},
 	}
-	got := resp.Msg.GetError().GetInvalidSummary()
-	if got.GetSummary() != "Fix it, then that" || got.GetReason() != "a summary carries no comma" {
-		t.Fatalf("result = %v, want invalid_summary with its evidence", resp.Msg.GetResult())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.setSummaryErr = tt.refusal
+
+			// Act
+			resp, err := h.Client.SetWorkspaceSummary(context.Background(),
+				connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref(), LongSummary: footerLong, ShortSummary: "Fix it, then that"}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceSummary: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError().GetInvalidSummary()) {
+				t.Fatalf("result = %v, want invalid_summary naming the part with its evidence", resp.Msg.GetResult())
+			}
+		})
 	}
 }
 

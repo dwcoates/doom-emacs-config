@@ -3,8 +3,7 @@
  * request, 2026-10-31).
  *
  * The sidebar runs in a web view of its own beside the pages (host/
- * sidebar-page.ts), so the topbar's warning chip, the pages' one error
- * surface, cannot list what goes wrong in it. Instead the version in the
+ * sidebar-page.ts), and the topbar lists no warnings. Instead the version in the
  * rail's top-right corner is tinted by what the sidebar has recorded since it
  * last started, in a subtle shade: red when there was an error, yellow when
  * there was a warning and no error, green when there was neither. The records

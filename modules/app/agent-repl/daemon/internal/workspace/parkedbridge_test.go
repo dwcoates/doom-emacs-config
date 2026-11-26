@@ -225,8 +225,8 @@ func TestABridgeThatCannotBeHeldStandsTheShimDownLoudly(t *testing.T) {
 			if _, ok := bridgeRecord(f, "error", tt.message); !ok {
 				t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), tt.message)
 			}
-			if f.fleet.Held(ws) || len(f.topbarWarnings) == 0 {
-				t.Fatalf("held %v, warnings %v; want the shim stood down and the strip told", f.fleet.Held(ws), f.topbarWarnings)
+			if f.fleet.Held(ws) {
+				t.Fatalf("held %v; want the shim stood down", f.fleet.Held(ws))
 			}
 			if _, ok := f.fleet.ColdGate(ws); !ok {
 				t.Fatal("no gate stands, want the gate standing with no bridge")
@@ -290,8 +290,8 @@ func TestAnUnreadableModeAtAGateKeepsNoShimLoudly(t *testing.T) {
 	if _, ok := bridgeRecord(f, "error", "could not read the parked workspace's remote-control mode; its gate holds no bridge, and claude.ai cannot reach it"); !ok {
 		t.Fatalf("records = %+v, want the unreadable mode at ERROR", f.log.logger.Records())
 	}
-	if f.fleet.Held(ws) || len(f.client.bridges) != 0 || len(f.topbarWarnings) == 0 {
-		t.Fatalf("held %v, bridges %d, warnings %v; want no shim, no bridge and the strip told", f.fleet.Held(ws), len(f.client.bridges), f.topbarWarnings)
+	if f.fleet.Held(ws) || len(f.client.bridges) != 0 {
+		t.Fatalf("held %v, bridges %d; want no shim and no bridge", f.fleet.Held(ws), len(f.client.bridges))
 	}
 }
 
@@ -542,8 +542,8 @@ func TestARefusalFromAShimStoodDownWhileItsBridgeOpenedIsNoFailure(t *testing.T)
 	if _, ok := bridgeRecord(f, "info", "the parked bridge's shim was stood down while its bridge opened"); !ok {
 		t.Fatalf("records = %+v, want the stood-down refusal at INFO", f.log.logger.Records())
 	}
-	if _, ok := bridgeRecord(f, "error", ""); ok || len(f.topbarWarnings) != 0 {
-		t.Fatalf("records = %+v, warnings %v; want no error and no warning", f.log.logger.Records(), f.topbarWarnings)
+	if _, ok := bridgeRecord(f, "error", ""); ok {
+		t.Fatalf("records = %+v; want no error", f.log.logger.Records())
 	}
 	if _, ok := f.fleet.ColdGate(ws); !ok {
 		t.Fatal("no gate stands, want the gate standing")

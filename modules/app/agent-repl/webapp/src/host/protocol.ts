@@ -30,7 +30,6 @@
  * it changes, and the host answers from that mirror.
  */
 
-import { isClientFailureArm, type ClientFailureArm } from "../failure/sink.js";
 import { focusMovedCause, type FocusMovedCause } from "../focus-left.js";
 import type { WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 
@@ -113,25 +112,6 @@ interface WebhostPressedMessage {
   readonly kind: "webhostPressed";
 }
 
-/** One failure of the webhost's own machinery, as a warning chip row draws it. */
-export interface WebhostFailure {
-  readonly arm: ClientFailureArm;
-  readonly headline: string;
-  readonly evidence: ReadonlyArray<readonly [string, string]>;
-}
-
-/**
- * host -> page: every failure of the webhost's own machinery standing now (its
- * sidebar's stream or verbs). The topbar's warning chip is the webapp's one
- * error surface and the webhost has no topbar, so every page lists these in
- * its own chip. The whole set, every time it changes, and replayed on hello.
- */
-interface WebhostFailuresMessage {
-  readonly channel: typeof HOST_CHANNEL;
-  readonly kind: "webhostFailures";
-  readonly failures: readonly WebhostFailure[];
-}
-
 /**
  * host -> page: the log level the page records at. A level other than info is
  * a window ending at UNTILMS (epoch ms; proto/vocab/log-level-window.json); info,
@@ -201,8 +181,7 @@ export type HostToPage =
   | DismissDigestMessage
   | FocusMovedMessage
   | QuietMessage
-  | WebhostPressedMessage
-  | WebhostFailuresMessage;
+  | WebhostPressedMessage;
 
 /** page -> host: the page booted; send it everything it should know. */
 interface HelloMessage {
@@ -355,13 +334,6 @@ export function parseHostToPage(data: unknown): HostToPage | null {
       return typeof data.text === "string" && data.text !== ""
         ? { channel: HOST_CHANNEL, kind: "editorNotice", text: data.text }
         : null;
-    case "webhostFailures": {
-      if (!Array.isArray(data.failures)) return null;
-      const failures = data.failures.map(parseWebhostFailure);
-      return failures.every((f): f is WebhostFailure => f !== null)
-        ? { channel: HOST_CHANNEL, kind: "webhostFailures", failures }
-        : null;
-    }
     default:
       return null;
   }
@@ -378,18 +350,6 @@ export function parseHeldIngressEntry(data: unknown): HeldIngressWireEntry | nul
   if (typeof data.queuedAt !== "string" || !Number.isFinite(Date.parse(data.queuedAt))) return null;
   if (!isRecord(data.said) || Array.isArray(data.said)) return null;
   return { key: data.key, queuedAt: data.queuedAt, said: data.said };
-}
-
-/** DATA as one webhost failure, or null when it is not one. */
-function parseWebhostFailure(data: unknown): WebhostFailure | null {
-  if (!isRecord(data) || typeof data.arm !== "string" || !isClientFailureArm(data.arm)) return null;
-  if (typeof data.headline !== "string" || !Array.isArray(data.evidence)) return null;
-  const evidence: Array<readonly [string, string]> = [];
-  for (const row of data.evidence) {
-    if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== "string" || typeof row[1] !== "string") return null;
-    evidence.push([row[0], row[1]]);
-  }
-  return { arm: data.arm, headline: data.headline, evidence };
 }
 
 /** DATA as a page-to-host message, or null when it is not one of ours. */

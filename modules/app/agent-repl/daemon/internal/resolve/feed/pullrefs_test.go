@@ -519,7 +519,7 @@ func TestAResetKeepsTheKnownPullRequests(t *testing.T) {
 	}
 }
 
-func TestAKnownPullRequestsLoadFailureIsLoggedAndRaised(t *testing.T) {
+func TestAKnownPullRequestsLoadFailureIsLogged(t *testing.T) {
 	// Arrange.
 	store := newFakePullReferences()
 	store.loadErr = errors.New("disk on fire")
@@ -536,12 +536,9 @@ func TestAKnownPullRequestsLoadFailureIsLoggedAndRaised(t *testing.T) {
 	if !h.hasRecordWith("error", opPullReferencesRestore, "error", "disk on fire") {
 		t.Fatalf("records = %+v, want the failed load at error", h.records())
 	}
-	if keys := h.warnings.keys(); len(keys) != 1 || keys[0] != opPullReferencesRestore {
-		t.Fatalf("warnings = %v, want the failed load raised", keys)
-	}
 }
 
-func TestAKnownPullRequestsRecordFailureIsLoggedAndRaised(t *testing.T) {
+func TestAKnownPullRequestsRecordFailureIsLogged(t *testing.T) {
 	// Arrange.
 	store := newFakePullReferences()
 	store.recordErr = errors.New("disk on fire")
@@ -558,9 +555,6 @@ func TestAKnownPullRequestsRecordFailureIsLoggedAndRaised(t *testing.T) {
 	}
 	if !h.hasRecordWith("error", opPullReferences, "error", "disk on fire") {
 		t.Fatalf("records = %+v, want the failed recording at error", h.records())
-	}
-	if keys := h.warnings.keys(); len(keys) != 1 || keys[0] != opPullReferences {
-		t.Fatalf("warnings = %v, want the failed recording raised once", keys)
 	}
 }
 

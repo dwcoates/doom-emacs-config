@@ -101,13 +101,12 @@ const records = installPageLogger("topbar");
 
 /** The context every drawn cell is handed; nothing here clicks, so no rpc is scripted. */
 function topbarContext(): TopbarContext {
-  return { ctx: appContext(), reveals: mountRevealLayer(host(), pageFocusLeft()), openLogin: () => undefined, localFailures: () => [] };
+  return { ctx: appContext(), reveals: mountRevealLayer(host(), pageFocusLeft()), openLogin: () => undefined };
 }
 
 /**
  * The strip's view: one of every chip, the queue-bypass chip a personal
- * account draws included, and warnings, which ride the heading's line rather
- * than a chip of the status run.
+ * account draws included.
  */
 function stripView(session: boolean, summary: boolean) {
   return create(TopbarViewSchema, {
@@ -127,7 +126,6 @@ function stripView(session: boolean, summary: boolean) {
         }
       : {}),
     context: { text: "142.3k", breakdown: { sections: [] } },
-    warnings: { warnings: [{ line: { text: "something is wrong" } }] },
     queueBypass: { mode: { case: "off", value: {} }, tooltip: { text: "queue bypass off" } },
     remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
     persistentWifi: {
@@ -195,7 +193,6 @@ window.topbarPage = {
       ctx: appContext(),
       reveals: mountRevealLayer(header, pageFocusLeft()),
       openLogin: () => undefined,
-      localFailures: () => [],
     };
     strip.append(drawTopbarView(stripView(session, summary), tc));
     const account = header.querySelector(".topbar-account");

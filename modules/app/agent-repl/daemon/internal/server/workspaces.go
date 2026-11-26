@@ -1608,8 +1608,8 @@ func renameMove(renamed workspace.Renamed) *agentreplv1.SetWorkspaceNameMove {
 	panic(fmt.Sprintf("SetWorkspaceName: a rename's move %d has no wire arm", renamed.Move))
 }
 
-// SetWorkspaceSummary records the one-sentence summary of a workspace's task
-// its agent set, and draws it in the workspace's topbar.
+// SetWorkspaceSummary records the long and short summary of a workspace's
+// task its agent set, and draws it in the workspace's topbar.
 func (s *server) SetWorkspaceSummary(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceSummaryRequest],
@@ -1623,12 +1623,13 @@ func (s *server) SetWorkspaceSummary(
 	if done {
 		return answer(resp, cerr)
 	}
-	summary, err := s.deps.Verbs.SetSummary(ctx, subject.Record.ID, req.Msg.GetSummary())
+	summary, err := s.deps.Verbs.SetSummary(ctx, subject.Record.ID,
+		wsm.WorkspaceSummary{Long: req.Msg.GetLongSummary(), Short: req.Msg.GetShortSummary()})
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SetWorkspaceSummaryResponse_Success{
-		Success: &agentreplv1.SetWorkspaceSummarySuccess{Summary: summary},
+		Success: &agentreplv1.SetWorkspaceSummarySuccess{LongSummary: summary.Long, ShortSummary: summary.Short},
 	}
 	return connect.NewResponse(resp), nil
 }

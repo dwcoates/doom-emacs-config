@@ -23,7 +23,6 @@ describe("parseHostToPage", () => {
     ["restyleGranted", { channel: HOST_CHANNEL, kind: "restyleGranted" }],
     ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],
     ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
-    ["webhostFailures with none", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
     ["heldIngress with none", { channel: HOST_CHANNEL, kind: "heldIngress", entries: [] }],
     ["editorNotice", { channel: HOST_CHANNEL, kind: "editorNotice", text: "send: no daemon connection" }],
     [
@@ -32,14 +31,6 @@ describe("parseHostToPage", () => {
         channel: HOST_CHANNEL,
         kind: "heldIngress",
         entries: [{ key: "k-1", queuedAt: "2026-10-20T15:18:02.227Z", said: { content: {} } }],
-      },
-    ],
-    [
-      "webhostFailures with a row",
-      {
-        channel: HOST_CHANNEL,
-        kind: "webhostFailures",
-        failures: [{ arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] }],
       },
     ],
   ])("reads a %s message", (_name, data) => {
@@ -78,15 +69,7 @@ describe("parseHostToPage", () => {
     ["a logLevel naming no level", { channel: HOST_CHANNEL, kind: "logLevel", level: "trace", untilMs: 1 }],
     ["a logLevel window with no end", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: null }],
     ["an info logLevel with an end", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: 1 }],
-    ["webhostFailures without a list", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: {} }],
-    [
-      "webhostFailures with an arm no frontend mints",
-      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "shimCrashed", headline: "h", evidence: [] }] },
-    ],
-    [
-      "webhostFailures with a malformed evidence row",
-      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [{ arm: "bootFailed", headline: "h", evidence: [["only"]] }] },
-    ],
+    ["a webhostFailures, which no host tells any more", { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] }],
     ["heldIngress without a list", { channel: HOST_CHANNEL, kind: "heldIngress", entries: {} }],
     ["an editorNotice with no text", { channel: HOST_CHANNEL, kind: "editorNotice", text: "" }],
     ["an editorNotice whose text is no string", { channel: HOST_CHANNEL, kind: "editorNotice", text: 3 }],

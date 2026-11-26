@@ -1069,15 +1069,15 @@ func TestSummarySendsTheSummaryForTheNamedWorkspace(t *testing.T) {
 			f := newCLIFixture()
 
 			// Act
-			code := f.run(workspaceNoun, "summary", tt.ws, "-text", "Fix the footer")
+			code := f.run(workspaceNoun, "summary", tt.ws, "-long", "The footer stalls. Fix it.", "-short", "Fix the footer")
 
 			// Assert
 			if code != exitSuccess {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
 			req := only[*agentreplv1.SetWorkspaceSummaryRequest](t, f)
-			if req.GetWorkspace().GetId() != tt.wantID || req.GetSummary() != "Fix the footer" {
-				t.Errorf("request = %v, want %s summarized as Fix the footer", req, tt.wantID)
+			if req.GetWorkspace().GetId() != tt.wantID || req.GetLongSummary() != "The footer stalls. Fix it." || req.GetShortSummary() != "Fix the footer" {
+				t.Errorf("request = %v, want %s summarized with both parts", req, tt.wantID)
 			}
 		})
 	}
@@ -1088,8 +1088,11 @@ func TestSummaryRefusesAMisspelledCall(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "no text", args: []string{"summary", "here"}},
-		{name: "a positional word", args: []string{"summary", "here", "-text", "Fix the footer", "extra"}},
+		{name: "no parts", args: []string{"summary", "here"}},
+		{name: "no long summary", args: []string{"summary", "here", "-short", "Fix the footer"}},
+		{name: "no short summary", args: []string{"summary", "here", "-long", "The footer stalls. Fix it."}},
+		{name: "the retired -text flag", args: []string{"summary", "here", "-text", "Fix the footer"}},
+		{name: "a positional word", args: []string{"summary", "here", "-long", "The footer stalls. Fix it.", "-short", "Fix the footer", "extra"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2042,7 +2045,7 @@ func listedRecords() *agentreplv1.FindWorkspacesResponse {
 	summary := "Fix the footer"
 	return &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
 		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: []*agentreplv1.FoundWorkspace{
-			{Workspace: &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"}, Name: "caller", Summary: &summary, Calling: true,
+			{Workspace: &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"}, Name: "caller", ShortSummary: &summary, Calling: true,
 				Roster: &agentreplv1.FoundWorkspaceRoster{
 					Section: &agentreplv1.FoundWorkspaceRosterSection{Section: &agentreplv1.FoundWorkspaceRosterSection_Open{Open: &agentreplv1.FoundWorkspaceRosterSectionOpen{}}},
 					Status:  &agentreplv1.FoundWorkspaceRosterStatus{Arm: "thinking"}}},
@@ -2133,7 +2136,7 @@ func TestListLinesCarryEveryLegacyFactAndTheSummary(t *testing.T) {
 	// Assert
 	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
 	for i, want := range [][]string{
-		{`"name":"caller"`, `"id":"ws-caller"`, `"dir":"/wt/caller"`, `"arm":"thinking"`, `"section":{"open":{}}`, `"calling":true`, `"summary":"Fix the footer"`},
+		{`"name":"caller"`, `"id":"ws-caller"`, `"dir":"/wt/caller"`, `"arm":"thinking"`, `"section":{"open":{}}`, `"calling":true`, `"shortSummary":"Fix the footer"`},
 		{`"name":"peer"`, `"id":"ws-peer"`, `"dir":"/wt/peer"`, `"arm":"done"`, `"section":{"backlog":{}}`},
 	} {
 		for _, fact := range want {
@@ -3315,7 +3318,7 @@ func TestFindPrintsTheDaemonsAnswer(t *testing.T) {
 	summary := "Fix the footer"
 	f.client.found = &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
 		Extent: &agentreplv1.FindWorkspacesSuccess_Partial{Partial: &agentreplv1.FindWorkspacesSuccessPartial{
-			Workspaces: []*agentreplv1.FoundWorkspace{{Name: "footer-fix", Summary: &summary}}, Omitted: 4}}}}}
+			Workspaces: []*agentreplv1.FoundWorkspace{{Name: "footer-fix", ShortSummary: &summary}}, Omitted: 4}}}}}
 
 	// Act
 	code := f.run(workspaceNoun, "find")

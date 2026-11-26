@@ -868,13 +868,13 @@ type AgentReplClient interface {
 	// mark. See endpoint_set_workspace_correspondence.proto.
 	SetWorkspaceCorrespondence(context.Context, *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error)
 	// Store, relabel or remove a workspace's links, choose which of them the
-	// topbar's summary menu shows, or clear them. See
+	// topbar's link menu shows, or clear them. See
 	// endpoint_change_workspace_links.proto.
 	ChangeWorkspaceLinks(context.Context, *connect.Request[v1.ChangeWorkspaceLinksRequest]) (*connect.Response[v1.ChangeWorkspaceLinksResponse], error)
 	// Rename a workspace: its name only, never its branch or its worktree
 	// directory. See endpoint_set_workspace_name.proto.
 	SetWorkspaceName(context.Context, *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error)
-	// Set the one-sentence summary of a workspace's task that its topbar
+	// Set the long and short summary of a workspace's task that its topbar
 	// draws. See endpoint_set_workspace_summary.proto.
 	SetWorkspaceSummary(context.Context, *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
@@ -3624,13 +3624,13 @@ type AgentReplHandler interface {
 	// mark. See endpoint_set_workspace_correspondence.proto.
 	SetWorkspaceCorrespondence(context.Context, *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error)
 	// Store, relabel or remove a workspace's links, choose which of them the
-	// topbar's summary menu shows, or clear them. See
+	// topbar's link menu shows, or clear them. See
 	// endpoint_change_workspace_links.proto.
 	ChangeWorkspaceLinks(context.Context, *connect.Request[v1.ChangeWorkspaceLinksRequest]) (*connect.Response[v1.ChangeWorkspaceLinksResponse], error)
 	// Rename a workspace: its name only, never its branch or its worktree
 	// directory. See endpoint_set_workspace_name.proto.
 	SetWorkspaceName(context.Context, *connect.Request[v1.SetWorkspaceNameRequest]) (*connect.Response[v1.SetWorkspaceNameResponse], error)
-	// Set the one-sentence summary of a workspace's task that its topbar
+	// Set the long and short summary of a workspace's task that its topbar
 	// draws. See endpoint_set_workspace_summary.proto.
 	SetWorkspaceSummary(context.Context, *connect.Request[v1.SetWorkspaceSummaryRequest]) (*connect.Response[v1.SetWorkspaceSummaryResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.

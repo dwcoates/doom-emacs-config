@@ -13,8 +13,9 @@
  * offered. So each control REGISTERS its reveal as it is drawn (name, the
  * anchor's name, a body builder closed over THIS push's view), and `refresh()`
  * re-opens whatever was open from the entry the new draw just registered. A
- * reveal whose control is gone from the new view — the warning chip, when the
- * warnings cleared — closes, because there is nothing left for it to belong to.
+ * reveal whose control is gone from the new view — the name's link menu, when
+ * the links cleared — closes, because there is nothing left for it to belong
+ * to.
  *
  * ONE AT A TIME, because these are menus: two open reveals would overlap under
  * a strip only a few hundred pixels wide, and the reader has no way to say

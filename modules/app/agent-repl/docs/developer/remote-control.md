@@ -94,8 +94,8 @@ id).
   - With a shim up, the daemon sends `shim.v1.SetSessionRemoteControl`.
   - Turning it on with no shim starts one.
   - Turning it off with no shim only records it.
-  - When the vendor refuses, the mode is still recorded, and the refusal
-    rides the warning strip.
+  - When the vendor refuses, the mode is still recorded, and the refusal is
+    logged at ERROR.
 - **Queue bypass mode turns it on (owner request, 2026-11-10).** A workspace
   holding its repository's queue bypass mode (`agentrepl.v1.UpdateQueueBypassMode`)
   is in remote control.

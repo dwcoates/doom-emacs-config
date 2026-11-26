@@ -13,13 +13,17 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/textline"
+	"agent-repld/internal/wsm"
 )
 
 const testWS = ids.WorkspaceID("ws-1")
 
+// footerSummary is a whole summary of the footer work.
+var footerSummary = wsm.WorkspaceSummary{Long: "Fix the footer's stall detail. It reads wrong at a cold gate.", Short: "Fix the footer"}
+
 // fakeStore is an in-memory summary store whose every call can be failed.
 type fakeStore struct {
-	summaries map[ids.WorkspaceID]string
+	summaries map[ids.WorkspaceID]wsm.WorkspaceSummary
 	titles    map[ids.WorkspaceID]string
 	putErr    error
 	dropErr   error
@@ -30,7 +34,7 @@ type fakeStore struct {
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{summaries: map[ids.WorkspaceID]string{}, titles: map[ids.WorkspaceID]string{}}
+	return &fakeStore{summaries: map[ids.WorkspaceID]wsm.WorkspaceSummary{}, titles: map[ids.WorkspaceID]string{}}
 }
 
 func (s *fakeStore) PutVendorTitle(_ context.Context, ws ids.WorkspaceID, title string) error {
@@ -50,7 +54,7 @@ func (s *fakeStore) DropVendorTitle(_ context.Context, ws ids.WorkspaceID) (bool
 	return stood, nil
 }
 
-func (s *fakeStore) PutWorkspaceSummary(_ context.Context, ws ids.WorkspaceID, summary string) error {
+func (s *fakeStore) PutWorkspaceSummary(_ context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) error {
 	if s.putErr != nil {
 		return s.putErr
 	}
@@ -67,9 +71,9 @@ func (s *fakeStore) DropWorkspaceSummary(_ context.Context, ws ids.WorkspaceID) 
 	return stood, nil
 }
 
-func (s *fakeStore) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (string, bool, error) {
+func (s *fakeStore) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (wsm.WorkspaceSummary, bool, error) {
 	if s.readErr != nil {
-		return "", false, s.readErr
+		return wsm.WorkspaceSummary{}, false, s.readErr
 	}
 	summary, ok := s.summaries[ws]
 	return summary, ok, nil
@@ -77,10 +81,10 @@ func (s *fakeStore) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (s
 
 // fakeTopbar records every summary it is handed.
 type fakeTopbar struct {
-	installed []string
+	installed []wsm.WorkspaceSummary
 }
 
-func (t *fakeTopbar) SetSummary(_ ids.WorkspaceID, summary string) {
+func (t *fakeTopbar) SetSummary(_ ids.WorkspaceID, summary wsm.WorkspaceSummary) {
 	t.installed = append(t.installed, summary)
 }
 
@@ -121,7 +125,7 @@ func (h *harness) recorded(t *testing.T, level, op string) dlog.Record {
 	return rec
 }
 
-func TestValidateAcceptsOnePlainImperativeSentence(t *testing.T) {
+func TestValidateShortAcceptsOnePlainImperativeSentence(t *testing.T) {
 	tests := []struct {
 		name    string
 		summary string
@@ -135,66 +139,66 @@ func TestValidateAcceptsOnePlainImperativeSentence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange, Act
-			err := Validate(tt.summary)
+			err := ValidateShort(tt.summary)
 
 			// Assert
 			if err != nil {
-				t.Fatalf("Validate(%q) = %v, want nil", tt.summary, err)
+				t.Fatalf("ValidateShort(%q) = %v, want nil", tt.summary, err)
 			}
 		})
 	}
 }
 
-func TestValidateRefusesWhatTheTitleLineDoesNotDraw(t *testing.T) {
+func TestValidateShortRefusesWhatTheTitleLineDoesNotDraw(t *testing.T) {
 	tests := []struct {
 		name    string
 		summary string
 		reason  string
 	}{
-		{name: "one word", summary: "Fix", reason: "a summary is 2 to 15 words, not 1"},
-		{name: "too many words", summary: strings.TrimSpace(strings.Repeat("word ", MaxWords+1)), reason: "a summary is 2 to 15 words, not 16"},
-		{name: "two sentences", summary: "Fix the footer. Then the topbar", reason: `a summary is one sentence, and "footer." ends one before its last word`},
-		{name: "a line break", summary: "Fix the\nfooter", reason: "a summary is one line"},
-		{name: "surrounding whitespace", summary: " Fix the footer", reason: "a summary carries no whitespace at either end"},
-		{name: "a comma", summary: "Fix the footer, then the topbar", reason: `a summary is one plain sentence, so it carries no "," joining clauses`},
-		{name: "a semicolon", summary: "Fix the footer; and the topbar", reason: `a summary is one plain sentence, so it carries no ";" joining clauses`},
-		{name: "a colon", summary: "Footer: fix the stall", reason: `a summary is one plain sentence, so it carries no ":" joining clauses`},
-		{name: "a parenthesis", summary: "Fix the footer (and topbar)", reason: `a summary is one plain sentence, so it carries no "(" joining clauses`},
-		{name: "an em dash", summary: "Fix the footer — then topbar", reason: `a summary is one plain sentence, so it carries no "—" joining clauses`},
-		{name: "a spaced hyphen", summary: "Fix the footer - then topbar", reason: `a summary is one plain sentence, so it carries no "-" joining clauses`},
+		{name: "one word", summary: "Fix", reason: "a short summary is 2 to 15 words, not 1"},
+		{name: "too many words", summary: strings.TrimSpace(strings.Repeat("word ", MaxWords+1)), reason: "a short summary is 2 to 15 words, not 16"},
+		{name: "two sentences", summary: "Fix the footer. Then the topbar", reason: `a short summary is one sentence, and "footer." ends one before its last word`},
+		{name: "a line break", summary: "Fix the\nfooter", reason: "a short summary is one line"},
+		{name: "surrounding whitespace", summary: " Fix the footer", reason: "a short summary carries no whitespace at either end"},
+		{name: "a comma", summary: "Fix the footer, then the topbar", reason: `a short summary is one plain sentence, so it carries no "," joining clauses`},
+		{name: "a semicolon", summary: "Fix the footer; and the topbar", reason: `a short summary is one plain sentence, so it carries no ";" joining clauses`},
+		{name: "a colon", summary: "Footer: fix the stall", reason: `a short summary is one plain sentence, so it carries no ":" joining clauses`},
+		{name: "a parenthesis", summary: "Fix the footer (and topbar)", reason: `a short summary is one plain sentence, so it carries no "(" joining clauses`},
+		{name: "an em dash", summary: "Fix the footer — then topbar", reason: `a short summary is one plain sentence, so it carries no "—" joining clauses`},
+		{name: "a spaced hyphen", summary: "Fix the footer - then topbar", reason: `a short summary is one plain sentence, so it carries no "-" joining clauses`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange, Act
-			err := Validate(tt.summary)
+			err := ValidateShort(tt.summary)
 
 			// Assert
 			if err == nil || err.Error() != tt.reason {
-				t.Fatalf("Validate(%q) = %v, want %q", tt.summary, err, tt.reason)
+				t.Fatalf("ValidateShort(%q) = %v, want %q", tt.summary, err, tt.reason)
 			}
 		})
 	}
 }
 
-func TestValidateSharesTheOneSentenceRule(t *testing.T) {
+func TestValidateShortSharesTheOneSentenceRule(t *testing.T) {
 	// Arrange — a summary breaking the shared rule.
 	summary := "Fix the footer. Then the topbar"
 
 	// Act
-	got := Validate(summary)
+	got := ValidateShort(summary)
 
 	// Assert — the refusal is textline.OneSentence's own, never a second
 	// spelling of the rule.
-	want := textline.OneSentence("summary", summary, MinWords, MaxWords)
+	want := textline.OneSentence("short summary", summary, MinWords, MaxWords)
 	if got == nil || want == nil || got.Error() != want.Error() {
-		t.Fatalf("Validate = %v, want textline.OneSentence's %v", got, want)
+		t.Fatalf("ValidateShort = %v, want textline.OneSentence's %v", got, want)
 	}
 }
 
 func TestRestoreDrawsTheStoredSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.store.summaries[testWS] = "Fix the footer"
+	h.store.summaries[testWS] = footerSummary
 
 	// Act
 	err := h.k.Restore(context.Background(), testWS)
@@ -203,8 +207,8 @@ func TestRestoreDrawsTheStoredSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if !reflect.DeepEqual(h.topbar.installed, []string{"Fix the footer"}) {
-		t.Fatalf("installed %q, want the stored summary", h.topbar.installed)
+	if !reflect.DeepEqual(h.topbar.installed, []wsm.WorkspaceSummary{footerSummary}) {
+		t.Fatalf("installed %+v, want the stored summary", h.topbar.installed)
 	}
 }
 
@@ -220,7 +224,7 @@ func TestRestoreWithNoSummaryDrawsNothing(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 	if len(h.topbar.installed) != 0 {
-		t.Fatalf("installed %q, want nothing", h.topbar.installed)
+		t.Fatalf("installed %+v, want nothing", h.topbar.installed)
 	}
 	h.recorded(t, "debug", opRestore)
 }
@@ -238,7 +242,7 @@ func TestAFailedRestoreIsSurfacedAndLogged(t *testing.T) {
 		t.Fatalf("Restore = %v, want the read's failure", err)
 	}
 	if len(h.topbar.installed) != 0 {
-		t.Fatalf("installed %q after a failed read, want nothing", h.topbar.installed)
+		t.Fatalf("installed %+v after a failed read, want nothing", h.topbar.installed)
 	}
 	if rec := h.recorded(t, "error", opRestore); rec.Context["workspace"] != string(testWS) || rec.Context["cause"] == nil {
 		t.Fatalf("the record = %+v, want the workspace and the cause", rec.Context)
@@ -250,20 +254,20 @@ func TestSetRecordsAndDrawsTheSummary(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	err := h.k.Set(context.Background(), testWS, "Fix the footer")
+	err := h.k.Set(context.Background(), testWS, footerSummary)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if h.store.summaries[testWS] != "Fix the footer" {
-		t.Fatalf("stored %q, want the summary", h.store.summaries[testWS])
+	if h.store.summaries[testWS] != footerSummary {
+		t.Fatalf("stored %+v, want the summary", h.store.summaries[testWS])
 	}
-	if !reflect.DeepEqual(h.topbar.installed, []string{"Fix the footer"}) {
-		t.Fatalf("installed %q, want the summary", h.topbar.installed)
+	if !reflect.DeepEqual(h.topbar.installed, []wsm.WorkspaceSummary{footerSummary}) {
+		t.Fatalf("installed %+v, want the summary", h.topbar.installed)
 	}
-	if rec := h.recorded(t, "info", opSet); rec.Context["summary"] != "Fix the footer" {
-		t.Fatalf("the record = %+v, want the summary", rec.Context)
+	if rec := h.recorded(t, "info", opSet); rec.Context["short_summary"] != footerSummary.Short || rec.Context["long_summary"] != footerSummary.Long {
+		t.Fatalf("the record = %+v, want both parts", rec.Context)
 	}
 }
 
@@ -273,24 +277,24 @@ func TestAFailedSetDrawsNothingAndIsLogged(t *testing.T) {
 	h.store.putErr = errors.New("the state database is locked")
 
 	// Act
-	err := h.k.Set(context.Background(), testWS, "Fix the footer")
+	err := h.k.Set(context.Background(), testWS, footerSummary)
 
 	// Assert
 	if !errors.Is(err, h.store.putErr) {
 		t.Fatalf("Set = %v, want the write's failure", err)
 	}
 	if len(h.topbar.installed) != 0 {
-		t.Fatalf("installed %q after a failed write, want nothing", h.topbar.installed)
+		t.Fatalf("installed %+v after a failed write, want nothing", h.topbar.installed)
 	}
-	if rec := h.recorded(t, "error", opSet); rec.Context["summary"] != "Fix the footer" {
-		t.Fatalf("the record = %+v, want the summary", rec.Context)
+	if rec := h.recorded(t, "error", opSet); rec.Context["short_summary"] != footerSummary.Short || rec.Context["long_summary"] != footerSummary.Long {
+		t.Fatalf("the record = %+v, want both parts", rec.Context)
 	}
 }
 
 func TestAClearDropsAndRetractsTheSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.store.summaries[testWS] = "Fix the footer"
+	h.store.summaries[testWS] = footerSummary
 
 	// Act
 	h.k.OnContextReset(testWS)
@@ -299,8 +303,8 @@ func TestAClearDropsAndRetractsTheSummary(t *testing.T) {
 	if _, stands := h.store.summaries[testWS]; stands {
 		t.Fatalf("the summary still stands after a /clear")
 	}
-	if !reflect.DeepEqual(h.topbar.installed, []string{""}) {
-		t.Fatalf("installed %q, want the retraction", h.topbar.installed)
+	if !reflect.DeepEqual(h.topbar.installed, []wsm.WorkspaceSummary{{}}) {
+		t.Fatalf("installed %+v, want the retraction", h.topbar.installed)
 	}
 	if rec := h.recorded(t, "info", opReset); rec.Context["dropped"] != true {
 		t.Fatalf("the record = %+v, want dropped=true", rec.Context)
@@ -310,7 +314,7 @@ func TestAClearDropsAndRetractsTheSummary(t *testing.T) {
 func TestAFailedClearDropKeepsTheSummaryDrawnAndIsLogged(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.store.summaries[testWS] = "Fix the footer"
+	h.store.summaries[testWS] = footerSummary
 	h.store.dropErr = errors.New("the state database is locked")
 
 	// Act
@@ -318,7 +322,7 @@ func TestAFailedClearDropKeepsTheSummaryDrawnAndIsLogged(t *testing.T) {
 
 	// Assert
 	if len(h.topbar.installed) != 0 {
-		t.Fatalf("installed %q after a failed drop, want the summary left drawn", h.topbar.installed)
+		t.Fatalf("installed %+v after a failed drop, want the summary left drawn", h.topbar.installed)
 	}
 	if rec := h.recorded(t, "error", opReset); rec.Context["workspace"] != string(testWS) || rec.Context["cause"] == nil {
 		t.Fatalf("the record = %+v, want the workspace and the cause", rec.Context)
@@ -404,7 +408,7 @@ func TestAWorkspaceWithNoSummaryOwesTheWrappedNote(t *testing.T) {
 func TestAWorkspaceWithASummaryOwesNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.store.summaries[testWS] = "Fix the footer"
+	h.store.summaries[testWS] = footerSummary
 
 	// Act
 	note, owed, err := h.k.OwedNote(context.Background(), testWS)
@@ -412,6 +416,104 @@ func TestAWorkspaceWithASummaryOwesNothing(t *testing.T) {
 	// Assert
 	if err != nil || owed || note != "" {
 		t.Fatalf("OwedNote = (%q, %v, %v), want nothing owed", note, owed, err)
+	}
+}
+
+func TestAWorkspaceWithOnlyAShortSummaryOwesTheNote(t *testing.T) {
+	// Arrange: a summary set before long summaries existed.
+	h := newHarness(t)
+	h.store.summaries[testWS] = wsm.WorkspaceSummary{Short: "Fix the footer"}
+
+	// Act
+	note, owed, err := h.k.OwedNote(context.Background(), testWS)
+
+	// Assert
+	if err != nil || !owed || note == "" {
+		t.Fatalf("OwedNote = (%q, %v, %v), want the note owed", note, owed, err)
+	}
+	if rec := h.recorded(t, "debug", opOwed); rec.Context["short_only"] != true {
+		t.Fatalf("the record = %+v, want short_only=true", rec.Context)
+	}
+}
+
+func TestRestoreDrawsAShortOnlySummary(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	shortOnly := wsm.WorkspaceSummary{Short: "Fix the footer"}
+	h.store.summaries[testWS] = shortOnly
+
+	// Act
+	err := h.k.Restore(context.Background(), testWS)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !reflect.DeepEqual(h.topbar.installed, []wsm.WorkspaceSummary{shortOnly}) {
+		t.Fatalf("installed %+v, want the short summary drawn", h.topbar.installed)
+	}
+	if rec := h.recorded(t, "debug", opRestore); rec.Context["complete"] != false {
+		t.Fatalf("the record = %+v, want complete=false", rec.Context)
+	}
+}
+
+func TestValidateLongAcceptsTwoToFourSentences(t *testing.T) {
+	tests := []struct {
+		name string
+		long string
+	}{
+		{name: "two sentences", long: "Fix the footer. It stalls at a cold gate."},
+		{name: "four sentences", long: "Fix the footer. It stalls. Users notice. Ship it today."},
+		{name: "at the most words", long: strings.TrimSpace(strings.Repeat("word ", LongMaxWords-1)) + ". Done."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			err := ValidateLong(tt.long)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ValidateLong(%q) = %v, want nil", tt.long, err)
+			}
+		})
+	}
+}
+
+func TestValidateLongRefusesWhatTheHoverDoesNotShow(t *testing.T) {
+	tests := []struct {
+		name   string
+		long   string
+		reason string
+	}{
+		{name: "one sentence", long: "Fix the footer.", reason: "a long summary is 2 to 4 sentences, not 1"},
+		{name: "five sentences", long: "One. Two. Three. Four. Five.", reason: "a long summary is 2 to 4 sentences, not 5"},
+		{name: "too many words", long: strings.TrimSpace(strings.Repeat("word ", LongMaxWords)) + ". Done.", reason: "a long summary is at most 80 words, not 81"},
+		{name: "a line break", long: "Fix the footer.\nIt stalls.", reason: "a long summary is one paragraph, with no line break"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange, Act
+			err := ValidateLong(tt.long)
+
+			// Assert
+			if err == nil || err.Error() != tt.reason {
+				t.Fatalf("ValidateLong(%q) = %v, want %q", tt.long, err, tt.reason)
+			}
+		})
+	}
+}
+
+func TestValidateLongSharesTheParagraphRule(t *testing.T) {
+	// Arrange
+	long := "Fix the footer."
+
+	// Act
+	got := ValidateLong(long)
+
+	// Assert
+	want := textline.Paragraph("long summary", long, LongMinSentences, LongMaxSentences, LongMaxWords)
+	if got == nil || want == nil || got.Error() != want.Error() {
+		t.Fatalf("ValidateLong = %v, want textline.Paragraph's %v", got, want)
 	}
 }
 
@@ -497,7 +599,7 @@ func TestTheShippedBriefLoadsAndNamesTheVerb(t *testing.T) {
 	if err != nil {
 		t.Fatalf("splice the shipped brief: %v", err)
 	}
-	if !strings.Contains(note, "agent-repld workspace summary here -text") {
+	if !strings.Contains(note, "agent-repld workspace summary here -long") || !strings.Contains(note, "-short") {
 		t.Fatalf("the shipped brief names no summary verb: %q", note)
 	}
 }

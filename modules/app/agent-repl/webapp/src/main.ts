@@ -3,8 +3,7 @@
  *
  * It does the smallest thing that makes every later mount possible, in the one
  * order the dependencies allow, and it mounts exactly one component before
- * adoption: the topbar, whose warning chip is the only surface that can report
- * the boot itself going wrong.
+ * adoption: the topbar.
  *
  * THE ORDER IS FORCED, not chosen, and the forcing constraint is that
  * the canonical `log` methods REFUSE to emit without an installed sink:
@@ -16,9 +15,9 @@
  *      logs;
  *   4. the shell, which logs, so a broken `index.html` fails by name here
  *      rather than inside a component's first draw;
- *   5. the client-local failures and the topbar that draws them in its
- *      warning chip, which also log, so there is somewhere to put a boot
- *      failure before anything that can fail is started;
+ *   5. the client-local failures and the topbar, which also log, so there is
+ *      somewhere to put a boot failure before anything that can fail is
+ *      started;
  *   6. everything else.
  *
  * Steps 4 and 5 used to come before step 3, which meant `boot` threw on its
@@ -27,9 +26,10 @@
  *
  * A THROW ANYWHERE IN HERE IS `boot_failed` — the one failure that cannot be
  * carried the way the others are, since the machinery that would carry it is
- * the machinery that failed to build. It is drawn from whatever exists at the
- * time: the warning chip if step 5 got that far, and the emergency console path if
- * it did not, which is the documented exception to "no direct console".
+ * the machinery that failed to build. It is filed in whatever exists at the
+ * time: the failure sink if step 5 got that far, and the emergency console
+ * path if it did not, which is the documented exception to "no direct
+ * console".
  */
 import { readWebappBuild } from "./webapp-build.js";
 import { pageRestyleTurns } from "./host/restyle-turn.js";
@@ -79,7 +79,6 @@ import { endPageAtPagehide, stopAtPageTeardown } from "./page-teardown.js";
 import { connectToHost } from "./host/embed.js";
 import { installTextAffordances, startPageRuntime } from "./document-runtime.js";
 import { watchShownEdge } from "./host/shown-edge.js";
-import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
 import { createEditorIngressView } from "./held/editor-ingress.js";
 import { createEditorNotices, type EditorNotices } from "./footer/editor-notice.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
@@ -166,14 +165,12 @@ export async function boot(): Promise<void> {
     // AND THE SHELL IS RESOLVED INSIDE THE TRY, not above it, because it
     // logs and therefore has to come after the sink. Its failure now goes
     // through `reportBootFailure` like every other one, which for a page
-    // missing its own `#topbar` is still the console path -- there is no
-    // warning chip to draw on -- but it is at least LOGGED now rather than
-    // thrown past the reporter.
+    // missing its own `#topbar` is still the console path, but it is at least
+    // LOGGED rather than thrown past the reporter.
     const shell = shellElements(document);
 
     // Joined before anything draws, so the host's first word (shown or not)
     // reaches the page before the rail decides what it can skip.
-    const webhostFailures = createWebhostFailureView();
     // The editor's own held-prompt ingress entries, which the held section
     // draws while this page cannot reach the daemon (held/section.ts).
     const editorIngress = createEditorIngressView();
@@ -185,7 +182,6 @@ export async function boot(): Promise<void> {
       win: window,
       presence: pagePresence(),
       quiet: pageQuiet(document),
-      webhostFailures,
       levelWindow,
       editorIngress,
       editorNotices,
@@ -202,18 +198,10 @@ export async function boot(): Promise<void> {
     // cannot read a cross-origin page's document.
     stopAtPageTeardown(installPageCensus(document, pageAfter));
 
-    // THE TOPBAR IS MOUNTED HERE, BEFORE ANY STREAM, because its warning chip
-    // is the ONE place this page shows an error -- including the ones that
-    // stop a stream from ever opening (a refused adoption, a dead link). The
-    // stream itself waits for `watch`, after adoption. `failures` is set only
-    // once the chip that draws it exists, so a failure the catch files is
-    // always one the page can show.
+    // THE TOPBAR IS MOUNTED HERE, BEFORE ANY STREAM; the stream itself waits
+    // for `watch`, after adoption.
     const localFailures = createLocalFailures();
-    // The chip lists the webhost's failures too: it has no chip of its own.
-    const topbar = mountTopbar(shell.topbar, {
-      failures: mergeFailureViews(localFailures, webhostFailures),
-      focusLeft: pageFocusLeft(),
-    });
+    const topbar = mountTopbar(shell.topbar, { focusLeft: pageFocusLeft() });
     // Its reveal layer listens on the document, which later test files share.
     stopAtPageTeardown(() => topbar.dispose());
     failures = localFailures;
@@ -523,24 +511,21 @@ function noFeedRow(id: FeedId, operation: string, said: LogMessage): Promise<boo
 /**
  * File the boot failure wherever there is still something to file it in.
  *
- * The warning chip's failures when the topbar that draws them is mounted, and
- * the emergency console path when it is not — which is the case for a failure
- * in the page address or the transport, before there is any surface at all.
+ * The page's failure sink once it is made, and the emergency console path
+ * before it is — which is the case for a failure in the page address or the
+ * transport, before there is anything to file it in.
  * Logging through `log.error()` is not available either: the logger's own
  * sink is built inside the block that just threw.
  */
 function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
   const cause = errorCause(err);
   if (failures !== null) {
+    // THE FAILURE SINK RECORDS IT, at ERROR with its cause: one record.
     failures.report(bootFailed(cause));
-    log.error("the webapp failed to boot: {cause}", {
-      operation: "main.boot-failed",
-      context: {},
-    }, { cause });
     return;
   }
   // PRE-LOGGER BOOTSTRAP FAILURE: the documented exception to "no direct
-  // console". There is no chip to draw on and no logger to route through.
+  // console". There is no failure sink and no logger to route through.
   console.error(`the webapp failed to boot before it could report anything: ${cause}`);
 }
 

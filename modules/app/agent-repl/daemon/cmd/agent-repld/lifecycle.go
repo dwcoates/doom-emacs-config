@@ -549,14 +549,17 @@ func (s *lifecycleSink) OnAsksSettled(ws ids.WorkspaceID) {
 //
 // The push is the WHOLE verdict, so the standing shim-reported faults are
 // closed first and the pushed ones opened afresh: a healthy verdict is a
-// retraction, exactly as the topbar's warning strip treats it.
+// retraction.
 func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *conversationv1.SessionDiagnostics) {
 	// EVERY FRAME STATES THE SHIM'S BUILD, and the rollout judges it against
 	// the installed bundle before anything else here can return early.
 	s.reportBuild(ws, diagnostics.GetShimBuild())
+	// Every record names the workspace as its own, so a reader scoped to the
+	// workspace (bin/logs.sh, a test on a shared daemon) finds it.
+	log := s.log.With(dlog.Context{dlog.KeyWorkspaceID: string(ws)})
 	reporter, ok := s.health.reporter()
 	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", "a diagnostics push arrived before the health reporter existed", dlog.Context{
+		log.Error("daemon.cmd.lifecycle", "a diagnostics push arrived before the health reporter existed", dlog.Context{
 			"workspace": string(ws),
 		})
 		return
@@ -566,7 +569,7 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 	// THE PUSH IS THE WHOLE VERDICT: it is the recovery edge of every
 	// shim-reported fault standing. A standing set that cannot be read is not
 	// replaced, or the verdict would be stacked on top of itself.
-	closed, err := health.CloseOnEdge(ctx, health.ReporterFaults(reporter), s.log, health.EdgeShimDiagnostics,
+	closed, err := health.CloseOnEdge(ctx, health.ReporterFaults(reporter), log, health.EdgeShimDiagnostics,
 		health.EdgeScope{Workspace: &ws}, time.Now())
 	if err != nil {
 		return
@@ -585,7 +588,7 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 					"kind":      shimFaultKind(fault),
 				},
 			}); err != nil {
-				s.log.Error("daemon.cmd.lifecycle", "a shim-reported fault could not be recorded", dlog.Context{
+				log.Error("daemon.cmd.lifecycle", "a shim-reported fault could not be recorded", dlog.Context{
 					"workspace": string(ws), "component": fault.GetComponent(), "cause": err.Error(),
 				})
 				continue
@@ -593,7 +596,7 @@ func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *co
 			opened++
 		}
 	}
-	s.log.Debug("daemon.cmd.lifecycle", "the shim's health verdict was folded into the session faults", dlog.Context{
+	log.Debug("daemon.cmd.lifecycle", "the shim's health verdict was folded into the session faults", dlog.Context{
 		"workspace": string(ws), "unhealthy": isUnhealthy, "opened": opened, "retracted": closed,
 	})
 }

@@ -10,7 +10,7 @@
  * (image-overlay.ts). Neither acts on the answer: the push is what draws.
  *
  * A REFUSED OR FAILED CALL is an error the reader must see: it is filed on the
- * topbar's warning chip (`control_plane_failed`) and logged, as every verb is.
+ * failure sink (`control_plane_failed`), which records it, as every verb is.
  */
 import { create } from "@bufbuild/protobuf";
 import {

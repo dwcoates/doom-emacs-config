@@ -1,6 +1,6 @@
 # Storing links
 
-- **LINKS.** The topbar's summary opens this workspace's links: a click on
+- **LINKS.** The workspace name beneath the topbar's summary opens this workspace's links (underlined while any link shows): a click on
   it opens the one shown link, or drops a menu of the shown links' labels,
   most recently set first, when there are several.
   - The metaprompt says when to store one ("Workspace links").

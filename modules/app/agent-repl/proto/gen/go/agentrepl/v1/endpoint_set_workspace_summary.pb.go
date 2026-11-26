@@ -1,28 +1,35 @@
 // endpoint_set_workspace_summary.proto — SetWorkspaceSummary: set the
-// one-sentence summary of a workspace's task that the topbar draws. AGENT
-// API section.
+// summary of a workspace's task that the topbar draws, as a long summary and
+// the short summary distilled from it. AGENT API section.
 //
 // THE WORKSPACE'S OWN AGENT WRITES ITS SUMMARY. The summary is the agent's
 // own statement of the workspace's high-level task, so the agent, which holds
 // the whole conversation, is the one that states it; the daemon distills
-// nothing. It draws the summary verbatim as the topbar's title line
+// nothing. It draws the short summary verbatim as the topbar's title line
 // (frontend.v1.TopbarTitle), first in precedence over the vendor's own
-// conversation title, and every find and status read answers it.
+// conversation title, and the long summary in the popup a hover on that title
+// shows (frontend.v1.TopbarTitleDescription). Every find and status read
+// answers both.
 //
-// WHEN IT IS SET. A workspace with no summary owes one: while none stands,
+// WHEN IT IS SET. A workspace with no summary owes one: while none stands (or
+// only a short summary stands, set before the long one existed),
 // the daemon closes every user's or agent's prompt to the workspace with a
 // note asking for it, so a new workspace sets it on its first prompt, and a
 // workspace whose /clear dropped it sets it again on the prompt after. Once
 // one stands, the agent sets it again only when the workspace's high-level
 // task materially changes, which for a one-shot is typically never.
 //
-// WHAT A SUMMARY IS. One plain imperative sentence stating the workspace's
-// task, opened by its verb ("Fix the footer's stall detail for cold gates."),
-// of at most fifteen words, shorter being better. The daemon refuses any
-// other text (`invalid_summary`) with the reason, so every summary drawn
-// fits the title line.
+// WHAT A SUMMARY IS. Two parts, always set together. The LONG summary is one
+// paragraph of two to four sentences describing the task in more detail than
+// a title can. The SHORT summary is distilled from it: one plain imperative
+// sentence stating the task, opened by its verb ("Fix the footer's stall
+// detail for cold gates."), of at most fifteen words, shorter being better.
+// The long summary is declared first so an agent writes it first and
+// distills the short one from it. The daemon refuses either part when it
+// breaks its form (`invalid_summary`) with the part and the reason, so every
+// summary drawn fits its slot.
 //
-// DURABLE: the daemon records the summary on the workspace, so it stands
+// DURABLE: the daemon records both parts on the workspace, so it stands
 // across a daemon restart, and drops it at the workspace's /clear, which
 // ends the conversation it described.
 
@@ -54,12 +61,18 @@ type SetWorkspaceSummaryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace whose summary is set.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The summary, stored and drawn verbatim: one line, one sentence, two to
-	// fifteen words, with no comma, semicolon, colon, parenthesis or dash
-	// joining clauses, and no whitespace at either end. Any other summary is
-	// refused (`invalid_summary`). A blank summary is a malformed request
-	// (Connect InvalidArgument).
-	Summary       string `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	// The long summary, stored and drawn verbatim in the title's hover popup:
+	// one paragraph (no line break) of two to four sentences and at most
+	// eighty words, the last word ending its last sentence, with no whitespace
+	// at either end. Any other text is refused (`invalid_summary`). A blank
+	// long summary is a malformed request (Connect InvalidArgument).
+	LongSummary string `protobuf:"bytes,3,opt,name=long_summary,json=longSummary,proto3" json:"long_summary,omitempty"`
+	// The short summary, distilled from the long one, stored and drawn
+	// verbatim as the title: one line, one sentence, two to fifteen words, with
+	// no comma, semicolon, colon, parenthesis or dash joining clauses, and no
+	// whitespace at either end. Any other text is refused (`invalid_summary`).
+	// A blank short summary is a malformed request (Connect InvalidArgument).
+	ShortSummary  string `protobuf:"bytes,2,opt,name=short_summary,json=shortSummary,proto3" json:"short_summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -101,9 +114,16 @@ func (x *SetWorkspaceSummaryRequest) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-func (x *SetWorkspaceSummaryRequest) GetSummary() string {
+func (x *SetWorkspaceSummaryRequest) GetLongSummary() string {
 	if x != nil {
-		return x.Summary
+		return x.LongSummary
+	}
+	return ""
+}
+
+func (x *SetWorkspaceSummaryRequest) GetShortSummary() string {
+	if x != nil {
+		return x.ShortSummary
 	}
 	return ""
 }
@@ -195,8 +215,10 @@ func (*SetWorkspaceSummaryResponse_Error) isSetWorkspaceSummaryResponse_Result()
 // the summary the workspace already has is no change and succeeds.
 type SetWorkspaceSummarySuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The summary the workspace now has, exactly as the topbar draws it.
-	Summary       string `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	// The long summary the workspace now has, exactly as the hover shows it.
+	LongSummary string `protobuf:"bytes,2,opt,name=long_summary,json=longSummary,proto3" json:"long_summary,omitempty"`
+	// The short summary the workspace now has, exactly as the topbar draws it.
+	ShortSummary  string `protobuf:"bytes,1,opt,name=short_summary,json=shortSummary,proto3" json:"short_summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -231,9 +253,16 @@ func (*SetWorkspaceSummarySuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *SetWorkspaceSummarySuccess) GetSummary() string {
+func (x *SetWorkspaceSummarySuccess) GetLongSummary() string {
 	if x != nil {
-		return x.Summary
+		return x.LongSummary
+	}
+	return ""
+}
+
+func (x *SetWorkspaceSummarySuccess) GetShortSummary() string {
+	if x != nil {
+		return x.ShortSummary
 	}
 	return ""
 }
@@ -362,7 +391,7 @@ type SetWorkspaceSummaryError_NotYetAdopted struct {
 }
 
 type SetWorkspaceSummaryError_InvalidSummary struct {
-	// The summary is not one plain sentence of two to fifteen words.
+	// A part of the summary breaks its form.
 	InvalidSummary *SetWorkspaceSummaryInvalidSummary `protobuf:"bytes,5,opt,name=invalid_summary,json=invalidSummary,proto3,oneof"`
 }
 
@@ -556,15 +585,17 @@ func (x *SetWorkspaceSummaryNotYetAdopted) GetAddress() string {
 	return ""
 }
 
-// The summary is not one the title line draws.
+// A part of the summary breaks its form. The long summary is judged first,
+// so a request breaking both names the long one.
 type SetWorkspaceSummaryInvalidSummary struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The summary exactly as the request named it.
-	Summary string `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
-	// Why it was refused (too few words, too many, more than one sentence, a
-	// line break, a clause-joining mark), for the agent to shorten or reword
-	// the summary from. Prose to be read, not a vocabulary to switch on.
-	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// THE ARM IS THE PART REFUSED.
+	//
+	// Types that are valid to be assigned to Part:
+	//
+	//	*SetWorkspaceSummaryInvalidSummary_LongSummary
+	//	*SetWorkspaceSummaryInvalidSummary_ShortSummary
+	Part          isSetWorkspaceSummaryInvalidSummary_Part `protobuf_oneof:"part"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -599,14 +630,157 @@ func (*SetWorkspaceSummaryInvalidSummary) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *SetWorkspaceSummaryInvalidSummary) GetSummary() string {
+func (x *SetWorkspaceSummaryInvalidSummary) GetPart() isSetWorkspaceSummaryInvalidSummary_Part {
 	if x != nil {
-		return x.Summary
+		return x.Part
+	}
+	return nil
+}
+
+func (x *SetWorkspaceSummaryInvalidSummary) GetLongSummary() *SetWorkspaceSummaryInvalidLongSummary {
+	if x != nil {
+		if x, ok := x.Part.(*SetWorkspaceSummaryInvalidSummary_LongSummary); ok {
+			return x.LongSummary
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspaceSummaryInvalidSummary) GetShortSummary() *SetWorkspaceSummaryInvalidShortSummary {
+	if x != nil {
+		if x, ok := x.Part.(*SetWorkspaceSummaryInvalidSummary_ShortSummary); ok {
+			return x.ShortSummary
+		}
+	}
+	return nil
+}
+
+type isSetWorkspaceSummaryInvalidSummary_Part interface {
+	isSetWorkspaceSummaryInvalidSummary_Part()
+}
+
+type SetWorkspaceSummaryInvalidSummary_LongSummary struct {
+	// The long summary is not two to four sentences in one paragraph.
+	LongSummary *SetWorkspaceSummaryInvalidLongSummary `protobuf:"bytes,3,opt,name=long_summary,json=longSummary,proto3,oneof"`
+}
+
+type SetWorkspaceSummaryInvalidSummary_ShortSummary struct {
+	// The short summary is not one plain sentence of two to fifteen words.
+	ShortSummary *SetWorkspaceSummaryInvalidShortSummary `protobuf:"bytes,4,opt,name=short_summary,json=shortSummary,proto3,oneof"`
+}
+
+func (*SetWorkspaceSummaryInvalidSummary_LongSummary) isSetWorkspaceSummaryInvalidSummary_Part() {}
+
+func (*SetWorkspaceSummaryInvalidSummary_ShortSummary) isSetWorkspaceSummaryInvalidSummary_Part() {}
+
+// The long summary is not one the title's hover popup shows.
+type SetWorkspaceSummaryInvalidLongSummary struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The long summary exactly as the request named it.
+	LongSummary string `protobuf:"bytes,1,opt,name=long_summary,json=longSummary,proto3" json:"long_summary,omitempty"`
+	// Why it was refused (a line break, too few sentences, too many, too many
+	// words, no sentence end at its close), for the agent to reword it from.
+	// Prose to be read, not a vocabulary to switch on.
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceSummaryInvalidLongSummary) Reset() {
+	*x = SetWorkspaceSummaryInvalidLongSummary{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceSummaryInvalidLongSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceSummaryInvalidLongSummary) ProtoMessage() {}
+
+func (x *SetWorkspaceSummaryInvalidLongSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceSummaryInvalidLongSummary.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceSummaryInvalidLongSummary) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetWorkspaceSummaryInvalidLongSummary) GetLongSummary() string {
+	if x != nil {
+		return x.LongSummary
 	}
 	return ""
 }
 
-func (x *SetWorkspaceSummaryInvalidSummary) GetReason() string {
+func (x *SetWorkspaceSummaryInvalidLongSummary) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// The short summary is not one the title line draws.
+type SetWorkspaceSummaryInvalidShortSummary struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The short summary exactly as the request named it.
+	ShortSummary string `protobuf:"bytes,1,opt,name=short_summary,json=shortSummary,proto3" json:"short_summary,omitempty"`
+	// Why it was refused (too few words, too many, more than one sentence, a
+	// line break, a clause-joining mark), for the agent to shorten or reword
+	// it from. Prose to be read, not a vocabulary to switch on.
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceSummaryInvalidShortSummary) Reset() {
+	*x = SetWorkspaceSummaryInvalidShortSummary{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceSummaryInvalidShortSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceSummaryInvalidShortSummary) ProtoMessage() {}
+
+func (x *SetWorkspaceSummaryInvalidShortSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceSummaryInvalidShortSummary.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceSummaryInvalidShortSummary) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetWorkspaceSummaryInvalidShortSummary) GetShortSummary() string {
+	if x != nil {
+		return x.ShortSummary
+	}
+	return ""
+}
+
+func (x *SetWorkspaceSummaryInvalidShortSummary) GetReason() string {
 	if x != nil {
 		return x.Reason
 	}
@@ -617,16 +791,18 @@ var File_agentrepl_v1_endpoint_set_workspace_summary_proto protoreflect.FileDesc
 
 const file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDesc = "" +
 	"\n" +
-	"1agentrepl/v1/endpoint_set_workspace_summary.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"p\n" +
+	"1agentrepl/v1/endpoint_set_workspace_summary.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x9e\x01\n" +
 	"\x1aSetWorkspaceSummaryRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x18\n" +
-	"\asummary\x18\x02 \x01(\tR\asummary\"\xad\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12!\n" +
+	"\flong_summary\x18\x03 \x01(\tR\vlongSummary\x12#\n" +
+	"\rshort_summary\x18\x02 \x01(\tR\fshortSummary\"\xad\x01\n" +
 	"\x1bSetWorkspaceSummaryResponse\x12D\n" +
 	"\asuccess\x18\x01 \x01(\v2(.agentrepl.v1.SetWorkspaceSummarySuccessH\x00R\asuccess\x12>\n" +
 	"\x05error\x18\x02 \x01(\v2&.agentrepl.v1.SetWorkspaceSummaryErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"6\n" +
-	"\x1aSetWorkspaceSummarySuccess\x12\x18\n" +
-	"\asummary\x18\x01 \x01(\tR\asummary\"\x8c\x04\n" +
+	"\x06result\"d\n" +
+	"\x1aSetWorkspaceSummarySuccess\x12!\n" +
+	"\flong_summary\x18\x02 \x01(\tR\vlongSummary\x12#\n" +
+	"\rshort_summary\x18\x01 \x01(\tR\fshortSummary\"\x8c\x04\n" +
 	"\x18SetWorkspaceSummaryError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.SetWorkspaceSummaryUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v25.agentrepl.v1.SetWorkspaceSummaryWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12`\n" +
@@ -642,9 +818,16 @@ const file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDesc = "" +
 	" SetWorkspaceSummaryNotYetAdopted\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
 	"\n" +
-	"\b_address\"U\n" +
-	"!SetWorkspaceSummaryInvalidSummary\x12\x18\n" +
-	"\asummary\x18\x01 \x01(\tR\asummary\x12\x16\n" +
+	"\b_address\"\xff\x01\n" +
+	"!SetWorkspaceSummaryInvalidSummary\x12X\n" +
+	"\flong_summary\x18\x03 \x01(\v23.agentrepl.v1.SetWorkspaceSummaryInvalidLongSummaryH\x00R\vlongSummary\x12[\n" +
+	"\rshort_summary\x18\x04 \x01(\v24.agentrepl.v1.SetWorkspaceSummaryInvalidShortSummaryH\x00R\fshortSummaryB\x06\n" +
+	"\x04partJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\asummaryR\x06reason\"b\n" +
+	"%SetWorkspaceSummaryInvalidLongSummary\x12!\n" +
+	"\flong_summary\x18\x01 \x01(\tR\vlongSummary\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"e\n" +
+	"&SetWorkspaceSummaryInvalidShortSummary\x12#\n" +
+	"\rshort_summary\x18\x01 \x01(\tR\fshortSummary\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reasonB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -659,7 +842,7 @@ func file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescGZIP() []byte
 	return file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_set_workspace_summary_proto_goTypes = []any{
 	(*SetWorkspaceSummaryRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceSummaryRequest
 	(*SetWorkspaceSummaryResponse)(nil),             // 1: agentrepl.v1.SetWorkspaceSummaryResponse
@@ -670,22 +853,26 @@ var file_agentrepl_v1_endpoint_set_workspace_summary_proto_goTypes = []any{
 	(*SetWorkspaceSummaryTransferringAway)(nil),     // 6: agentrepl.v1.SetWorkspaceSummaryTransferringAway
 	(*SetWorkspaceSummaryNotYetAdopted)(nil),        // 7: agentrepl.v1.SetWorkspaceSummaryNotYetAdopted
 	(*SetWorkspaceSummaryInvalidSummary)(nil),       // 8: agentrepl.v1.SetWorkspaceSummaryInvalidSummary
-	(*v1.WorkspaceRef)(nil),                         // 9: workspace.v1.WorkspaceRef
+	(*SetWorkspaceSummaryInvalidLongSummary)(nil),   // 9: agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary
+	(*SetWorkspaceSummaryInvalidShortSummary)(nil),  // 10: agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary
+	(*v1.WorkspaceRef)(nil),                         // 11: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_set_workspace_summary_proto_depIdxs = []int32{
-	9, // 0: agentrepl.v1.SetWorkspaceSummaryRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.SetWorkspaceSummaryResponse.success:type_name -> agentrepl.v1.SetWorkspaceSummarySuccess
-	3, // 2: agentrepl.v1.SetWorkspaceSummaryResponse.error:type_name -> agentrepl.v1.SetWorkspaceSummaryError
-	4, // 3: agentrepl.v1.SetWorkspaceSummaryError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceSummaryUnknownWorkspace
-	5, // 4: agentrepl.v1.SetWorkspaceSummaryError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceSummaryWorkspaceRefMismatch
-	6, // 5: agentrepl.v1.SetWorkspaceSummaryError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceSummaryTransferringAway
-	7, // 6: agentrepl.v1.SetWorkspaceSummaryError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceSummaryNotYetAdopted
-	8, // 7: agentrepl.v1.SetWorkspaceSummaryError.invalid_summary:type_name -> agentrepl.v1.SetWorkspaceSummaryInvalidSummary
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	11, // 0: agentrepl.v1.SetWorkspaceSummaryRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.SetWorkspaceSummaryResponse.success:type_name -> agentrepl.v1.SetWorkspaceSummarySuccess
+	3,  // 2: agentrepl.v1.SetWorkspaceSummaryResponse.error:type_name -> agentrepl.v1.SetWorkspaceSummaryError
+	4,  // 3: agentrepl.v1.SetWorkspaceSummaryError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceSummaryUnknownWorkspace
+	5,  // 4: agentrepl.v1.SetWorkspaceSummaryError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceSummaryWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.SetWorkspaceSummaryError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceSummaryTransferringAway
+	7,  // 6: agentrepl.v1.SetWorkspaceSummaryError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceSummaryNotYetAdopted
+	8,  // 7: agentrepl.v1.SetWorkspaceSummaryError.invalid_summary:type_name -> agentrepl.v1.SetWorkspaceSummaryInvalidSummary
+	9,  // 8: agentrepl.v1.SetWorkspaceSummaryInvalidSummary.long_summary:type_name -> agentrepl.v1.SetWorkspaceSummaryInvalidLongSummary
+	10, // 9: agentrepl.v1.SetWorkspaceSummaryInvalidSummary.short_summary:type_name -> agentrepl.v1.SetWorkspaceSummaryInvalidShortSummary
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_summary_proto_init() }
@@ -705,13 +892,17 @@ func file_agentrepl_v1_endpoint_set_workspace_summary_proto_init() {
 		(*SetWorkspaceSummaryError_InvalidSummary)(nil),
 	}
 	file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[7].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_set_workspace_summary_proto_msgTypes[8].OneofWrappers = []any{
+		(*SetWorkspaceSummaryInvalidSummary_LongSummary)(nil),
+		(*SetWorkspaceSummaryInvalidSummary_ShortSummary)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_summary_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -347,9 +347,11 @@
 
 ### The workspace keeps its own topbar summary current
 
-- The workspace's topbar summary is its own one-sentence statement of its high-level task, which its agent sets.
+- The workspace's topbar summary is its own statement of its high-level task, which its agent sets in two parts.
+  - The long summary, written first, describes the task in two to four sentences, and a hover on the topbar's title shows it.
+  - The short summary, distilled from the long one, is one sentence, and the topbar draws it as its title.
   - The daemon derives no summary, so a workspace that sets none shows none.
-  - While none stands, the daemon closes each prompt with a note asking for one, and that note holds the format.
+  - While none stands, or only a short one does, the daemon closes each prompt with a note asking for one, and that note holds the format.
 - The workspace sets its summary again whenever its high-level task materially changes, without asking.
   - A step within the task is never a reason to change it.
   - A one-shot's task is fixed at its creation, so a one-shot rarely changes its summary.
@@ -363,7 +365,7 @@
   - A link the prompt references is always stored, however briefly or incidentally the prompt mentions it.
     - The workspace is never hesitant to store a link: whether it is "important enough" is not a test, and the menu's cap is handled by choosing the five shown, never by skipping a link.
     - A link the prompt references is stored at the start of the turn, before any other work.
-  - The links are what the topbar's summary opens: one shown link opens on a click, and several drop a menu of their labels.
+  - The links are what the topbar's workspace name opens: one shown link opens on a click, and several drop a menu of their labels.
   - Examples are a pull request, a ticket, a design doc, or a dashboard.
   - A link already stored is relabeled rather than stored twice.
 - Every stored link says whether the workspace's work made what it points at.

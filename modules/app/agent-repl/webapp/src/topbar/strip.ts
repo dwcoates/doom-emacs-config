@@ -26,13 +26,18 @@
  * workspace's name into it; this end never concatenates identity fragments and
  * never stands the name in for a missing summary.
  *
- * THE SUMMARY OPENS THE WORKSPACE'S SHOWN LINKS, when the title carries them,
- * and the daemon's arm says how: one link is opened directly, through the one
- * external-link component, so the click is OpenExternal (the Chrome profile of
- * the session's account) and never a navigation; several drop a menu under the
- * heading whose rows are that same component. Either click stops propagating,
- * so the heading's session-line reveal does not also open. With no summary
- * there is no title, so nothing is clickable.
+ * NEITHER LINE CHANGES WITH STATE (owner ruling, 2026-11-25). The summary is
+ * always the summary's purple and never underlined; the name is always the
+ * foreground white. A hover on the summary shows the workspace's long summary
+ * beneath it (`TopbarTitle.description`).
+ *
+ * THE NAME OPENS THE WORKSPACE'S SHOWN LINKS, when it carries them, and is
+ * then the one underlined line. The daemon's arm says how: one link is opened
+ * directly, through the one external-link component, so the click is
+ * OpenExternal (the Chrome profile of the session's account) and never a
+ * navigation; several drop a menu under the heading whose rows are that same
+ * component. Either click stops propagating, so the heading's session-line
+ * reveal does not also open.
  */
 import { createControl } from "../control.js";
 import type {
@@ -40,14 +45,14 @@ import type {
   TopbarConnectivity,
   TopbarSessionLine,
   TopbarTitle,
-  TopbarTitleLinkMenu,
+  TopbarTitleDescription,
+  TopbarWorkspaceNameLinkMenu,
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
 import { drawLinkBadge, drawLinkMarks } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
 import { createLogger } from "../log.js";
-import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import { drawNamePrefix } from "../name-prefix.js";
@@ -168,7 +173,7 @@ export function drawTopbarHeading(
   const heading = document.createElement("div");
   heading.className = "topbar-heading";
   if (title !== undefined) heading.append(drawTopbarTitle(title, tc));
-  heading.append(drawTopbarWorkspaceName(name));
+  heading.append(drawTopbarWorkspaceName(name, tc));
   return heading;
 }
 
@@ -184,50 +189,66 @@ export function drawHeadingLine(className: string, text: string): HTMLElement {
   return element;
 }
 
-/** The summary's menu's name in the strip's one reveal layer. */
+/** The name's link menu's name in the strip's one reveal layer. */
 export const LINKS_REVEAL = "links";
+
+/** The summary's hover popup's name in the strip's one reveal layer. */
+export const DESCRIPTION_REVEAL = "description";
 
 /** A menu row whose link the workspace's work made: drawn on a lighter ground, its label in the summary's purple. */
 export const OWNED_LINK_CLASS = "is-owned";
 /** A menu row that carries a pull request badge, which reserves its margin. */
 export const BADGED_LINK_CLASS = "has-badge";
-/** A summary-menu row's first line: its label and the marks beside it. */
-export const LINK_HEAD_CLASS = "topbar-title-link-head";
+/** A link-menu row's first line: its label and the marks beside it. */
+export const LINK_HEAD_CLASS = "topbar-name-link-head";
 
 /**
- * The title: the workspace's generated summary, drawn verbatim. With one shown
- * link the summary's text is that link, and the tooltip names its label and
- * url beneath the whole summary. With several, a click on the summary drops
- * their menu.
+ * The title: the workspace's short summary, drawn verbatim, always in the
+ * summary's purple. With a description, a hover on it shows the long summary
+ * beneath it, and the popup replaces the line's own tooltip.
  */
 export function drawTopbarTitle(u: TopbarTitle, tc: TopbarContext): HTMLElement {
   const element = drawHeadingLine("topbar-title", u.text);
-  if (u.links === undefined) return element;
-  element.classList.add("topbar-title-linked");
-  const opens = requireCase(u.links.opens, "TopbarTitleLinks.opens");
-  switch (opens.case) {
-    case "single":
-      element.title = `${u.text}\n${opens.value.label}\n${opens.value.url}`;
-      element.replaceChildren(renderExternalLink(tc.ctx, { text: u.text, url: opens.value.url }));
-      return element;
-    case "menu":
-      bindTitleLinkMenu(element, opens.value, tc);
-      return element;
-    default: {
-      const other: { case: string } = opens;
-      return unreachableArm("TopbarTitleLinks.opens", other.case);
-    }
-  }
+  if (u.description !== undefined) bindTitleDescription(element, u.description, tc);
+  return element;
 }
 
 /**
- * Wire the summary's click to the menu of its shown links. The click is
+ * Wire the summary's hover to its long summary: the popup opens while the
+ * pointer rests on the summary and closes when it leaves. It is registered as
+ * it is drawn, so a push arriving while it is open re-opens it with THIS
+ * push's text.
+ */
+export function bindTitleDescription(element: HTMLElement, description: TopbarTitleDescription, tc: TopbarContext): void {
+  element.classList.add("topbar-title-described");
+  element.removeAttribute("title");
+  asAnchor(element, DESCRIPTION_REVEAL);
+  const body = (): HTMLElement => drawTitleDescription(description);
+  tc.reveals.register(DESCRIPTION_REVEAL, DESCRIPTION_REVEAL, body);
+  element.addEventListener("pointerenter", () => {
+    tc.reveals.open(DESCRIPTION_REVEAL, DESCRIPTION_REVEAL, body);
+  });
+  element.addEventListener("pointerleave", () => {
+    if (tc.reveals.current() === DESCRIPTION_REVEAL) tc.reveals.close();
+  });
+}
+
+/** The summary's hover popup: the long summary, drawn verbatim. */
+export function drawTitleDescription(u: TopbarTitleDescription): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "topbar-title-description";
+  element.textContent = u.text;
+  return element;
+}
+
+/**
+ * Wire the name's click to the menu of its shown links. The click is
  * claimed, so the heading's session-line reveal does not also toggle.
  */
-export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMenu, tc: TopbarContext): void {
-  element.classList.add("topbar-title-menu");
+export function bindNameLinkMenu(element: HTMLElement, menu: TopbarWorkspaceNameLinkMenu, tc: TopbarContext): void {
+  element.classList.add("topbar-name-menu");
   asAnchor(element, LINKS_REVEAL);
-  const body = (): HTMLElement => drawTitleLinkMenu(menu, tc);
+  const body = (): HTMLElement => drawNameLinkMenu(menu, tc);
   // Registered as it is drawn, so a push arriving while the menu is open
   // re-opens it with THIS push's links rather than the previous push's.
   tc.reveals.register(LINKS_REVEAL, LINKS_REVEAL, body);
@@ -238,7 +259,7 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
 }
 
 /**
- * The summary's menu: one row per shown link, in the served order (most
+ * The name's link menu: one row per shown link, in the served order (most
  * recently set first), each the label drawn as its link with the url beneath
  * it as the row's dim second line, the way a model's description sits under
  * its name. A click anywhere in a row closes the menu as it opens the link.
@@ -248,16 +269,16 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
  * "owned" and "subscribed" marks, and a pull request's row carries its
  * state's badge in its right margin.
  */
-export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
+export function drawNameLinkMenu(menu: TopbarWorkspaceNameLinkMenu, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
-  list.className = "topbar-title-link-options list-rows";
-  log.debug("drawing the summary's link menu", {
-    operation: "topbar.title-link-menu",
+  list.className = "topbar-name-link-options list-rows";
+  log.debug("drawing the name's link menu", {
+    operation: "topbar.name-link-menu",
     context: { items: menu.items.length },
   });
   for (const item of menu.items) {
     const row = document.createElement("div");
-    row.className = "topbar-title-link-option";
+    row.className = "topbar-name-link-option";
     row.title = item.url;
     const link = renderExternalLink(tc.ctx, { text: item.label, url: item.url });
     link.addEventListener("click", () => tc.reveals.close());
@@ -278,7 +299,7 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
     head.className = LINK_HEAD_CLASS;
     head.append(link, ...drawLinkMarks(item));
     const url = document.createElement("span");
-    url.className = "topbar-title-link-url";
+    url.className = "topbar-name-link-url";
     url.textContent = item.url;
     row.append(head, url);
     const badge = drawLinkBadge(item.badge);
@@ -293,11 +314,32 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
 
 /**
  * The workspace's name, drawn verbatim on the heading's second line, after
- * the marks the daemon puts before it (`name-prefix.ts`). The tooltip is the
- * name alone.
+ * the marks the daemon puts before it (`name-prefix.ts`), always in the
+ * foreground white. With shown links it is underlined and its click opens
+ * them: one directly, with the tooltip naming its label and url beneath the
+ * name, several through their menu. The tooltip is otherwise the name alone.
  */
-export function drawTopbarWorkspaceName(u: TopbarWorkspaceName): HTMLElement {
+export function drawTopbarWorkspaceName(u: TopbarWorkspaceName, tc: TopbarContext): HTMLElement {
   const line = drawHeadingLine("topbar-workspace-name", u.text);
+  if (u.links !== undefined) {
+    line.classList.add("topbar-name-linked");
+    const opens = requireCase(u.links.opens, "TopbarWorkspaceNameLinks.opens");
+    switch (opens.case) {
+      case "single": {
+        line.title = `${u.text}\n${opens.value.label}\n${opens.value.url}`;
+        line.replaceChildren(renderExternalLink(tc.ctx, { text: u.text, url: opens.value.url }));
+        line.addEventListener("click", (event) => event.stopPropagation());
+        break;
+      }
+      case "menu":
+        bindNameLinkMenu(line, opens.value, tc);
+        break;
+      default: {
+        const other: { case: string } = opens;
+        return unreachableArm("TopbarWorkspaceNameLinks.opens", other.case);
+      }
+    }
+  }
   const prefix = drawNamePrefix(u.prefix, "TopbarWorkspaceName.prefix");
   if (prefix !== undefined) line.prepend(prefix);
   return line;

@@ -45,7 +45,6 @@ import { frameQueue } from "../frame-queue.js";
 import type { FeedId, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { composerClosedFor } from "../../src/vocab.js";
-import { isControl } from "../../src/control.js";
 import { shellElements, type ShellElements } from "../../src/shell";
 import { createDaemonTransport } from "../../src/rpc/transport";
 import { createAgentReplClient } from "../../src/rpc/client";
@@ -58,8 +57,9 @@ import {
   setLogger,
   type ClientLogLevel,
 } from "../../src/log";
-import { createLocalFailures } from "../../src/failure/local";
-import { bootFailed } from "../../src/failure/sink";
+import { ARM_HEADLINE, createLocalFailures, evidenceRows, type LocalFailures } from "../../src/failure/local";
+import { bootFailed, type ClientFailureArm } from "../../src/failure/sink";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
 import { installProseLinkRouting } from "../../src/link";
 import { createRowRenderers } from "../../src/feed/row-renderers";
@@ -252,7 +252,7 @@ export interface MountedApp {
   click(selector: string): Promise<void>;
   /** Click an element directly (for elements found by a richer query). */
   clickElement(element: HTMLElement): Promise<void>;
-  /** The client-local failure arms the topbar's warning chip currently lists. */
+  /** The client-local failure arms standing in the page's failure sink. */
   failureArms(): string[];
   /** The refusal arms currently drawn anywhere, with their host selectors. */
   refusalArms(): string[];
@@ -394,29 +394,26 @@ interface Endpoint {
   readonly socketPath?: string;
 }
 
-/**
- * The client-local failure arms the topbar's warning chip lists, read off the
- * document: the chip's `data-local-arms` hook, so no reveal has to be opened
- * to say which failures the page is showing.
- */
-export function chipFailureArms(): string[] {
-  const chip = document.querySelector<HTMLElement>("#topbar .topbar-heading-warnings");
-  return (chip?.dataset.localArms ?? "").split(" ").filter((arm) => arm !== "");
+/** The latest failure each client-local arm was filed with, by the page under test. */
+const filedFailures = new Map<string, FailureKind>();
+
+/** The page under test's failure sink, once one is mounted. */
+let pageFailures: LocalFailures | null = null;
+
+/** The client-local failure arms standing in the mounted page's failure sink. */
+export function filedFailureArms(): string[] {
+  return [...(pageFailures?.standingArms() ?? [])];
 }
 
 /**
- * Everything the warning chip shows for the client-local failure ARM: its row
- * in the chip's list and, when the row opens one, the detail behind it — the
- * headline and the evidence, as the reader would see them.
+ * Everything the page's failure sink recorded for the client-local failure
+ * ARM: its sentence and its evidence, as its record carries them.
  */
-export async function chipFailureText(app: MountedApp, arm: string): Promise<string> {
-  await app.click("#topbar .topbar-heading-warnings");
-  const row = app.$(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`);
-  if (row === null) throw new Error(`the warning chip lists no ${arm} failure`);
-  const listed = row.textContent ?? "";
-  if (!isControl(row)) return listed;
-  await app.clickElement(row);
-  return `${listed}\n${app.$("#topbar [data-reveal]")?.textContent ?? ""}`;
+export function filedFailureText(arm: string): string {
+  const kind = filedFailures.get(arm);
+  if (kind === undefined) throw new Error(`the page filed no ${arm} failure`);
+  const evidence = evidenceRows(kind).map(([label, value]) => `${label}: ${value}`);
+  return [ARM_HEADLINE[arm as ClientFailureArm], ...evidence].join("\n");
 }
 
 /**
@@ -751,10 +748,20 @@ async function mountApp(
   });
   const client = createAgentReplClient(transport);
   const ticker = createTicker();
-  // MAIN.TS'S OWN ORDER: the topbar is mounted before any stream, so its
-  // warning chip can list a failure that stops one from ever opening.
-  const failures = createLocalFailures();
-  const topbar = mountTopbar(shell.topbar, { failures, focusLeft: pageFocusLeft() });
+  // MAIN.TS'S OWN ORDER: the topbar is mounted before any stream.
+  const sink = createLocalFailures();
+  filedFailures.clear();
+  // THE PAGE'S FAILURES ARE READ FROM ITS SINK: each report is remembered by
+  // arm, so a case reads what the page recorded rather than a surface.
+  const failures: LocalFailures = {
+    ...sink,
+    report(kind) {
+      filedFailures.set(kind.kind.case ?? "", kind);
+      sink.report(kind);
+    },
+  };
+  pageFailures = failures;
+  const topbar = mountTopbar(shell.topbar, { focusLeft: pageFocusLeft() });
   const composerEnabled = options.composer === true;
 
   // THE REAL PAGE MUX, on purpose. This harness drives a REAL daemon, so its
@@ -1009,7 +1016,7 @@ async function mountApp(
     );
   };
 
-  const harnessFailureArms = (): string[] => chipFailureArms();
+  const harnessFailureArms = (): string[] => filedFailureArms();
 
   const harness: MountedApp = {
     ctx,
@@ -1101,7 +1108,7 @@ async function mountApp(
       element.click();
       await settle();
     },
-    failureArms: () => chipFailureArms(),
+    failureArms: () => filedFailureArms(),
     refusalArms: () => $$(".refusal[data-arm]").map((el) => el.dataset.arm ?? ""),
   };
 

@@ -65,9 +65,9 @@ func fixture() Records {
 	landed.MergedAt = ptr(at(6))
 	creator := wsm.WorkspaceID("open")
 	landed.RequestedBy = &creator
-	summaries := map[wsm.WorkspaceID]string{
-		"open":   "Fix the footer's clock",
-		"landed": "Prune the store's old rows",
+	summaries := map[wsm.WorkspaceID]wsm.WorkspaceSummary{
+		"open":   {Long: "The footer's clock drifts. Fix its tick.", Short: "Fix the footer's clock"},
+		"landed": {Long: "Old rows pile up. Prune them on a schedule.", Short: "Prune the store's old rows"},
 	}
 	return Records{
 		Workspaces:   []wsm.Workspace{open, closed, landed},
@@ -105,7 +105,8 @@ func TestFindNarrowsByEveryCriterion(t *testing.T) {
 		{name: "until drops a workspace created after it", query: Query{Until: ptr(at(3))}, want: []string{"open", "closed"}},
 		{name: "a window overlaps a workspace's life", query: Query{Since: ptr(at(3)), Until: ptr(at(3))}, want: []string{"open", "closed"}},
 		{name: "text matches a name case-insensitively", query: Query{Text: ptr("TOPBAR")}, want: []string{"closed"}},
-		{name: "text matches a summary", query: Query{Text: ptr("clock")}, want: []string{"open"}},
+		{name: "text matches a short summary", query: Query{Text: ptr("clock")}, want: []string{"open"}},
+		{name: "text matches a long summary", query: Query{Text: ptr("schedule")}, want: []string{"landed"}},
 		{name: "text matching nothing finds nothing", query: Query{Text: ptr("nowhere")}, want: nil},
 		{name: "criteria combine", query: Query{Repository: ptr(doom.ID), Standing: ClosedStanding}, want: []string{"closed"}},
 		{name: "a creator keeps only what it asked for", query: Query{CreatedBy: ptr(wsm.WorkspaceID("open"))}, want: []string{"landed"}},
@@ -183,7 +184,7 @@ func TestFindAnswersEachWorkspacesRepositoryAndSummary(t *testing.T) {
 	for _, f := range got.Found {
 		byID[string(f.Workspace.ID)] = f
 	}
-	if f := byID["landed"]; f.Repository != other || f.Summary == nil || *f.Summary != "Prune the store's old rows" || !f.LastActiveAt.Equal(at(6)) {
+	if f := byID["landed"]; f.Repository != other || f.Summary == nil || f.Summary.Short != "Prune the store's old rows" || !f.LastActiveAt.Equal(at(6)) {
 		t.Fatalf("landed = %+v, want repository %v, its summary and last active on day 6", f, other)
 	}
 	if f := byID["closed"]; f.Summary != nil || !f.LastActiveAt.Equal(at(4)) {
@@ -363,17 +364,20 @@ func TestFindNarrowsToALogin(t *testing.T) {
 	}
 }
 
+// fixIt is a whole summary.
+var fixIt = wsm.WorkspaceSummary{Long: "It is broken. Fix it.", Short: "Fix it"}
+
 func TestSummaries(t *testing.T) {
 	tests := []struct {
 		name      string
-		summaries map[wsm.WorkspaceID]string
+		summaries map[wsm.WorkspaceID]wsm.WorkspaceSummary
 		titles    map[wsm.WorkspaceID]string
-		want      map[wsm.WorkspaceID]string
+		want      map[wsm.WorkspaceID]wsm.WorkspaceSummary
 	}{
-		{name: "a summary stands alone", summaries: map[wsm.WorkspaceID]string{"a": "Fix it"}, want: map[wsm.WorkspaceID]string{"a": "Fix it"}},
-		{name: "a vendor title stands in for no summary", titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]string{"a": "Its title"}},
-		{name: "a summary outranks the vendor title", summaries: map[wsm.WorkspaceID]string{"a": "Fix it"}, titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]string{"a": "Fix it"}},
-		{name: "neither is no entry", want: map[wsm.WorkspaceID]string{}},
+		{name: "a summary stands alone", summaries: map[wsm.WorkspaceID]wsm.WorkspaceSummary{"a": fixIt}, want: map[wsm.WorkspaceID]wsm.WorkspaceSummary{"a": fixIt}},
+		{name: "a vendor title stands in for no summary as a short summary", titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]wsm.WorkspaceSummary{"a": {Short: "Its title"}}},
+		{name: "a summary outranks the vendor title", summaries: map[wsm.WorkspaceID]wsm.WorkspaceSummary{"a": fixIt}, titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]wsm.WorkspaceSummary{"a": fixIt}},
+		{name: "neither is no entry", want: map[wsm.WorkspaceID]wsm.WorkspaceSummary{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

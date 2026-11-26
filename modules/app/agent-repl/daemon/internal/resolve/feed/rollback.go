@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -281,8 +280,6 @@ func (r *resolver) rollBackTurnsLocked(s *wsState, ws ids.WorkspaceID, turns []i
 			fields["error"] = err.Error()
 			log.Error(opRollbackApply,
 				"rolled-back turns were removed from the feed but could not be recorded; a daemon restart will draw them again", fields)
-			r.raiseWarningFor(ws, opRollbackApply,
-				fmt.Sprintf("the rolled-back prompts could not be saved and will reappear after a daemon restart: %v", err))
 		}, recorded)
 }
 
@@ -413,21 +410,16 @@ func (r *resolver) settleRollbackLocked(s *wsState, ws ids.WorkspaceID, settled 
 		r.releaseTurnsLocked(s, ws, held)
 		fields["vendor_message"] = outcome.Refused.GetVendorMessage()
 		log.Warn(opRollbackApply, "the vendor refused the rollback's cut; its prompts are drawn again and stay in the conversation", fields)
-		r.raiseWarning(s, opRollbackApply,
-			fmt.Sprintf("the rollback did not happen: the vendor refused it, so its prompt is still in the conversation (%s)", outcome.Refused.GetVendorMessage()))
 	case *conversationv1.SessionRollbackSettled_Failed:
 		r.releaseTurnsLocked(s, ws, held)
 		fields["detail"] = outcome.Failed.GetDetail()
 		log.Error(opRollbackApply, "the rollback's restart failed; its prompts are drawn again and stay in the conversation", fields)
-		r.raiseWarning(s, opRollbackApply,
-			fmt.Sprintf("the rollback did not happen: the vendor could not restart at the cut, so its prompt is still in the conversation (%s)", outcome.Failed.GetDetail()))
 	default:
 		// A SETTLE WITH NO OUTCOME IS THE SHIM'S MALFORMED MESSAGE: whether the
 		// cut stands is unknown, so the rows are drawn again, as for a cut that
 		// did not happen, and the breach is recorded.
 		r.releaseTurnsLocked(s, ws, held)
 		log.Error(opRollbackApply, "a rollback settled with no outcome; its prompts are drawn again", fields)
-		r.raiseWarning(s, opRollbackApply, "a rollback's outcome was not stated; its prompt is shown again")
 	}
 }
 
@@ -513,11 +505,10 @@ func (r *resolver) restoreRolledBack(s *wsState, primed *primedWorkspace) {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
-		op:      opRollbackRestore,
-		read:    primed.turnSets[turnSetRolledBack],
-		failed:  logsite.Msg("the workspace's rolled-back turns could not be loaded; their rows may be drawn again"),
-		warning: "rolled-back prompts could not be loaded and may be drawn again",
-		loaded:  logsite.Msg("the workspace's rolled-back turns were loaded; their rows are not drawn"),
+		op:     opRollbackRestore,
+		read:   primed.turnSets[turnSetRolledBack],
+		failed: logsite.Msg("the workspace's rolled-back turns could not be loaded; their rows may be drawn again"),
+		loaded: logsite.Msg("the workspace's rolled-back turns were loaded; their rows are not drawn"),
 	}, s.rolledBack)
 }
 

@@ -127,7 +127,7 @@ These clicks jump to an entry in the feed:
 - **Your open or closed choice always wins, and survives a reload.**
   - Open a landed merge's bubble and it stays open, across a reload too; close a running merge's bubble and it stays closed, even when the merge later fails.
   - Reloading the page, restarting Emacs or restarting the daemon draws the bubble the way you left it.
-  - If the daemon cannot record your choice, the failure is listed under the warning chip in the top bar, and the bubble stays the way you left it on this page.
+  - If the daemon cannot record your choice, the failure is logged, and the bubble stays the way you left it on this page.
 - **A merge that lands on agent-repl's master shows the version it landed as on the bubble's head.**
   - Every merge an agent asks for onto agent-repl's master says whether it moves the version's minor or patch number, with a one-line changelog entry.
   - The merge queue tags the landed merge with the next version (for example `0.5.0`), and the changelog entry is that tag's annotation.
@@ -166,7 +166,7 @@ These clicks jump to an entry in the feed:
     - The merge running cannot be dragged.
     - A refused move is shown above the table, and the line goes back to the queue's order.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
-  - The failure is listed under the warning chip in the top bar.
+  - The failure is logged.
 
 ## What agents can do with workspaces
 
@@ -195,21 +195,23 @@ Two marks an agent sets on its own workspace show on every surface:
   - The workspace is drawn in the background status (yellow) while no turn runs, and the footer names the workspace it waits for.
   - The agent clears the mark when the answer arrives.
 
-## The summary's links
+## The summary and the workspace's links
 
-A workspace keeps every link that bears on its task, such as its pull request, ticket or design doc, each under a short label.
+The top bar's heading is the workspace's summary in purple, and its name beneath it in white.
 
-- While at least one link is shown, the purple summary in the top bar is underlined.
-  - With one shown link, clicking the summary opens it.
-  - With several, clicking the summary drops a menu of their labels, most recently set first, and picking one opens it.
+- The summary is always purple and never underlined.
+  - Rest the pointer on it to see the workspace's longer description, two to four sentences, beneath the top bar.
+- A workspace keeps every link that bears on its task, such as its pull request, ticket or design doc, each under a short label.
+- While at least one link is shown, the workspace's name in the top bar is underlined.
+  - With one shown link, clicking the name opens it.
+  - With several, clicking the name drops a menu of their labels, most recently set first, and picking one opens it.
   - Links open in the Chrome profile of the account the workspace's session runs as, the same way a link in the feed opens.
-  - Clicking the summary does not open the session line the heading otherwise opens.
+  - Clicking the name does not open the session line the heading otherwise opens.
 - In the menu, an owned link's label is drawn in the summary's purple, so the links the workspace's work made stand out.
 - A GitHub pull request's row carries a small badge on its right saying how the pull request stands.
   - `open` is white, `draft` grey, `merged` green, and `closed` red.
   - The daemon reads every linked pull request on its usual pull-request cadence, owned or not, so the badge follows a merge or a close on its own.
   - A pull request the daemon has not read yet shows no badge.
-- A workspace with no summary yet has nothing to click, even with links stored.
 - The menu shows at most five links, though a workspace can store any number.
   - Once the menu is full, the agent chooses which five it shows, ranked by how much each matters to you and to the people you report the work to.
 - Agents store links on their own, without asking, whenever one comes up in the conversation.
@@ -933,7 +935,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - A permission answered there closes the card here, marked as answered on claude.ai.
   - A stop there ends the turn here.
 - **Turning it on for a workspace with no session starts one.**
-- **If Claude refuses the bridge** (Remote Control is off for your account or blocked by policy), the mode is still kept, and the refusal shows on the warning strip.
+- **If Claude refuses the bridge** (Remote Control is off for your account or blocked by policy), the mode is still kept, and the refusal is logged.
 
 ## Zooming the feed text
 

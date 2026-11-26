@@ -6,6 +6,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/refusalarm"
+	"agent-repld/internal/wsm"
 	"agent-repld/internal/wssummary"
 )
 
@@ -15,24 +17,54 @@ const rpcSetSummary = "SetWorkspaceSummary"
 // opSetSummary is the operation SetSummary's outcome is recorded under.
 const opSetSummary = "daemon.workspace.set_summary"
 
+// The parts of a summary an invalid_summary refusal names
+// (agentrepl.v1.SetWorkspaceSummaryInvalidSummary.part).
+const (
+	summaryPartLong  = refusalarm.Nested("long_summary")
+	summaryPartShort = refusalarm.Nested("short_summary")
+)
+
 // SetSummary records SUMMARY as the workspace's own statement of its task and
-// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary). A summary that
-// is not one plain sentence of two to fifteen words is refused
-// invalid_summary, with the validator's reason, before anything is written.
-// It answers the summary the workspace now has.
-func (v *verbs) SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error) {
+// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary). A long summary
+// that is not two to four sentences in one paragraph, or a short summary that
+// is not one plain sentence of two to fifteen words, is refused
+// invalid_summary naming the part and the validator's reason, before
+// anything is written; the long summary is judged first. It answers the
+// summary the workspace now has.
+func (v *verbs) SetSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) (wsm.WorkspaceSummary, error) {
 	_, log, err := v.owned(ctx, rpcSetSummary, ws)
 	if err != nil {
-		return "", err
+		return wsm.WorkspaceSummary{}, err
 	}
-	if err := wssummary.Validate(summary); err != nil {
-		return "", refuseWith(log, rpcSetSummary, ArmInvalidSummary,
-			fmt.Sprintf("%q is not a summary the title line draws: %v", summary, err), false,
-			map[string]any{"summary": summary, "reason": err.Error()})
+	if err := wssummary.ValidateLong(summary.Long); err != nil {
+		return wsm.WorkspaceSummary{}, refuseWith(log, rpcSetSummary, ArmInvalidSummary,
+			fmt.Sprintf("%q is not a long summary the title's hover shows: %v", summary.Long, err), false,
+			map[string]any{"part": summaryPartLong, "long_summary": summary.Long, "reason": err.Error()})
+	}
+	if err := wssummary.ValidateShort(summary.Short); err != nil {
+		return wsm.WorkspaceSummary{}, refuseWith(log, rpcSetSummary, ArmInvalidSummary,
+			fmt.Sprintf("%q is not a short summary the title line draws: %v", summary.Short, err), false,
+			map[string]any{"part": summaryPartShort, "short_summary": summary.Short, "reason": err.Error()})
 	}
 	if err := v.deps.Summaries.Set(ctx, ws, summary); err != nil {
-		return "", err
+		return wsm.WorkspaceSummary{}, err
 	}
-	log.Info(opSetSummary, "set the workspace summary", dlog.Context{"summary": summary})
+	log.Info(opSetSummary, "set the workspace summary", dlog.Context{"short_summary": summary.Short, "long_summary": summary.Long})
 	return summary, nil
+}
+
+// SummaryFields answers SUMMARY's two parts as the wire's optional fields
+// (agentrepl.v1.WorkspaceStatus, agentrepl.v1.FoundWorkspace): both nil when
+// no summary stands, and the long part nil for a summary set before long
+// summaries existed. It is the ONE mapping every read that answers a summary
+// takes.
+func SummaryFields(summary *wsm.WorkspaceSummary) (short, long *string) {
+	if summary == nil {
+		return nil, nil
+	}
+	short = &summary.Short
+	if summary.Long != "" {
+		long = &summary.Long
+	}
+	return short, long
 }

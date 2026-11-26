@@ -52,7 +52,8 @@ type FindWorkspacesRequest struct {
 	Window *FindWorkspacesWindow `protobuf:"bytes,2,opt,name=window,proto3,oneof" json:"window,omitempty"`
 	// Only workspaces in this standing. UNSET = every standing.
 	Standing *FindWorkspacesStanding `protobuf:"bytes,3,opt,name=standing,proto3,oneof" json:"standing,omitempty"`
-	// Only workspaces whose name, branch or summary contains this text,
+	// Only workspaces whose name, branch, short summary or long summary
+	// contains this text,
 	// compared case-insensitively. UNSET = no text filter. A blank string is
 	// malformed (Connect InvalidArgument), never "match everything".
 	Text *string `protobuf:"bytes,4,opt,name=text,proto3,oneof" json:"text,omitempty"`
@@ -944,12 +945,16 @@ type FoundWorkspace struct {
 	// The repository the workspace belongs to, by its registry id and its main
 	// checkout.
 	Repository *v1.RepositoryRef `protobuf:"bytes,4,opt,name=repository,proto3" json:"repository,omitempty"`
-	// The workspace's summary: the one-sentence statement of its task the
-	// topbar draws as its title, as the daemon last distilled it from the
-	// user's prompts and kept across restarts and the workspace's close. UNSET
-	// while no summary was ever distilled (a workspace that never took a
-	// prompt, or one whose summary was dropped with its conversation).
-	Summary *string `protobuf:"bytes,5,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
+	// The workspace's long summary: two to four sentences describing its task,
+	// as its agent last set it (SetWorkspaceSummary), kept across restarts and
+	// the workspace's close. UNSET while none stands (a workspace that never
+	// took a prompt, one whose summary was dropped with its conversation, or
+	// one whose agent has set only a short summary).
+	LongSummary *string `protobuf:"bytes,16,opt,name=long_summary,json=longSummary,proto3,oneof" json:"long_summary,omitempty"`
+	// The workspace's short summary: the one-sentence statement of its task the
+	// topbar draws as its title, as its agent last set it and kept across
+	// restarts and the workspace's close. UNSET while none stands.
+	ShortSummary *string `protobuf:"bytes,5,opt,name=short_summary,json=shortSummary,proto3,oneof" json:"short_summary,omitempty"`
 	// When the workspace was created, unix milliseconds.
 	CreatedAtMs int64 `protobuf:"varint,6,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
 	// When the workspace was last active, unix milliseconds: the instant
@@ -1053,9 +1058,16 @@ func (x *FoundWorkspace) GetRepository() *v1.RepositoryRef {
 	return nil
 }
 
-func (x *FoundWorkspace) GetSummary() string {
-	if x != nil && x.Summary != nil {
-		return *x.Summary
+func (x *FoundWorkspace) GetLongSummary() string {
+	if x != nil && x.LongSummary != nil {
+		return *x.LongSummary
+	}
+	return ""
+}
+
+func (x *FoundWorkspace) GetShortSummary() string {
+	if x != nil && x.ShortSummary != nil {
+		return *x.ShortSummary
 	}
 	return ""
 }
@@ -2145,30 +2157,31 @@ const file_agentrepl_v1_endpoint_find_workspaces_proto_rawDesc = "" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1c.agentrepl.v1.FoundWorkspaceR\n" +
 	"workspaces\x12\x18\n" +
-	"\aomitted\x18\x02 \x01(\rR\aomitted\"\xa3\x06\n" +
+	"\aomitted\x18\x02 \x01(\rR\aomitted\"\xed\x06\n" +
 	"\x0eFoundWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06branch\x18\x03 \x01(\tR\x06branch\x12;\n" +
 	"\n" +
 	"repository\x18\x04 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
-	"repository\x12\x1d\n" +
-	"\asummary\x18\x05 \x01(\tH\x00R\asummary\x88\x01\x01\x12\"\n" +
+	"repository\x12&\n" +
+	"\flong_summary\x18\x10 \x01(\tH\x00R\vlongSummary\x88\x01\x01\x12(\n" +
+	"\rshort_summary\x18\x05 \x01(\tH\x01R\fshortSummary\x88\x01\x01\x12\"\n" +
 	"\rcreated_at_ms\x18\x06 \x01(\x03R\vcreatedAtMs\x12)\n" +
 	"\x11last_active_at_ms\x18\a \x01(\x03R\x0elastActiveAtMs\x12@\n" +
 	"\bstanding\x18\b \x01(\v2$.agentrepl.v1.FoundWorkspaceStandingR\bstanding\x12>\n" +
 	"\n" +
-	"created_by\x18\t \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\tcreatedBy\x88\x01\x01\x127\n" +
+	"created_by\x18\t \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\tcreatedBy\x88\x01\x01\x127\n" +
 	"\x06parent\x18\n" +
-	" \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\x06parent\x88\x01\x01\x12?\n" +
-	"\x06roster\x18\v \x01(\v2\".agentrepl.v1.FoundWorkspaceRosterH\x03R\x06roster\x88\x01\x01\x12\x18\n" +
+	" \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x03R\x06parent\x88\x01\x01\x12?\n" +
+	"\x06roster\x18\v \x01(\v2\".agentrepl.v1.FoundWorkspaceRosterH\x04R\x06roster\x88\x01\x01\x12\x18\n" +
 	"\acalling\x18\f \x01(\bR\acalling\x12<\n" +
-	"\x05merge\x18\r \x01(\v2!.agentrepl.v1.FoundWorkspaceMergeH\x04R\x05merge\x88\x01\x01\x12\"\n" +
+	"\x05merge\x18\r \x01(\v2!.agentrepl.v1.FoundWorkspaceMergeH\x05R\x05merge\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"config_dir\x18\x0e \x01(\tH\x05R\tconfigDir\x88\x01\x01\x12*\n" +
-	"\x0flast_turn_at_ms\x18\x0f \x01(\x03H\x06R\flastTurnAtMs\x88\x01\x01B\n" +
-	"\n" +
-	"\b_summaryB\r\n" +
+	"config_dir\x18\x0e \x01(\tH\x06R\tconfigDir\x88\x01\x01\x12*\n" +
+	"\x0flast_turn_at_ms\x18\x0f \x01(\x03H\aR\flastTurnAtMs\x88\x01\x01B\x0f\n" +
+	"\r_long_summaryB\x10\n" +
+	"\x0e_short_summaryB\r\n" +
 	"\v_created_byB\t\n" +
 	"\a_parentB\t\n" +
 	"\a_rosterB\b\n" +

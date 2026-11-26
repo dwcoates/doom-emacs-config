@@ -939,10 +939,7 @@ describe("hello", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
 
     // Assert
-    expect(posted).toEqual([
-      { channel: HOST_CHANNEL, kind: "presence", shown: true },
-      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
-    ]);
+    expect(posted).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
   });
 
   it("replays the quiet state to a page that says hello while it stands", () => {
@@ -1263,13 +1260,6 @@ describe("a page's bubble overlay", () => {
 });
 
 describe("the webhost's sidebar", () => {
-  /** A failure row as the webhost relays it. */
-  const FAILURE = {
-    arm: "daemonUnreachable",
-    headline: "lost the connection",
-    evidence: [["close", "1006"]],
-  } as const;
-
   it("tells every page the lid-closed quiet state", () => {
     // Arrange
     pages(host, "a", "b");
@@ -1394,37 +1384,6 @@ describe("the webhost's sidebar", () => {
     // Assert
     unsubscribe();
     expect(left).toEqual([FOCUS_LEFT_COMPOSER]);
-  });
-
-  it("tells every page its own standing failures", () => {
-    // Arrange
-    pages(host, "a", "b");
-    const toB = postsTo("b");
-
-    // Act
-    host.setFailures([FAILURE]);
-
-    // Assert
-    expect(toB).toEqual([
-      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] },
-    ]);
-  });
-
-  it("tells a page that says hello the failures standing", () => {
-    // Arrange
-    pages(host, "a");
-    host.setFailures([FAILURE]);
-    const posted = postsTo("a");
-
-    // Act
-    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
-
-    // Assert
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
-      kind: "webhostFailures",
-      failures: [FAILURE],
-    });
   });
 
   it("answers text selected in the webhost itself as the selection", () => {

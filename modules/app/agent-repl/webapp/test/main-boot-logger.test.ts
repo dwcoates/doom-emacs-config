@@ -35,7 +35,6 @@
  * from the file the daemon serves.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { awaitDom } from "./events.js";
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -62,7 +61,7 @@ import { shellHTML } from "./shell-html.js";
  *
  * A coverage run on a contended host exhausted six seconds while the other
  * two identical imports completed, so twelve seconds keeps a 2x scheduling
- * margin and leaves the inner two-second failure-chip deadline enough room to
+ * margin and leaves the inner two-second failure deadline enough room to
  * print its own diagnostic first. This is a per-site bound,
  * deliberately not a raised global: nothing else in the unit suite imports
  * its subject at run time, and the global stays sized for what it covers.
@@ -89,30 +88,30 @@ export function bootImports(source = readFileSync(resolve(process.cwd(), "src/ma
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";
 
 /**
- * How long the boot is given to reach its failure in the warning chip.
+ * How long the boot is given to file and re-raise its failure.
  *
  * The boot is asynchronous -- `main.ts` ends in `void boot()` -- so the
  * import returns before the failure path has run. Everything between here
- * and the chip is one rejected fetch and a few microtasks, so this is a
+ * and the re-raise is one rejected fetch and a few microtasks, so this is a
  * ceiling on a hang rather than a duration anything is expected to take.
  */
 const BOOT_SETTLE_MS = 2000;
 
 /**
- * The boot's failure as the topbar's heading shows it, once it stands: the
- * heading's warning list is opened and the `bootFailed` row's detail read back.
+ * The boot's failure, once the boot has filed it and re-raised it: the re-raise
+ * is scheduled only after the failure sink recorded it (main.ts), so it is the
+ * event a test awaits rather than a duration.
  */
-async function awaitBootFailureChip(): Promise<string> {
-  const chip = await awaitDom(
-    document,
-    "the boot listing a failure in the warning chip",
-    () => document.querySelector<HTMLElement>('#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]'),
-    () => `the topbar ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
-    BOOT_SETTLE_MS,
-  );
-  chip.click();
-  document.querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')?.click();
-  return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
+async function awaitBootFailure(): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the boot raised no failure within ${BOOT_SETTLE_MS}ms`)), BOOT_SETTLE_MS);
+  });
+  try {
+    return await Promise.race([firstReRaise, bound]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -132,16 +131,23 @@ async function awaitBootFailureChip(): Promise<string> {
  * callback still runs on a real microtask.
  */
 let reRaised: unknown[] = [];
+/** Settles with the boot's first re-raised failure (captureTheReRaise). */
+let firstReRaise: Promise<unknown> = new Promise(() => undefined);
 
 function captureTheReRaise(): void {
   const realQueueMicrotask = globalThis.queueMicrotask.bind(globalThis);
   reRaised = [];
+  let raised: (err: unknown) => void = () => undefined;
+  firstReRaise = new Promise((resolve) => {
+    raised = resolve;
+  });
   globalThis.queueMicrotask = (callback: () => void): void => {
     realQueueMicrotask(() => {
       try {
         callback();
       } catch (err) {
         reRaised.push(err);
+        raised(err);
       }
     });
   };
@@ -244,11 +250,11 @@ describe("the webapp's boot against a real page", () => {
     document.body.innerHTML = "";
   });
 
-  it("draws its failure rather than coming up empty and silent", async () => {
+  it("files its failure rather than coming up empty and silent", async () => {
     // `main.ts` boots itself at import time; that top-level call IS the
     // production entry point, so importing it is how a page is booted.
     await import("../src/main.js");
-    expect(await awaitBootFailureChip()).toContain("AdoptWebWorkspace");
+    expect(String(await awaitBootFailure())).toContain("AdoptWebWorkspace");
   }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("never fails on the logger's own guard", async () => {
@@ -257,7 +263,7 @@ describe("the webapp's boot against a real page", () => {
     // which is what a reordering would reintroduce, and which the buggy
     // build reported through exactly this console path.
     await import("../src/main.js");
-    await awaitBootFailureChip();
+    await awaitBootFailure();
     const said = consoleError.mock.calls.flat().join(" ");
     expect(said).not.toContain("the webapp logger is not installed");
   }, BOOT_IMPORT_TIMEOUT_MS);
@@ -282,7 +288,7 @@ describe("the webapp's boot against a real page", () => {
       realRemove(type, listener, options);
     });
     await import("../src/main.js");
-    await awaitBootFailureChip();
+    await awaitBootFailure();
 
     // Act
     (await import("../src/page-teardown.js")).tearDownPage();
@@ -294,13 +300,13 @@ describe("the webapp's boot against a real page", () => {
   }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("re-raises the failure it drew, rather than ending quietly", async () => {
-    // The other half of "drew its failure": the chip is what the READER sees,
-    // and this is what the BROWSER sees. A boot that drew the failure and then
-    // returned normally would leave a page that looks broken to a person and
+    // The other half of "filed its failure": the record is what the LOG
+    // holds, and this is what the BROWSER sees. A boot that filed the failure
+    // and then returned normally would leave a page that is broken and
     // healthy to every error reporter pointed at it.
     await import("../src/main.js");
-    await awaitBootFailureChip();
-    // The re-raise is scheduled on a microtask after the failure is drawn.
+    await awaitBootFailure();
+    // The re-raise is scheduled on a microtask after the failure is filed.
     await Promise.resolve();
     expect(reRaised.map((err) => String(err))).toEqual([
       expect.stringContaining("AdoptWebWorkspace") as unknown as string,

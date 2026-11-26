@@ -403,13 +403,13 @@ service AgentRepl {
   // mark. See endpoint_set_workspace_correspondence.proto.
   rpc SetWorkspaceCorrespondence(SetWorkspaceCorrespondenceRequest) returns (SetWorkspaceCorrespondenceResponse);
   // Store, relabel or remove a workspace's links, choose which of them the
-  // topbar's summary menu shows, or clear them. See
+  // topbar's link menu shows, or clear them. See
   // endpoint_change_workspace_links.proto.
   rpc ChangeWorkspaceLinks(ChangeWorkspaceLinksRequest) returns (ChangeWorkspaceLinksResponse);
   // Rename a workspace: its name only, never its branch or its worktree
   // directory. See endpoint_set_workspace_name.proto.
   rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (SetWorkspaceNameResponse);
-  // Set the one-sentence summary of a workspace's task that its topbar
+  // Set the long and short summary of a workspace's task that its topbar
   // draws. See endpoint_set_workspace_summary.proto.
   rpc SetWorkspaceSummary(SetWorkspaceSummaryRequest) returns (SetWorkspaceSummaryResponse);
 

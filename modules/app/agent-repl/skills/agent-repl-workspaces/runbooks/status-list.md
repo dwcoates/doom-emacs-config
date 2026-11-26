@@ -18,7 +18,7 @@
   unset or false is absent:
   - `name`, `branch`: strings.
   - `workspace.id`, `workspace.dir`, `repository.id`, `repository.dir`: strings.
-  - `summary`: a string, the purple one-sentence task summary the topbar draws;
+  - `shortSummary`, `longSummary`: strings, the purple one-sentence title the topbar draws and the paragraph its popup shows;
     absent when none was ever distilled.
   - `createdAtMs`, `lastActiveAtMs`: unix milliseconds encoded as JSON STRINGS
     (protojson `int64`), so compare them with `tonumber`.
@@ -40,8 +40,8 @@
     - the 5 most recently active: `agent-repld workspace list | head -n 5`
     - by live status: `agent-repld workspace list | jq -c 'select(.roster.status.arm == "thinking")'`
     - by section: `agent-repld workspace list | jq -c 'select(.roster.section | has("backlog"))'`
-    - regex over the summary, case-insensitive: `agent-repld workspace list | jq -c 'select((.summary // "") | test("footer"; "i"))'`
+    - regex over the summaries, case-insensitive: `agent-repld workspace list | jq -c 'select(((.shortSummary // "") + " " + (.longSummary // "")) | test("footer"; "i"))'`
     - one repository: `agent-repld workspace list | jq -c 'select(.repository.dir == "/path/to/main/checkout")'`
     - active in the last hour: `agent-repld workspace list | jq -c --argjson since "$(( ($(date +%s) - 3600) * 1000 ))" 'select((.lastActiveAtMs | tonumber) >= $since)'`
-    - a readable table: `agent-repld workspace list | jq -r '[.name, .roster.status.arm, .summary // ""] | @tsv'`
+    - a readable table: `agent-repld workspace list | jq -r '[.name, .roster.status.arm, .shortSummary // ""] | @tsv'`
     - sorted by name: `agent-repld workspace list | jq -s -c 'sort_by(.name)[]'`

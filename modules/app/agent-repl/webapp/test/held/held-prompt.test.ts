@@ -2063,7 +2063,7 @@ describe("the Edit control", () => {
     ]);
   });
 
-  it("files a refused begin on the warning chip", async () => {
+  it("files a refused begin in the failure sink", async () => {
     // Arrange
     const { tc, reported } = editContext(editRefusal("alreadyDelivered"));
     const card = drawHeldPrompt(heldPrompt(), tc);
@@ -2133,7 +2133,7 @@ describe("the Edit control", () => {
     ]);
   });
 
-  it("files a begin that failed at the transport on the warning chip", async () => {
+  it("files a begin that failed at the transport in the failure sink", async () => {
     // Arrange
     const { tc, reported } = editContext(() => {
       throw new ConnectError("connection refused", Code.Unavailable);

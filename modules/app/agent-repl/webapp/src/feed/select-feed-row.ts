@@ -12,8 +12,7 @@
  * reading of the answer.
  *
  * A REFUSED OR FAILED MOVE is an error the reader must see: it is filed on the
- * topbar's warning chip (`control_plane_failed`), the webapp's one error
- * surface, and logged.
+ * failure sink (`control_plane_failed`), which records it.
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {

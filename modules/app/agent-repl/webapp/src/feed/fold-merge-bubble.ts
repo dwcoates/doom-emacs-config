@@ -15,8 +15,8 @@
  * a repeat.
  *
  * A REFUSED OR FAILED FOLD is an error the reader must see: it is filed on the
- * topbar's warning chip (`control_plane_failed`), the webapp's one error
- * surface, and logged. The bubble keeps the reader's toggle.
+ * failure sink (`control_plane_failed`), which records it. The bubble keeps
+ * the reader's toggle.
  */
 import { create } from "@bufbuild/protobuf";
 import {

@@ -210,16 +210,6 @@ func TestNewRefusesWithoutTheConnectivityTable(t *testing.T) {
 	}
 }
 
-func TestNewRefusesANonPositiveWarningCap(t *testing.T) {
-	// Arrange, Act
-	_, err := New(testColors(), dlog.NewTestSurfaces(), WithWarningCap(0))
-
-	// Assert
-	if err == nil {
-		t.Fatalf("New accepted a zero warning cap")
-	}
-}
-
 func TestNothingIsPublishedBeforeTheWorkspaceFacts(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -246,7 +236,7 @@ func TestTheLastRequiredFactPublishesTheWholeView(t *testing.T) {
 	view := h.view(t)
 	switch {
 	case view.GetWorkspaceName() == nil, view.GetSessionLine() == nil, view.GetModelSelector() == nil,
-		view.GetConnectivity() == nil, view.GetWarnings() == nil, view.GetContext() == nil,
+		view.GetConnectivity() == nil, view.GetContext() == nil,
 		view.GetAccount() == nil, view.GetPermissionModePicker() == nil:
 		t.Fatalf("view = %+v, want every element resolved", view)
 	}
@@ -801,7 +791,6 @@ func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 		{"connectivity", view.GetConnectivity() != nil},
 		{"account", view.GetAccount() != nil},
 		{"context", view.GetContext() != nil},
-		{"warnings", view.GetWarnings() != nil},
 	} {
 		if !tc.present {
 			t.Errorf("%s is absent from the session-less strip, want drawn", tc.element)
@@ -930,86 +919,6 @@ func TestALiveSessionsHoverLeadsWithItsSpend(t *testing.T) {
 	sections := h.view(t).GetContext().GetBreakdown().GetSections()
 	if got, want := sections[0].GetHeading().GetText(), "session"; got != want {
 		t.Fatalf("heading = %q, want %q", got, want)
-	}
-}
-
-func TestAParkedStripStatesNoLineOfItsOwn(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-	before := h.view(t).GetWarnings()
-
-	// Act
-	h.r.SetParked(testWS, true)
-
-	// Assert: there is no hibernated state left to state.
-	if after := h.view(t).GetWarnings(); !proto.Equal(before, after) {
-		t.Fatalf("warnings = %v, want the live strip's own %v", after, before)
-	}
-}
-
-func TestTheColdGatedStripStatesTheGateAsAWarningLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
-
-	// Assert
-	if got, want := lastWarningLine(t, h), "cold context, awaiting your answer"; got != want {
-		t.Fatalf("line = %q, want %q", got, want)
-	}
-}
-
-func TestTheSessionLessWarningCarriesNoOverlay(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.ready(t)
-
-	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
-
-	// Assert: the line IS the warning; there is nothing further to reveal, and
-	// a gate is answered in the feed's card and nowhere else.
-	warnings := h.view(t).GetWarnings().GetWarnings()
-	last := warnings[len(warnings)-1]
-	if last.GetDetail() != nil {
-		t.Fatalf("detail = %T, want no overlay behind a state line", last.GetDetail())
-	}
-}
-
-func TestTheColdGateIsStatedOverAPark(t *testing.T) {
-	// Arrange: both signals stand at once. The gate is waiting on the reader
-	// and the park is waiting on nothing, so the strip names the gate.
-	h := newHarness(t)
-	h.ready(t)
-	h.r.SetParked(testWS, true)
-
-	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
-
-	// Assert
-	if got, want := lastWarningLine(t, h), "cold context, awaiting your answer"; got != want {
-		t.Fatalf("line = %q, want %q", got, want)
-	}
-}
-
-func TestAParkStatesNoLineOnceTheColdGateIsAnswered(t *testing.T) {
-	// Arrange: the park outlives the gate, and is drawn as the live idle
-	// session it stands in for once the gate is answered.
-	h := newHarness(t)
-	h.ready(t)
-	before := h.view(t).GetWarnings()
-	h.r.SetParked(testWS, true)
-	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
-
-	// Act
-	h.r.SetColdGate(testWS, ColdGate{Standing: false})
-
-	// Assert
-	if after := h.view(t).GetWarnings(); !proto.Equal(before, after) {
-		t.Fatalf("warnings = %v, want the live strip's own %v", after, before)
 	}
 }
 
@@ -1147,7 +1056,7 @@ func TestTheWorkspaceNameIsItsOwnElement(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, sessionTitle("Add SPC j keybinding support"))
 		}},
 		{name: "beside the agent-set summary", summarize: func(h *harness) {
-			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 		}},
 	}
 	for _, tt := range tests {
@@ -1223,7 +1132,7 @@ func TestTheTitleIsTheAgentSetSummary(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 
 	// Assert: the daemon's own summary beats the bare workspace name.
 	if got, want := h.view(t).GetTitle().GetText(), "Wire up the reconnect backoff"; got != want {
@@ -1238,7 +1147,7 @@ func TestTheAgentSetSummaryOutranksTheVendorsSummary(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
 
 	// Act
-	h.r.SetSummary(testWS, "Distill the prompts into a summary")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Distill the prompts into a summary"})
 
 	// Assert: the summary the agent set is the title.
 	if got, want := h.view(t).GetTitle().GetText(), "Distill the prompts into a summary"; got != want {
@@ -1250,7 +1159,7 @@ func TestALaterVendorSummaryDoesNotDisplaceTheAgentSetSummary(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Distill the prompts into a summary")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Distill the prompts into a summary"})
 
 	// Act
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
@@ -1266,10 +1175,10 @@ func TestARetractedSummaryFallsBackToTheVendorsSummary(t *testing.T) {
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
-	h.r.SetSummary(testWS, "a title to be retracted")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "a title to be retracted"})
 
 	// Act: retract it, as a /clear does.
-	h.r.SetSummary(testWS, "")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{})
 
 	// Assert
 	if got, want := h.view(t).GetTitle().GetText(), "the vendor's own summary"; got != want {
@@ -1281,10 +1190,10 @@ func TestARetractedSummaryWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "a title to be retracted")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "a title to be retracted"})
 
 	// Act: retract it, as a /clear does.
-	h.r.SetSummary(testWS, "")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{})
 
 	// Assert
 	if got := h.view(t).GetTitle(); got != nil {
@@ -1292,45 +1201,38 @@ func TestARetractedSummaryWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	}
 }
 
-// docLink and ticketLink are two links the summary's menu may show.
+// docLink and ticketLink are two links the name's menu may show.
 var (
 	docLink    = Link{Label: "The design doc", URL: "https://example.com/doc"}
 	ticketLink = Link{Label: "The tracking ticket", URL: "https://example.com/ticket"}
 )
 
-func TestTheShownLinksRideTheTitle(t *testing.T) {
-	single := &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Single{
-		Single: &frontendv1.TopbarTitleLink{Label: docLink.Label, Url: docLink.URL}}}
-	menu := &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{Menu: &frontendv1.TopbarTitleLinkMenu{
-		Items: []*frontendv1.TopbarTitleLinkMenuItem{
+func TestTheShownLinksRideTheName(t *testing.T) {
+	single := &frontendv1.TopbarWorkspaceNameLinks{Opens: &frontendv1.TopbarWorkspaceNameLinks_Single{
+		Single: &frontendv1.TopbarWorkspaceNameLink{Label: docLink.Label, Url: docLink.URL}}}
+	menu := &frontendv1.TopbarWorkspaceNameLinks{Opens: &frontendv1.TopbarWorkspaceNameLinks_Menu{Menu: &frontendv1.TopbarWorkspaceNameLinkMenu{
+		Items: []*frontendv1.TopbarWorkspaceNameLinkMenuItem{
 			{Label: ticketLink.Label, Url: ticketLink.URL}, {Label: docLink.Label, Url: docLink.URL}}}}}
 	tests := []struct {
 		name      string
 		arrange   func(h *harness)
-		wantText  string
-		wantLinks *frontendv1.TopbarTitleLinks
-		noTitle   bool
+		wantLinks *frontendv1.TopbarWorkspaceNameLinks
 	}{
 		{name: "one shown link is opened directly", arrange: func(h *harness) {
-			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 			h.r.SetLinks(testWS, []Link{docLink})
-		}, wantText: "Wire up the reconnect backoff", wantLinks: single},
+		}, wantLinks: single},
 		{name: "two shown links drop a menu in the order given", arrange: func(h *harness) {
-			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 			h.r.SetLinks(testWS, []Link{ticketLink, docLink})
-		}, wantText: "Wire up the reconnect backoff", wantLinks: menu},
-		{name: "links set before the summary land with it", arrange: func(h *harness) {
-			h.r.SetLinks(testWS, []Link{docLink})
-			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
-		}, wantText: "the vendor's own summary", wantLinks: single},
+		}, wantLinks: menu},
 		{name: "cleared links leave plain text", arrange: func(h *harness) {
-			h.r.SetSummary(testWS, "Wire up the reconnect backoff")
 			h.r.SetLinks(testWS, []Link{docLink})
 			h.r.SetLinks(testWS, nil)
-		}, wantText: "Wire up the reconnect backoff"},
-		{name: "no summary publishes no links", arrange: func(h *harness) {
+		}},
+		{name: "a workspace with no summary still links its name", arrange: func(h *harness) {
 			h.r.SetLinks(testWS, []Link{docLink})
-		}, noTitle: true},
+		}, wantLinks: single},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1342,18 +1244,59 @@ func TestTheShownLinksRideTheTitle(t *testing.T) {
 			tt.arrange(h)
 
 			// Assert
-			got := h.view(t).GetTitle()
-			if tt.noTitle {
-				if got != nil {
-					t.Fatalf("title = %v, want none: nothing is clickable without a summary", got)
-				}
-				return
-			}
-			if got.GetText() != tt.wantText {
-				t.Errorf("title text = %q, want %q", got.GetText(), tt.wantText)
-			}
+			got := h.view(t).GetWorkspaceName()
 			if !proto.Equal(got.GetLinks(), tt.wantLinks) {
-				t.Errorf("title links = %v, want %v", got.GetLinks(), tt.wantLinks)
+				t.Errorf("name links = %v, want %v", got.GetLinks(), tt.wantLinks)
+			}
+		})
+	}
+}
+
+func TestTheTitleCarriesNoLinks(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Long: "Fix the backoff. It retries too fast.", Short: "Wire up the reconnect backoff"})
+
+	// Act
+	h.r.SetLinks(testWS, []Link{docLink})
+
+	// Assert
+	want := &frontendv1.TopbarTitle{Text: "Wire up the reconnect backoff",
+		Description: &frontendv1.TopbarTitleDescription{Text: "Fix the backoff. It retries too fast."}}
+	if got := h.view(t).GetTitle(); !proto.Equal(got, want) {
+		t.Fatalf("title = %v, want %v", got, want)
+	}
+}
+
+func TestTheTitlesDescriptionIsTheLongSummary(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    *frontendv1.TopbarTitleDescription
+	}{
+		{name: "a long summary is the description", arrange: func(h *harness) {
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Long: "Fix the backoff. It retries too fast.", Short: "Fix the backoff"})
+		}, want: &frontendv1.TopbarTitleDescription{Text: "Fix the backoff. It retries too fast."}},
+		{name: "a short summary alone has no description", arrange: func(h *harness) {
+			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Fix the backoff"})
+		}},
+		{name: "the vendor's title has no description", arrange: func(h *harness) {
+			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := h.view(t).GetTitle().GetDescription(); !proto.Equal(got, tt.want) {
+				t.Errorf("description = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1367,13 +1310,13 @@ func TestOwnedLinksLeadTheMenuAndReadAsOwned(t *testing.T) {
 	owned2 := Link{Label: "The doc", URL: "https://www.notion.so/doc", Owned: true}
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Title")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Title"})
 
 	// Act
 	h.r.SetLinks(testWS, []Link{reference1, owned1, reference2, owned2})
 
 	// Assert
-	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
+	items := h.view(t).GetWorkspaceName().GetLinks().GetMenu().GetItems()
 	var gotURLs []string
 	for _, item := range items {
 		gotURLs = append(gotURLs, item.GetUrl())
@@ -1394,15 +1337,15 @@ func TestAMenuRowCarriesItsPullRequestsBadge(t *testing.T) {
 	merged := Link{Label: "The pull request", URL: "https://github.com/o/r/pull/1", Owned: true, State: wsm.PullRequestStateMerged}
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Title")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Title"})
 
 	// Act
 	h.r.SetLinks(testWS, []Link{merged, docLink})
 
 	// Assert: the pull request's row carries its badge, the doc's none.
-	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
-	want := []*frontendv1.TopbarTitleLinkBadge{
-		{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}, nil}
+	items := h.view(t).GetWorkspaceName().GetLinks().GetMenu().GetItems()
+	want := []*frontendv1.TopbarWorkspaceNameLinkBadge{
+		{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Merged{Merged: &frontendv1.TopbarWorkspaceNameLinkBadgeMerged{}}}, nil}
 	for i := range want {
 		if !proto.Equal(items[i].GetBadge(), want[i]) {
 			t.Errorf("item %d badge = %v, want %v", i, items[i].GetBadge(), want[i])
@@ -1415,13 +1358,13 @@ func TestAMenuRowSaysWhetherItsLinkIsSubscribed(t *testing.T) {
 	followed := Link{Label: "The pull request", URL: "https://github.com/o/r/pull/1", Owned: true, Subscribed: true}
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Title")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Title"})
 
 	// Act
 	h.r.SetLinks(testWS, []Link{followed, docLink})
 
 	// Assert: the followed row is subscribed, the doc's is not.
-	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
+	items := h.view(t).GetWorkspaceName().GetLinks().GetMenu().GetItems()
 	if got := []bool{items[0].GetSubscribed(), items[1].GetSubscribed()}; !slices.Equal(got, []bool{true, false}) {
 		t.Fatalf("subscribed = %v, want [true false]", got)
 	}
@@ -1431,13 +1374,13 @@ func TestLinkBadgeDrawsEachState(t *testing.T) {
 	tests := []struct {
 		name  string
 		state wsm.PullRequestState
-		want  *frontendv1.TopbarTitleLinkBadge
+		want  *frontendv1.TopbarWorkspaceNameLinkBadge
 	}{
 		{"no state draws none", "", nil},
-		{"open", wsm.PullRequestStateOpen, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Open{Open: &frontendv1.TopbarTitleLinkBadgeOpen{}}}},
-		{"draft", wsm.PullRequestStateDraft, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Draft{Draft: &frontendv1.TopbarTitleLinkBadgeDraft{}}}},
-		{"merged", wsm.PullRequestStateMerged, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}},
-		{"closed", wsm.PullRequestStateClosed, &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Closed{Closed: &frontendv1.TopbarTitleLinkBadgeClosed{}}}},
+		{"open", wsm.PullRequestStateOpen, &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Open{Open: &frontendv1.TopbarWorkspaceNameLinkBadgeOpen{}}}},
+		{"draft", wsm.PullRequestStateDraft, &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Draft{Draft: &frontendv1.TopbarWorkspaceNameLinkBadgeDraft{}}}},
+		{"merged", wsm.PullRequestStateMerged, &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Merged{Merged: &frontendv1.TopbarWorkspaceNameLinkBadgeMerged{}}}},
+		{"closed", wsm.PullRequestStateClosed, &frontendv1.TopbarWorkspaceNameLinkBadge{State: &frontendv1.TopbarWorkspaceNameLinkBadge_Closed{Closed: &frontendv1.TopbarWorkspaceNameLinkBadgeClosed{}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1468,16 +1411,16 @@ func TestLinkIconNamesTheServiceOfTheHost(t *testing.T) {
 	tests := []struct {
 		name string
 		url  string
-		want frontendv1.TopbarTitleLinkIcon
+		want frontendv1.TopbarWorkspaceNameLinkIcon
 	}{
-		{"github", "https://github.com/o/r/pull/3", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GITHUB},
-		{"slack subdomain", "https://team.slack.com/archives/C1/p2", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK},
-		{"notion", "https://www.notion.so/page", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION},
-		{"notion site", "https://team.notion.site/page", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION},
-		{"gns", "https://gns.example.com/k/1", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS},
-		{"lookalike host has none", "https://notgithub.com/x", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
-		{"unknown host has none", "https://example.com/x", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
-		{"unparseable url has none", "http://[::1", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
+		{"github", "https://github.com/o/r/pull/3", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_GITHUB},
+		{"slack subdomain", "https://team.slack.com/archives/C1/p2", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_SLACK},
+		{"notion", "https://www.notion.so/page", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_NOTION},
+		{"notion site", "https://team.notion.site/page", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_NOTION},
+		{"gns", "https://gns.example.com/k/1", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_GNS},
+		{"lookalike host has none", "https://notgithub.com/x", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED},
+		{"unknown host has none", "https://example.com/x", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED},
+		{"unparseable url has none", "http://[::1", frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_UNSPECIFIED},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1496,17 +1439,17 @@ func TestSetLinksKeepsItsOwnCopy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 	shown := []Link{docLink}
 
 	// Act: the caller reuses its slice after handing it over.
 	h.r.SetLinks(testWS, shown)
 	shown[0] = ticketLink
-	h.r.SetSummary(testWS, "Wire up the reconnect backoff again")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff again"})
 
 	// Assert
-	if got := h.view(t).GetTitle().GetLinks().GetSingle().GetUrl(); got != docLink.URL {
-		t.Fatalf("title link = %q, want %q: the resolver read the caller's later write", got, docLink.URL)
+	if got := h.view(t).GetWorkspaceName().GetLinks().GetSingle().GetUrl(); got != docLink.URL {
+		t.Fatalf("name link = %q, want %q: the resolver read the caller's later write", got, docLink.URL)
 	}
 }
 
@@ -1514,7 +1457,7 @@ func TestSettingTheLinksRepublishesTheStrip(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSummary(testWS, "Wire up the reconnect backoff")
+	h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Wire up the reconnect backoff"})
 	before := h.view(t)
 
 	// Act
@@ -1522,21 +1465,9 @@ func TestSettingTheLinksRepublishesTheStrip(t *testing.T) {
 
 	// Assert: a NEW view was published, carrying the link.
 	after := h.view(t)
-	if after == before || after.GetTitle().GetLinks().GetSingle().GetUrl() != docLink.URL {
-		t.Fatalf("published view = %v, want a fresh view whose title links the doc", after.GetTitle())
+	if after == before || after.GetWorkspaceName().GetLinks().GetSingle().GetUrl() != docLink.URL {
+		t.Fatalf("published view = %v, want a fresh view whose name links the doc", after.GetWorkspaceName())
 	}
-}
-
-// lastWarningLine is the sentence on the strip's LAST warning — where a
-// standing state sorts, because the dropdown draws the newest first and a
-// state was true before anything that is wrong right now went wrong.
-func lastWarningLine(t *testing.T, h *harness) string {
-	t.Helper()
-	warnings := h.view(t).GetWarnings().GetWarnings()
-	if len(warnings) == 0 {
-		t.Fatalf("the warning strip is empty, want the state stated as a line")
-	}
-	return warnings[len(warnings)-1].GetLine().GetText()
 }
 
 // sessionTitle is the vendor's own summary of the conversation.
@@ -2001,7 +1932,7 @@ func TestLinkIconDrawsGNSForExactlyTheHostsGNSURLRecognizes(t *testing.T) {
 			got := linkIcon("https://" + host + "/key/teams.x")
 
 			// Assert
-			if gotGNS := got == frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS; gotGNS != gnsurl.IsHost(host) {
+			if gotGNS := got == frontendv1.TopbarWorkspaceNameLinkIcon_TOPBAR_WORKSPACE_NAME_LINK_ICON_GNS; gotGNS != gnsurl.IsHost(host) {
 				t.Errorf("linkIcon on %q = %v, but gnsurl.IsHost = %v", host, got, gnsurl.IsHost(host))
 			}
 		})
@@ -2050,5 +1981,59 @@ func TestTwoCutsWithNoReadingBetweenBankTheContextOnce(t *testing.T) {
 	// Assert
 	if got := h.view(t).GetContext().GetSessionTotalText(); got != "142.3k" {
 		t.Fatalf("session total = %q, want the context banked once", got)
+	}
+}
+
+func TestAUsageContradictionIsRecordedAtWarn(t *testing.T) {
+	tests := []struct {
+		name          string
+		act           func(h *harness)
+		contradiction string
+	}{
+		{name: "a unit reporting two usages", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 5, 0)))
+		}, contradiction: "it reported two different usages"},
+		{name: "more thinking than output", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 9)))
+		}, contradiction: "it reports more thinking tokens than output tokens"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			var found bool
+			for _, record := range h.log.Records() {
+				if record.Operation == "daemon.topbar.usage_contradiction" {
+					found = record.Level == "warn" && record.Context["contradiction"] == tt.contradiction && record.Context["activity_id"] == "u1"
+				}
+			}
+			if !found {
+				t.Fatalf("records = %+v, want one warn naming %q for u1", h.log.Records(), tt.contradiction)
+			}
+		})
+	}
+}
+
+func TestAConsistentUsageRecordsNoContradiction(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: the same report twice is a re-report, not a contradiction.
+	h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 0)))
+	h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 4, 0)))
+
+	// Assert
+	for _, record := range h.log.Records() {
+		if record.Operation == "daemon.topbar.usage_contradiction" {
+			t.Fatalf("record = %+v, want no contradiction", record)
+		}
 	}
 }

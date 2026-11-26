@@ -1774,8 +1774,8 @@ A FAILED DEPLOY ROLLS BACK (owner ruling, 2026-09-28): any failure after the
 install began puts every replaced artifact back and restarts every service
 the deploy restarted onto the restored build, so the machine is left exactly on
 the build it ran before; the fault line says `rolled back`. A rollback that
-fails is its own `deploy_failed` fault (the `rollback` step). Both stand in
-the TOPBAR's warning strip as well as on every footer, and the next deploy
+fails is its own `deploy_failed` fault (the `rollback` step). Both stand on
+every footer and are told to every Emacs as loud faults, and the next deploy
 that gets through takes them down from both.
 
 `force` does not wait: every stale shim is bounced at once and a stale daemon
@@ -2387,16 +2387,15 @@ NEVER opens in the xwidget.
   page redirects to the app and stays behind, and landing on that tab later
   sends the app back to the link.
 
-## The topbar's warning chip is the webapp's one error surface
+## The webapp draws no error surface of its own
 
-Owner ruling, standing (2026-09-23). The topbar's warning chip and its
-dropdown are the ONE canonical place the webapp makes an error visible to the
-user: no overlays, banners, toasts or corner cards. The daemon's pushed
-warnings are drawn there verbatim, and the page's own client-local failures
-(the ones no daemon can push, because it may be what is unreachable) are
-listed there too, with or without a topbar push. The chip is red (`--err`).
-Every error is also always logged; the chip never stands in for the record.
-The details live in `webapp/AGENTS.md`.
+Owner ruling, standing (2026-11-25, superseding the warning chip of
+2026-09-23): the topbar draws no warnings, and the webapp has no overlay,
+banner, toast or corner card for an error either. An error is recorded through
+its system's canonical log at ERROR, with the context to diagnose it. The
+footer still states a session's health, and the page's client-local failures
+that describe its link to the daemon still reach it as cards
+(`webapp/src/failure/local.ts`).
 
 ## An invisible action is a logging defect, not a test problem
 
@@ -2737,8 +2736,8 @@ READER folds it, with ONE exception: a merge that ended in success.
   (DEBUG `feed.bubble-reader-fold-kept`).
 - **Only the reader's toggle is sent.** A fold the daemon applied, a jump's
   expansion and a replace's reopening are never recorded. A refused or failed
-  record is filed on the warning chip (`control_plane_failed`) and logged;
-  the bubble keeps the reader's toggle.
+  record is filed in the failure sink (`control_plane_failed`), which records
+  it; the bubble keeps the reader's toggle.
 - **A merge bubble a jump opened is never watched** (DEBUG
   `feed.jump-merge-unwatched`), so leaving the view never folds it.
 

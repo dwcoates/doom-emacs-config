@@ -2143,12 +2143,15 @@ func (d *Daemon) Stderr() string {
 	return string(raw)
 }
 
-// SeededSummary is the topbar summary Register states for every workspace it
-// registers.
-const SeededSummary = "Exercise the daemon under test"
+// SeededLongSummary and SeededShortSummary are the topbar summary Register
+// states for every workspace it registers.
+const (
+	SeededLongSummary  = "Exercise the daemon under test. The harness registered this workspace."
+	SeededShortSummary = "Exercise the daemon under test"
+)
 
 // Register registers a repository's worktree, states its summary
-// (SeededSummary), and answers the minted ref.
+// (SeededLongSummary, SeededShortSummary), and answers the minted ref.
 //
 // A WORKSPACE WITH NO SUMMARY OWES ONE (wssummary): every prompt it is sent
 // carries the note asking its agent for one, and the fake vendor reads that
@@ -2159,17 +2162,18 @@ const SeededSummary = "Exercise the daemon under test"
 func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	ref := RegisterOwingSummary(t, d, dir)
-	SetSummary(t, d, ref, SeededSummary)
+	SetSummary(t, d, ref, SeededLongSummary, SeededShortSummary)
 	return ref
 }
 
-// SetSummary sets ws's topbar summary, as its agent does with `agent-repld
-// workspace summary`, failing the test unless the daemon stores it.
-func SetSummary(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef, summary string) {
+// SetSummary sets ws's topbar summary, its LONG and SHORT parts, as its
+// agent does with `agent-repld workspace summary`, failing the test unless
+// the daemon stores it.
+func SetSummary(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef, long, short string) {
 	t.Helper()
-	resp, err := d.Client().SetWorkspaceSummary(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ws, Summary: summary}))
+	resp, err := d.Client().SetWorkspaceSummary(d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ws, LongSummary: long, ShortSummary: short}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SetWorkspaceSummary(%s, %q) = (%v, %v), want a success", ws.GetId(), summary, resp, err)
+		t.Fatalf("SetWorkspaceSummary(%s, %q, %q) = (%v, %v), want a success", ws.GetId(), long, short, resp, err)
 	}
 }
 

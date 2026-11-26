@@ -135,7 +135,7 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(m.cells.map((c) => c.cell)).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
   });
 
-  it("draws one cell of every status kind in the left group, and no warning chip", async () => {
+  it("draws one cell of every status kind in the left group", async () => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
     expect(m.status.map((c) => c.cell)).toEqual(["topbar-queue-bypass", "topbar-remote-control", "topbar-wifi"]);
   });

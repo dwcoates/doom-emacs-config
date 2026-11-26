@@ -16,7 +16,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { FailureKindSchema } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 
-import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
+import { bootColdOnce, filedFailureText, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { RENDER_COLORS, failureSideColor } from "./vocab";
 import {
@@ -68,7 +68,7 @@ describe("the client-local failure vocabulary", () => {
 });
 
 describe.each(CLIENT_FAILURE_ARMS)("the %s failure", (arm) => {
-  it("lists its own arm in the topbar's warning chip", async () => {
+  it("stands its own arm in the failure sink", async () => {
     // Arrange / Act
     harness = await report(arm);
     // Assert
@@ -103,14 +103,14 @@ describe("failure evidence", () => {
     // Arrange / Act
     harness = await report(arm);
     // Assert
-    expect(await chipFailureText(harness, arm)).toContain(FAILURE_EVIDENCE[arm]);
+    expect(filedFailureText(arm)).toContain(FAILURE_EVIDENCE[arm]);
   });
 
   it("draws the workspace-gone arm, which carries no evidence at all", async () => {
     // Arrange / Act
     harness = await report("workspaceGone");
     // Assert
-    expect(await chipFailureText(harness, "workspaceGone")).toContain("no longer exists");
+    expect(filedFailureText("workspaceGone")).toContain("no longer exists");
   });
 });
 

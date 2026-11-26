@@ -8,9 +8,8 @@
  * composer's slot, and a held-back page's load button (load-button.ts).
  *
  * SO THE HOST STILL TALKS TO THE DAEMON (document.ts): the gate's answers go
- * through its context, it watches the roster for the gates it draws, and its
- * failures go to every page's warning chip (host.ts `setFailures`), the
- * webapp's one error surface over the pages.
+ * through its context, and it watches the roster for the gates it draws. Its
+ * own failures are recorded where they are filed (failure/local.ts).
  */
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -79,8 +78,8 @@ export function watchColdGates(
 /**
  * Start the webhost's services for HOST, served from WIN's origin, on RUNTIME's connection.
  *
- * Services that cannot start leave the pages working: the failure is logged
- * and listed in every page's warning chip, never thrown past the webhost.
+ * Services that cannot start leave the pages working: the failure is filed
+ * in the webhost's failure sink, never thrown past the webhost.
  * Answers the stop.
  */
 export function startWebhostServices(
@@ -92,11 +91,6 @@ export function startWebhostServices(
 ): { dispose(): void } {
   const started = startWebhostDocument(runtime, doc, win, deps);
   const { ctx, failures } = started;
-  // THE WEBHOST'S FAILURES ARE LISTED IN EVERY PAGE'S CHIP: the whole set,
-  // every time it changes.
-  failures.subscribe(() => {
-    host.setFailures(failures.standing());
-  });
 
   let stop = (): void => undefined;
   try {
@@ -133,12 +127,8 @@ export function startWebhostServices(
       gate?.dispose();
     };
   } catch (err) {
-    const cause = errorCause(err);
-    log.error("the webhost's services failed to start: {cause}", {
-      operation: "webhost.services-start-failed",
-      context: {},
-    }, { cause });
-    failures.report(bootFailed(cause));
+    // THE FAILURE SINK RECORDS IT, at ERROR with its cause: one record.
+    failures.report(bootFailed(errorCause(err)));
   }
   return {
     dispose: () => {

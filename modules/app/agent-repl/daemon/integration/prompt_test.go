@@ -1989,7 +1989,7 @@ func TestAWorkspaceOwingItsSummaryAsksForItUntilItsAgentSetsOne(t *testing.T) {
 	f.submit("fix the flaky reconnect test", "k-owed", origin)
 	owed := f.shim.ExpectStartTurn()
 	pushConcludedTurn(f.shim, mainAgent, "owed-answer")
-	harness.SetSummary(t, f.d, f.ws, "Fix the flaky reconnect test")
+	harness.SetSummary(t, f.d, f.ws, "The reconnect test flakes under load. Fix its wait.", "Fix the flaky reconnect test")
 	f.submit("and the footer too", "k-set", origin)
 	set := f.shim.ExpectStartTurn()
 

@@ -865,3 +865,17 @@ func TestEveryParticipantEdgeStatesItsHopsThroughOneShape(t *testing.T) {
 		})
 	}
 }
+
+// TestFindTakesSummaryFields fails when the find read maps a stored summary
+// to its wire fields by hand instead of through workspace.SummaryFields.
+func TestFindTakesSummaryFields(t *testing.T) {
+	sourcescan.InPackage(t, internalServerDir)
+	// Act
+	callers := sourcescan.Sites(t, internalServerDir, "workspace.SummaryFields(")
+	handRolled := sourcescan.Sites(t, internalServerDir, "LongSummary = &")
+
+	// Assert: the find read maps a summary through the one mapping.
+	if len(callers) != 1 || callers[0] != "findworkspaces.go" || len(handRolled) != 0 {
+		t.Fatalf("SummaryFields sites = %v, hand-rolled = %v; want the find read alone", callers, handRolled)
+	}
+}

@@ -410,7 +410,7 @@ func TestRegisterStatesTheSeededSummary(t *testing.T) {
 		register func(testing.TB, *Daemon, string) *workspacev1.WorkspaceRef
 		want     []string
 	}{
-		{name: "Register", register: Register, want: []string{SeededSummary}},
+		{name: "Register", register: Register, want: []string{SeededLongSummary + " | " + SeededShortSummary}},
 		{name: "RegisterOwingSummary", register: RegisterOwingSummary, want: nil},
 	}
 	for _, tt := range tests {
@@ -430,7 +430,7 @@ func TestRegisterStatesTheSeededSummary(t *testing.T) {
 				if req.GetWorkspace().GetId() != "w1" {
 					t.Fatalf("SetWorkspaceSummary named workspace %q, want the registered w1", req.GetWorkspace().GetId())
 				}
-				got = append(got, req.GetSummary())
+				got = append(got, req.GetLongSummary()+" | "+req.GetShortSummary())
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("summaries set = %q, want %q", got, tt.want)

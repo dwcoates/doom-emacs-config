@@ -195,7 +195,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
 		"set":                    {usage: "set WS [-backlogged|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
-		"summary":                {usage: "summary WS -text SUMMARY", run: workspaceSummary},
+		"summary":                {usage: "summary WS -long LONG_SUMMARY -short SHORT_SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":                   {usage: "open WS", run: workspaceOpen},
@@ -1328,11 +1328,13 @@ func originatorFlag(spelled string) (*agentreplv1.WorkspaceOriginator, bool) {
 	return nil, false
 }
 
-// workspaceSummary sets the one-sentence summary of a workspace's task that
-// its topbar draws (agentrepl.v1.SetWorkspaceSummary).
+// workspaceSummary sets the summary of a workspace's task that its topbar
+// draws (agentrepl.v1.SetWorkspaceSummary): the long summary, written first,
+// and the short summary distilled from it.
 func workspaceSummary(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	text := fs.String("text", "", "the summary: one imperative sentence of at most fifteen words")
+	long := fs.String("long", "", "the long summary: two to four sentences in one paragraph, at most eighty words; the topbar title's hover shows it")
+	short := fs.String("short", "", "the short summary, distilled from the long one: one imperative sentence of at most fifteen words; the topbar's title")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
@@ -1340,16 +1342,19 @@ func workspaceSummary(c *cliCall, args []string) int {
 	if len(rest) != 0 {
 		return c.usageFailed("nothing is positional")
 	}
-	if *text == "" {
-		return c.usageFailed("-text names the summary")
+	if *long == "" {
+		return c.usageFailed("-long names the long summary")
 	}
-	resp, err := c.client.SetWorkspaceSummary(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref, Summary: *text}))
+	if *short == "" {
+		return c.usageFailed("-short names the short summary")
+	}
+	resp, err := c.client.SetWorkspaceSummary(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceSummaryRequest{Workspace: ref, LongSummary: *long, ShortSummary: *short}))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.SetWorkspaceSummaryResponse) (string, error) {
 		return describeSummaryRefusal(named, msg.GetError())
 	})
 }
 
-// workspaceLink changes one of a workspace's links, the topbar summary's
+// workspaceLink changes one of a workspace's links, the topbar name's
 // menu: store or relabel one (-url with -label, and -owned or -reference),
 // remove one (-remove), name
 // exactly the ones the menu shows (-show, repeated), or clear them (-clear).

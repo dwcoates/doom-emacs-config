@@ -19,7 +19,6 @@ import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import type { QuietSource } from "../quiet.js";
 import { FOCUS_LEFT_EMACS, focusLeftReason, type FocusLeftSource } from "../focus-left.js";
-import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 import { pageMutationObserver } from "../dom.js";
 import { fromJson, type JsonObject } from "@bufbuild/protobuf";
@@ -65,8 +64,6 @@ export interface EmbedEnv {
   readonly presence: PresenceSource;
   /** The page's lid-closed quiet state, which the host's `quiet` sets. */
   readonly quiet: QuietSource;
-  /** Where the webhost's own failures are listed for this page's warning chip. */
-  readonly webhostFailures: WebhostFailureView;
   /** The page's live log threshold, which the host raises (`logLevel`). */
   readonly levelWindow: LevelWindow;
   /** The editor's held-prompt ingress entries, which the host hands over (`heldIngress`). */
@@ -95,7 +92,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns } = env;
+  const { doc, win, presence, quiet, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -116,9 +113,6 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
         if (message.downtimeStartedAtMs !== undefined) presence.setDowntimeStartedAt(message.downtimeStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
-        return;
-      case "webhostFailures":
-        webhostFailures.set(message.failures);
         return;
       case "heldIngress":
         editorIngress.set(decodeHeldIngress(message.entries));

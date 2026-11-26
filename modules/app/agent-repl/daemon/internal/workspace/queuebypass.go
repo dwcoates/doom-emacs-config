@@ -275,7 +275,7 @@ const (
 
 // restateRemoteControl has the fleet put the remote-control mode a queue
 // bypass TRANSITION left in force. The fleet logs a failure, with the
-// transition and its cause, and states it on the warning strip; the
+// transition and its cause; the
 // transition stands either way, because the mode the store derives is
 // already right and the next bring-up puts it in force.
 func (v *verbs) restateRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, transition string) {

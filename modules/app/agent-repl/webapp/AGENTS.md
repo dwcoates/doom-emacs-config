@@ -41,8 +41,8 @@ rules/                    the rule tests (the webapp-rules suite), mirroring tes
 
 1. `shellElements(document)` — a broken shell fails here, by id.
 2. the page address, then the transport, the client, the client-local
-   failures (`createLocalFailures`) and the topbar's MOUNT — its warning chip
-   lists those failures from here on, before any stream exists.
+   failures (`createLocalFailures`) and the topbar's MOUNT, before any stream
+   exists, so a boot failure has a failure sink to be filed in.
 3. the logger, bound to this page's identity and configured from the page's
    `log_level` boot parameter.
 4. `adoptAtBoot(ctx)` — BEFORE any view stream. A joining daemon refuses every
@@ -79,8 +79,7 @@ daemon's central log) that name the document (`webhost_document`: `host` or
 - The webhost (src/host/, `?host=1`) holds every workspace page as an iframe
   and draws, from its own services (src/host/services.ts), the shown
   workspace's cold gate and a held-back page's load button. It watches the
-  roster for the gates, and relays its failures to every page's warning chip
-  (`webhostFailures`), the pages' one error surface.
+  roster for the gates; its own failures are filed in its own failure sink.
 - The sidebar page (src/host/sidebar-page.ts, `?sidebar=1`) draws the sidebar
   ONCE, filling its window. Emacs reaches it through `window.agentReplSidebar`
   (`markShown`, `setDaemon`, `setLogLevel`, `focusMoved`), as it reaches the
@@ -120,7 +119,9 @@ scale (src/feed/feed-text-scale.ts) is the first user.
   in the rpc layer so a refusal can reach the mounted banner without the rpc
   layer importing a component.
 - **The failure sink.** `createLocalFailures` IS the `FailureSink` every layer
-  reports through; the topbar's warning chip is its one drawer.
+  reports through. It records each failure at ERROR with its arm's evidence,
+  and relays the ones about the page's link to the footer as cards; no surface
+  lists them (the topbar draws no warnings).
 - **The ticker.** One `Ticker` on the context; every clock subscribes to it.
 
 ## DOM hooks
@@ -388,16 +389,12 @@ hand any more:
   so no reopen can subscribe on the generation being left. No stream waits for
   the old daemon to end it: a handover that cannot finish leaves the old
   daemon serving, and a roster read from it never moves again (2026-10-26).
-- **THE TOPBAR'S WARNING CHIP IS THE ONE PLACE AN ERROR IS SHOWN** (owner
-  ruling, 2026-09-23). The chip and its dropdown (`src/topbar/warnings.ts`)
-  are the canonical surface on which the webapp makes an error visible: no
-  overlays, banners, toasts or corner cards. The daemon's pushed warnings are
-  drawn there verbatim; the page's own client-local failures
-  (`src/failure/local.ts`) merge in client-side, ahead of them and in the same
-  count, and never wait on a push — the topbar mounts before adoption so the
-  chip can list a failure that stops every stream. The chip is red (`--err`).
-  Every error is ALSO logged: filing one writes `warning-chip.report`, clearing
-  it `warning-chip.retract`.
+- **NO ERROR SURFACE** (owner ruling, 2026-11-25, superseding the warning
+  chip of 2026-09-23). The topbar draws no warnings, and nothing else draws
+  an error: no overlays, banners, toasts or corner cards. The page's own
+  client-local failures (`src/failure/local.ts`) are recorded at ERROR with
+  their arm's evidence (`failure.report`, retracted under `failure.retract`),
+  and the ones about the page's link to the daemon reach the footer as cards.
 - **TYPED ARMS, NO FALLBACKS.** Every oneof is switched exhaustively. An unset
   oneof, an unset non-optional message field, or an unknown arm is a
   `MalformedView` — never a default, never something else drawn instead. An

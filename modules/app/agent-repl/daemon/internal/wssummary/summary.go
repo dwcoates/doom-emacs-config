@@ -1,5 +1,6 @@
-// Package wssummary keeps the workspace summary the topbar draws: the one
-// imperative sentence a workspace's own agent sets to state its task
+// Package wssummary keeps the workspace summary the topbar draws: the long
+// summary of two to four sentences and the one imperative sentence distilled
+// from it that a workspace's own agent sets to state its task
 // (agentrepl.v1.SetWorkspaceSummary).
 //
 // THE AGENT OWNS THE SUMMARY; THE DAEMON DISTILLS NOTHING. The keeper stores
@@ -7,10 +8,12 @@
 // registration so a restarted daemon shows it at once, and drops it at a
 // /clear, which ends the conversation it described.
 //
-// NO SUMMARY IS A SUMMARY OWED. While none stands — a new workspace, or one
-// whose /clear dropped it — every user's or agent's prompt to the workspace
-// is closed by the BriefOwed note asking the agent to set one (OwedNote). The absence of the stored row IS the owed state, so the
-// two can never disagree.
+// NO WHOLE SUMMARY IS A SUMMARY OWED. While none stands — a new workspace, one
+// whose /clear dropped it, or one whose agent set a short summary before long
+// summaries existed — every user's or agent's prompt to the workspace is
+// closed by the BriefOwed note asking the agent to set one (OwedNote). The
+// stored row, read whole (wsm.WorkspaceSummary.Complete), IS the owed state,
+// so the two can never disagree.
 package wssummary
 
 import (
@@ -22,15 +25,23 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/textline"
+	"agent-repld/internal/wsm"
 )
 
 // BriefOwed is the note a prompt to a workspace with no summary closes with.
 const BriefOwed = "workspace-summary-owed"
 
-// The bounds of a summary, in words.
+// The bounds of a short summary, in words.
 const (
 	MinWords = 2
 	MaxWords = 15
+)
+
+// The bounds of a long summary: sentences, and words in all.
+const (
+	LongMinSentences = 2
+	LongMaxSentences = 4
+	LongMaxWords     = 80
 )
 
 // The keeper's operations, one per logical branch.
@@ -46,30 +57,40 @@ const (
 // otherwise be several clauses, and a summary is one plain sentence.
 var clauseMarks = []string{",", ";", ":", "(", ")", "—", "–", " - "}
 
-// Validate answers why SUMMARY is not one the title line draws: not one line
-// holding one sentence of MinWords to MaxWords words (textline.OneSentence),
-// or carrying a clause-joining mark. Nil for a summary the title line draws.
-func Validate(summary string) error {
-	if err := textline.OneSentence("summary", summary, MinWords, MaxWords); err != nil {
+// ValidateShort answers why SHORT is not a short summary the title line
+// draws: not one line holding one sentence of MinWords to MaxWords words
+// (textline.OneSentence), or carrying a clause-joining mark. Nil for one the
+// title line draws.
+func ValidateShort(short string) error {
+	if err := textline.OneSentence("short summary", short, MinWords, MaxWords); err != nil {
 		return err
 	}
 	for _, mark := range clauseMarks {
-		if strings.Contains(summary, mark) {
-			return fmt.Errorf("a summary is one plain sentence, so it carries no %q joining clauses", strings.TrimSpace(mark))
+		if strings.Contains(short, mark) {
+			return fmt.Errorf("a short summary is one plain sentence, so it carries no %q joining clauses", strings.TrimSpace(mark))
 		}
 	}
 	return nil
 }
 
+// ValidateLong answers why LONG is not a long summary the title's hover
+// popup shows: not one paragraph of LongMinSentences to LongMaxSentences
+// sentences and at most LongMaxWords words (textline.Paragraph). Nil for one
+// the popup shows.
+func ValidateLong(long string) error {
+	return textline.Paragraph("long summary", long, LongMinSentences, LongMaxSentences, LongMaxWords)
+}
+
 // Store keeps each workspace's summary (wsm).
 type Store interface {
-	// PutWorkspaceSummary records the summary, replacing any it had.
-	PutWorkspaceSummary(ctx context.Context, ws ids.WorkspaceID, summary string) error
+	// PutWorkspaceSummary records the summary, both parts, replacing any it
+	// had.
+	PutWorkspaceSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) error
 	// DropWorkspaceSummary deletes the summary, reporting whether one stood.
 	DropWorkspaceSummary(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// WorkspaceSummaryOf loads the summary; the bool is false when none
 	// stands.
-	WorkspaceSummaryOf(ctx context.Context, ws ids.WorkspaceID) (string, bool, error)
+	WorkspaceSummaryOf(ctx context.Context, ws ids.WorkspaceID) (wsm.WorkspaceSummary, bool, error)
 	// PutVendorTitle records the vendor's title for the conversation,
 	// replacing any it had.
 	PutVendorTitle(ctx context.Context, ws ids.WorkspaceID, title string) error
@@ -80,8 +101,8 @@ type Store interface {
 
 // Topbar installs the summary the title line draws.
 type Topbar interface {
-	// SetSummary installs the summary; empty retracts it.
-	SetSummary(ws ids.WorkspaceID, summary string)
+	// SetSummary installs the summary; the zero summary retracts it.
+	SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary)
 }
 
 // Deps are the keeper's collaborators.
@@ -113,7 +134,9 @@ func New(deps Deps) *Keeper {
 
 // Restore installs the workspace's stored summary into the topbar. The daemon
 // calls it at the workspace's registration, so a restart draws the summary at
-// once, however long the session stays down. A failed read is recorded and
+// once, however long the session stays down. A summary with no long summary
+// is installed too: its short summary is still the title, and the workspace
+// owes the whole summary at its next prompt. A failed read is recorded and
 // returned.
 func (k *Keeper) Restore(ctx context.Context, ws ids.WorkspaceID) error {
 	fields := dlog.Context{"workspace": string(ws)}
@@ -127,15 +150,17 @@ func (k *Keeper) Restore(ctx context.Context, ws ids.WorkspaceID) error {
 		return nil
 	}
 	k.deps.Topbar.SetSummary(ws, summary)
+	fields["complete"] = summary.Complete()
 	k.deps.Log.Debug(opRestore, "restored the workspace summary", fields)
 	return nil
 }
 
 // Set records SUMMARY as the workspace's and installs it in the topbar. The
-// summary's format is the caller's to have validated (Validate); a write that
-// fails is recorded and returned, with the topbar left on the summary it had.
-func (k *Keeper) Set(ctx context.Context, ws ids.WorkspaceID, summary string) error {
-	fields := dlog.Context{"workspace": string(ws), "summary": summary}
+// summary's format is the caller's to have validated (ValidateLong,
+// ValidateShort); a write that fails is recorded and returned, with the
+// topbar left on the summary it had.
+func (k *Keeper) Set(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) error {
+	fields := dlog.Context{"workspace": string(ws), "short_summary": summary.Short, "long_summary": summary.Long}
 	if err := k.deps.Store.PutWorkspaceSummary(ctx, ws, summary); err != nil {
 		k.deps.Log.Error(opSet, "the workspace summary could not be recorded", dlog.WithCause(fields, err))
 		return fmt.Errorf("record the summary of %q: %w", ws, err)
@@ -156,7 +181,7 @@ func (k *Keeper) OnContextReset(ws ids.WorkspaceID) {
 		k.deps.Log.Error(opReset, "the summary a /clear ended could not be dropped; it stands until the workspace sets another", dlog.WithCause(fields, err))
 		return
 	}
-	k.deps.Topbar.SetSummary(ws, "")
+	k.deps.Topbar.SetSummary(ws, wsm.WorkspaceSummary{})
 	fields["dropped"] = dropped
 	k.deps.Log.Info(opReset, "a /clear ended the summarized conversation; the workspace owes a new summary", fields)
 }
@@ -187,19 +212,20 @@ func (k *Keeper) OnVendorTitle(ws ids.WorkspaceID, title string) {
 }
 
 // OwedNote answers the meta-wrapped BriefOwed note a prompt to the workspace
-// closes with while it has no summary standing, and false when one stands. A
-// read or a brief that fails is recorded and returned, so a prompt is never
-// sent without the note it owes.
+// closes with while it has no whole summary standing, and false when one
+// stands. A read or a brief that fails is recorded and returned, so a prompt
+// is never sent without the note it owes.
 func (k *Keeper) OwedNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
 	fields := dlog.Context{"workspace": string(ws), "brief": BriefOwed}
-	_, found, err := k.deps.Store.WorkspaceSummaryOf(ctx, ws)
+	summary, found, err := k.deps.Store.WorkspaceSummaryOf(ctx, ws)
 	if err != nil {
 		k.deps.Log.Error(opOwed, "could not read whether the workspace owes a summary", dlog.WithCause(fields, err))
 		return "", false, fmt.Errorf("read the summary of %q: %w", ws, err)
 	}
-	if found {
+	if found && summary.Complete() {
 		return "", false, nil
 	}
+	fields["short_only"] = found
 	note, err := Note(k.deps.PromptsDir)
 	if err != nil {
 		k.deps.Log.Error(opOwed, "could not compose the note asking for a summary", dlog.WithCause(fields, err))

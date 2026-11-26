@@ -25,10 +25,6 @@
 //     every other tool-kind here renders through — cron, push notification,
 //     task acts, send-message, web-fetch, web-search all have no dedicated
 //     bubble of their own).
-//   - proto/src/frontend/v1/topbar.proto: TopbarWarningStrip.warnings — used
-//     by TestDiagnostics to assert a HEALTHY diagnostics push by absence,
-//     mirroring kit/stack/world.go's KeepAliveNeverAppearsOnWire-style
-//     assert-by-absence precedent named in SPEC.md §C #45.
 //   - proto/src/store/v1/endpoint_open_agent_session.proto,
 //     proto/src/store/v1/store.proto (StoreAgentItem/AgentFrame/AgentUpdate/
 //     AgentActivity), proto/src/conversation/v1/agent_activity.proto

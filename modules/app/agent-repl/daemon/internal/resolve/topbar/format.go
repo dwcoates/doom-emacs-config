@@ -2,12 +2,9 @@ package topbar
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"agent-repld/internal/figures"
-
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // formatTokens renders a token count the topbar carries as a SIGNED figure.
@@ -62,59 +59,6 @@ func permilleOf(tokens, basis int64) (int32, bool) {
 		value = 0
 	}
 	return int32(value), true
-}
-
-// plural renders "1 warning" / "2 warnings".
-func plural(n int, noun string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", noun)
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
-}
-
-// abbreviateArguments composes ONE LEGIBLE LINE PER ARGUMENT of an unmodeled
-// call, in key order so the same call always reads the same way.
-//
-// NEVER A RAW DUMP: the overlay exists so a reader can decide whether the tool
-// deserves an arm of its own, and an unstructured blob helps nobody. A nested
-// value is summarized by its shape rather than expanded, and a long scalar is
-// truncated.
-func abbreviateArguments(args *structpb.Struct) []string {
-	fields := args.GetFields()
-	if len(fields) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, truncate(key+": "+abbreviateValue(fields[key]), DefaultLineWidth))
-	}
-	return out
-}
-
-// abbreviateValue summarizes one argument value: a scalar reads as itself, and
-// a container reads as its shape.
-func abbreviateValue(value *structpb.Value) string {
-	switch kind := value.GetKind().(type) {
-	case *structpb.Value_StringValue:
-		return truncate(kind.StringValue, 60)
-	case *structpb.Value_NumberValue:
-		return trimZero(fmt.Sprintf("%.1f", kind.NumberValue))
-	case *structpb.Value_BoolValue:
-		return fmt.Sprintf("%t", kind.BoolValue)
-	case *structpb.Value_NullValue:
-		return "null"
-	case *structpb.Value_ListValue:
-		return plural(len(kind.ListValue.GetValues()), "item")
-	case *structpb.Value_StructValue:
-		return "{" + plural(len(kind.StructValue.GetFields()), "field") + "}"
-	default:
-		return "unstated"
-	}
 }
 
 // joinNonEmpty joins the parts that carry anything, with the separator. It is

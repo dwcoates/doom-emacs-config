@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -79,8 +78,6 @@ func (r *resolver) knownPulls(ws ids.WorkspaceID) *pullrefs.Known {
 			r.logger(ws).Error(opPullReferencesRestore,
 				"the pull requests the workspace's text named could not be loaded; its bare references link into its own repository",
 				dlog.Context{"error": err.Error(), "read_ms": readMs})
-			r.raiseWarningFor(ws, opPullReferencesRestore,
-				fmt.Sprintf("the pull requests this workspace named could not be loaded, so its references may link to the wrong repository: %v", err))
 		case len(loaded) > 0:
 			r.logger(ws).Info(opPullReferencesRestore, "loaded the pull requests the workspace's text named",
 				dlog.Context{"pull_requests": len(loaded), "read_ms": readMs})
@@ -118,8 +115,6 @@ func (r *resolver) learnPulls(ws ids.WorkspaceID, known *pullrefs.Known, refs []
 				fields["error"] = err.Error()
 				log.Error(opPullReferences,
 					"a pull request the workspace's text named could not be recorded; a daemon restart will not know it", fields)
-				r.raiseWarningFor(ws, opPullReferences,
-					fmt.Sprintf("a pull request this workspace named could not be saved, so its references may link to the wrong repository after a restart: %v", err))
 			}, learned)
 	}
 }

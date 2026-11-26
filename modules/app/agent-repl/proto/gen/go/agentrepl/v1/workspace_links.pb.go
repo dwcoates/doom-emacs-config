@@ -1,11 +1,11 @@
 // workspace_links.proto — A WORKSPACE'S LINKS AS AN AGENT READS THEM: every
 // link an agent stored for the workspace's task, each with its short label,
-// and which of them the topbar's summary menu shows. Shared by
+// and which of them the topbar's link menu shows. Shared by
 // ChangeWorkspaceLinks's answer and WorkspaceStatus, so the answer to a change
 // and a later read describe the links identically.
 //
 // UNLIMITED STORAGE, A CAPPED MENU. A workspace holds any number of links, but
-// the summary's menu shows at most five of them. While the menu has room, a
+// the link menu shows at most five of them. While the menu has room, a
 // newly set link is shown. Once it is full, a newly set OWNED link takes the
 // place of the oldest shown reference, a new reference is stored unshown, the
 // answer's `menu` is `full`, and the agent chooses which links the menu shows
@@ -50,7 +50,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Every link a workspace holds, and the standing of its summary menu.
+// Every link a workspace holds, and the standing of its link menu.
 type WorkspaceLinks struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Every stored link, MOST RECENTLY SET FIRST: setting a link that is
@@ -118,7 +118,7 @@ type WorkspaceLink struct {
 	// The agent's label for it, two to eight words in one sentence, which the
 	// menu draws as the link's text.
 	Label string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
-	// Whether the summary's menu shows this link.
+	// Whether the link menu shows this link.
 	Placement *WorkspaceLinkPlacement `protobuf:"bytes,3,opt,name=placement,proto3" json:"placement,omitempty"`
 	// Whether the workspace's work made what the link points at.
 	Ownership     *WorkspaceLinkOwnership `protobuf:"bytes,4,opt,name=ownership,proto3" json:"ownership,omitempty"`
@@ -420,7 +420,7 @@ func (*WorkspaceLinkReference) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{5}
 }
 
-// Whether the summary's menu shows a link. THE ARM IS THE PLACEMENT.
+// Whether the link menu shows a link. THE ARM IS THE PLACEMENT.
 type WorkspaceLinkPlacement struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Placement:
@@ -580,7 +580,7 @@ func (*WorkspaceLinkPlacementUnshown) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_links_proto_rawDescGZIP(), []int{8}
 }
 
-// The summary menu's standing against its cap. THE ARM IS THE STANDING.
+// The link menu's standing against its cap. THE ARM IS THE STANDING.
 type WorkspaceLinksMenu struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Standing:

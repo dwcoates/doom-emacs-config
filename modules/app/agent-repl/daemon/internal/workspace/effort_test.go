@@ -274,7 +274,7 @@ func TestANewShimIsAskedNothingWithNoPick(t *testing.T) {
 	}
 }
 
-func TestAFailedPutBackIsLoggedAndStatedOnTheStrip(t *testing.T) {
+func TestAFailedPutBackIsLogged(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -287,9 +287,6 @@ func TestAFailedPutBackIsLoggedAndStatedOnTheStrip(t *testing.T) {
 	// Assert: the session still comes up; the failure is loud, not fatal.
 	if err != nil {
 		t.Fatalf("Start: %v, want the session up", err)
-	}
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "effort low") {
-		t.Errorf("warnings = %v, want one naming the level", f.topbarWarnings)
 	}
 	if records := recordsAt(f.log, opSetEffort, "error"); len(records) != 1 || records[0]["cause"] != "socket closed" {
 		t.Errorf("error records = %v, want one carrying the cause", records)
@@ -412,9 +409,6 @@ func TestAnUnreadableSettingsFileIsStatedAndTheRootNamesNoLevel(t *testing.T) {
 	got := f.topbarEffortSettings
 	if len(got) != 1 || got[0].Default != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED || got[0].Path != "/config/settings.json" {
 		t.Fatalf("topbar effort settings = %+v, want the path with no level", got)
-	}
-	if len(f.topbarWarnings) != 1 || !strings.HasPrefix(f.topbarWarnings[0], effortSettingsWarning+": ") {
-		t.Errorf("warnings = %v, want one keyed %s", f.topbarWarnings, effortSettingsWarning)
 	}
 	if records := recordsAt(f.log, opEffortSettings, "error"); len(records) != 1 || records[0]["cause"] != "unexpected end of JSON input" {
 		t.Errorf("error records = %v, want one carrying the cause", records)
@@ -551,13 +545,12 @@ func awaitSwitch(t *testing.T, f *fleetFixture, level, message string) {
 
 func TestSwitchEffortSettlesEachOutcomeOffTheCallersGoroutine(t *testing.T) {
 	tests := []struct {
-		name         string
-		arrange      func(f *fleetFixture)
-		level        string
-		message      string
-		wantPicked   conversationv1.AgentEffortLevel
-		wantErrors   int
-		wantWarnings int
+		name       string
+		arrange    func(f *fleetFixture)
+		level      string
+		message    string
+		wantPicked conversationv1.AgentEffortLevel
+		wantErrors int
 	}{
 		{name: "a switch the shim confirmed states the level", level: "info", message: "the effort switch landed", wantPicked: effortLow},
 		{name: "a shim the rollout stood down leaves the pick standing", level: "info",
@@ -565,8 +558,8 @@ func TestSwitchEffortSettlesEachOutcomeOffTheCallersGoroutine(t *testing.T) {
 			arrange: func(f *fleetFixture) {
 				f.client.effortErr = fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, goneShimCause)
 			}},
-		{name: "a level the vendor refused is an error stated on the strip", level: "error", message: "the shim did not switch the effort",
-			wantErrors: 1, wantWarnings: 1,
+		{name: "a level the vendor refused is an error", level: "error", message: "the shim did not switch the effort",
+			wantErrors: 1,
 			arrange: func(f *fleetFixture) {
 				f.client.effortResponse = effortFailure(&shimv1.SetSessionEffortFailure{
 					Detail: "the vendor said no",
@@ -596,9 +589,6 @@ func TestSwitchEffortSettlesEachOutcomeOffTheCallersGoroutine(t *testing.T) {
 			}
 			if records := recordsAt(f.log, opSetEffort, "error"); len(records) != tt.wantErrors {
 				t.Errorf("error records = %v, want %d", records, tt.wantErrors)
-			}
-			if len(f.topbarWarnings) != tt.wantWarnings {
-				t.Errorf("warnings = %v, want %d", f.topbarWarnings, tt.wantWarnings)
 			}
 		})
 	}

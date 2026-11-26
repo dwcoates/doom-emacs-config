@@ -204,9 +204,6 @@ func TestFleetSetRemoteControlStatesTheVendorsRefusalLoudly(t *testing.T) {
 	_, _ = f.fleet.SetRemoteControl(context.Background(), f.log.logger, ws.ID, wsm.RemoteControlOn)
 
 	// Assert.
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "disabled by policy") {
-		t.Errorf("warnings = %v, want one carrying the vendor's detail", f.topbarWarnings)
-	}
 	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 1 {
 		t.Errorf("error records = %v, want one", records)
 	}
@@ -224,8 +221,8 @@ func TestFleetSetRemoteControlLeavesAShimWithNoSessionToItsStart(t *testing.T) {
 
 	// Assert.
 	var refusal *ShimRefusal
-	if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession || len(f.topbarWarnings) != 0 {
-		t.Fatalf("SetRemoteControl = %v, warnings %v; want no_session and no warning", err, f.topbarWarnings)
+	if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession {
+		t.Fatalf("SetRemoteControl = %v; want no_session", err)
 	}
 }
 
@@ -422,7 +419,7 @@ func TestANewShimIsPutInRemoteControlAfterTheSessionIsUp(t *testing.T) {
 	}
 }
 
-func TestAFailedRemoteControlPutBackIsLoggedAndStatedOnTheStrip(t *testing.T) {
+func TestAFailedRemoteControlPutBackIsLogged(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -435,9 +432,6 @@ func TestAFailedRemoteControlPutBackIsLoggedAndStatedOnTheStrip(t *testing.T) {
 	// Assert: the session still comes up; the failure is loud, not fatal.
 	if err != nil {
 		t.Fatalf("Start: %v, want the session up", err)
-	}
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "claude.ai") {
-		t.Errorf("warnings = %v, want one naming claude.ai", f.topbarWarnings)
 	}
 	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 1 {
 		t.Errorf("error records = %v, want one", records)
@@ -487,8 +481,8 @@ func TestABridgeTheNetworkRefusedIsOwedUntilTheNetworkIsRestored(t *testing.T) {
 		}
 	})
 	t.Run("nothing is recorded at ERROR or stated on the strip", func(t *testing.T) {
-		if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 || len(f.topbarWarnings) != 0 {
-			t.Fatalf("errors %v, warnings %v; want neither for a refusal the network caused", records, f.topbarWarnings)
+		if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 {
+			t.Fatalf("errors %v; want none for a refusal the network caused", records)
 		}
 	})
 	t.Run("the restoration puts the bridge in force", func(t *testing.T) {
@@ -565,8 +559,8 @@ func TestAShimGoneBeforeItsBridgeIsAskedIsNoFailure(t *testing.T) {
 			}
 
 			// Assert: the death is recorded where it is observed, once.
-			if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 || len(f.topbarWarnings) != 0 {
-				t.Fatalf("errors %v, warnings %v; want neither for a shim that went", records, f.topbarWarnings)
+			if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 {
+				t.Fatalf("errors %v; want none for a shim that went", records)
 			}
 		})
 	}
@@ -587,8 +581,8 @@ func TestAShimWhoseSessionEndedBeforeItsBridgeIsAskedIsNoFailure(t *testing.T) {
 	}
 
 	// Assert: the session's end is recorded where it is observed, once.
-	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 || len(f.topbarWarnings) != 0 {
-		t.Fatalf("errors %v, warnings %v; want neither for a session that ended", records, f.topbarWarnings)
+	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 {
+		t.Fatalf("errors %v; want none for a session that ended", records)
 	}
 }
 
@@ -602,12 +596,12 @@ func TestAChangeWhoseShimDiedUnderItIsLeftToTheNextBringUp(t *testing.T) {
 
 	// Assert.
 	var refusal *ShimRefusal
-	if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession || len(f.topbarWarnings) != 0 {
-		t.Fatalf("SetRemoteControl = %v, warnings %v; want no_session and no warning", err, f.topbarWarnings)
+	if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession {
+		t.Fatalf("SetRemoteControl = %v; want no_session", err)
 	}
 }
 
-func TestAnUnreadableModeAtABringUpIsStatedOnTheStrip(t *testing.T) {
+func TestAnUnreadableModeAtABringUpIsLogged(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -620,8 +614,8 @@ func TestAnUnreadableModeAtABringUpIsStatedOnTheStrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v, want the session up", err)
 	}
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "database is locked") {
-		t.Errorf("warnings = %v, want one carrying the cause", f.topbarWarnings)
+	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 1 || records[0]["cause"] != "database is locked" {
+		t.Errorf("error records = %v, want one carrying the cause", records)
 	}
 }
 
@@ -920,8 +914,8 @@ func TestFleetRestateRemoteControlWithNoShimStatesTheModeAlone(t *testing.T) {
 	err := f.fleet.RestateRemoteControl(context.Background(), f.log.logger, ws.ID, queueBypassEntered)
 
 	// Assert.
-	if err != nil || len(f.topbarRemote) != 1 || !f.topbarRemote[0] || len(f.topbarWarnings) != 0 {
-		t.Fatalf("RestateRemoteControl = %v, topbar %v, warnings %v; want on stated, no failure", err, f.topbarRemote, f.topbarWarnings)
+	if err != nil || len(f.topbarRemote) != 1 || !f.topbarRemote[0] {
+		t.Fatalf("RestateRemoteControl = %v, topbar %v; want on stated", err, f.topbarRemote)
 	}
 }
 
@@ -940,9 +934,6 @@ func TestFleetRestateRemoteControlSurfacesAnUnreadableMode(t *testing.T) {
 	if len(f.client.remoteControls) != 0 || len(f.topbarRemote) != 0 {
 		t.Fatalf("asks %v, topbar %v; want nothing sent or drawn", f.client.remoteControls, f.topbarRemote)
 	}
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "database is locked") {
-		t.Errorf("warnings = %v, want one carrying the cause", f.topbarWarnings)
-	}
 	requireTransitionRecord(t, f, "could not read the remote-control mode a queue bypass transition left", queueBypassEntered, "database is locked")
 }
 
@@ -959,9 +950,6 @@ func TestFleetRestateRemoteControlSurfacesTheVendorsRefusal(t *testing.T) {
 	var refusal *ShimRefusal
 	if !errors.As(err, &refusal) || refusal.Arm != ArmShimVendorRefused {
 		t.Fatalf("RestateRemoteControl = %v, want the vendor's refusal", err)
-	}
-	if len(f.topbarWarnings) != 1 || !strings.Contains(f.topbarWarnings[0], "disabled by policy") {
-		t.Errorf("warnings = %v, want one carrying the vendor's detail", f.topbarWarnings)
 	}
 	requireTransitionRecord(t, f, "the shim did not put the remote-control mode in force", queueBypassEntered, "disabled by policy")
 }

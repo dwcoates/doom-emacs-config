@@ -598,11 +598,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// beside each raise, which is how three fault kinds came to have a footer
 	// path and sixteen did not. Every collaborator built below takes the
 	// decorated client, so a fault opened anywhere lands on the strip. The
-	// faults the topbar carries (health.FaultTopbarLine) reach its warning
-	// strip through the same hook (owner ruling, 2026-09-28).
-	// The same faults reach every Emacs as the standing loud faults on its
-	// WatchDaemon stream (owner request, 2026-09-28): the set is built here,
-	// before the hook and the server, so no open can precede it.
+	// loud faults (health.FaultLoudLine) reach every Emacs as the standing
+	// loud faults on its WatchDaemon stream through the same hook (owner
+	// request, 2026-09-28): the set is built here, before the hook and the
+	// server, so no open can precede it.
 	loudFaults := health.NewLoudFaults(log)
 	// THE SESSIONS' FACTS the keeper and the drain mirror for the census
 	// built once the fleet exists (sessionwhy). They only measure.
@@ -650,7 +649,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// draws no fault for the stood-down link, and the roster, which projects
 	// the footer, keeps the session live.
 	replacing := onBothStatusSurfaces(footerResolver.SetReplacing, sidebarResolver.SetReplacing)
-	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults)
+	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, loudFaults)
 	// THE NETWORK'S STATE HANGS OFF THE SAME DOOR: a shim's network fault
 	// opening and closing is what says the network is down and restored
 	// (netstate), beside the daemon's own evidence.
@@ -898,9 +897,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SlackSubdomain: slackChannelSubdomain(slackTeams, log),
 		// A WEB LINK A RESPONSE NAMES becomes a reference link of its workspace.
 		ResponseLinks: verbsRef,
-		// A row the feed cannot place is drawn nowhere and raised on the
-		// topbar's warning chip, the webapp's one error surface.
-		Warnings: topbarResolver,
 		// Zero leaves the resolver's own DefaultTailRetention in force; the
 		// flag and its environment knob are what make token_expired reachable.
 		TailRetention: p.Opts.feedTailRetention,
@@ -2824,14 +2820,13 @@ func resolveFactsBound(value string) (time.Duration, error) {
 }
 
 // faultSurfaces is the health package's fault sink: every fault is drawn on
-// the footer, and the ones the topbar carries on its warning strip too and in
-// the standing loud faults every Emacs is told. It
+// the footer, and the loud ones are in the standing loud faults every Emacs
+// is told. It
 // translates the health verdict into each resolver's own vocabulary and adds
 // nothing: the partition and the lines are health's, the drawing theirs.
 type faultSurfaces struct {
 	footer  footer.Resolver
 	sidebar sidebar.Resolver
-	topbar  topbar.Resolver
 	loud    *health.LoudFaults
 	// feed takes the network fault's edges, so a connection-failed card
 	// leaves the feed when the connection is back. It is attached once the
@@ -2840,9 +2835,9 @@ type faultSurfaces struct {
 	feed networkFaultFeed
 
 	mu sync.Mutex
-	// onTopbar are the open faults raised on the topbar (and so told to
-	// Emacs), so a close retracts exactly those.
-	onTopbar map[ids.FaultID]bool
+	// onLoud are the open faults told to Emacs as loud, so a close retracts
+	// exactly those.
+	onLoud map[ids.FaultID]bool
 	// onFeed are the open network faults told to the feed, so only their
 	// close reaches it. THE FEED CLOSES FAULTS OF ITS OWN WHILE HOLDING ITS
 	// LOCK (a turn start closes its edge's faults), so passing it every
@@ -2867,8 +2862,8 @@ func (sinks faultSinks) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	}
 }
 
-func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
-	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}, onFeed: map[ids.FaultID]bool{}}
+func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, loud *health.LoudFaults) *faultSurfaces {
+	return &faultSurfaces{footer: f, sidebar: s, loud: loud, onLoud: map[ids.FaultID]bool{}, onFeed: map[ids.FaultID]bool{}}
 }
 
 // networkFaultFeed is the slice of the feed the network fault's edges reach
@@ -2899,8 +2894,8 @@ func (f *faultSurfaces) networkFeed() networkFaultFeed {
 }
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
-// strip when the fault is daemon-scoped, and on the topbar when it carries
-// the fault.
+// strip when the fault is daemon-scoped, and tells every Emacs when it is
+// loud.
 func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	f.footer.OpenFault(ws, footer.Fault{
 		ID:        string(line.ID),
@@ -2922,35 +2917,19 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		f.mu.Unlock()
 		feed.NetworkFaultOpened(ws, string(line.ID))
 	}
-	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
-	// states no line for any other.
-	if line.Topbar == "" || ws != "" {
+	// ONLY A DAEMON-SCOPED FAULT is loud: health.FaultLoudLine states no
+	// line for any other.
+	if line.Loud == "" || ws != "" {
 		return
 	}
 	f.mu.Lock()
-	f.onTopbar[line.ID] = true
+	f.onLoud[line.ID] = true
 	f.mu.Unlock()
-	f.topbar.RaiseDaemonWarning(string(line.ID), topbarWarning(line))
 	f.loud.Opened(line)
 }
 
-// topbarWarning is a daemon-scoped fault's topbar row: its line, and for a
-// failed deploy the overlay saying what failed.
-func topbarWarning(line health.FaultLine) topbar.DaemonWarning {
-	warning := topbar.DaemonWarning{Line: line.Topbar}
-	if line.Kind != health.KindDeployFailed {
-		return warning
-	}
-	if o, ok := health.DeployFailedOverlay(line.Record); ok {
-		warning.DeployFailed = &topbar.DeployFailedOverlay{
-			Step: o.Step, Component: o.Component, Rollback: o.Rollback, Detail: o.Detail, Log: o.Log,
-		}
-	}
-	return warning
-}
-
-// FaultClosed retracts it again, from the topbar too when it was raised
-// there.
+// FaultClosed retracts it again, from Emacs's loud faults too when it was
+// told there.
 func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
 	if ws != "" {
@@ -2964,11 +2943,10 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 		}
 	}
 	f.mu.Lock()
-	raised := f.onTopbar[id]
-	delete(f.onTopbar, id)
+	loud := f.onLoud[id]
+	delete(f.onLoud, id)
 	f.mu.Unlock()
-	if raised {
-		f.topbar.RetractDaemonWarning(string(id))
+	if loud {
 		f.loud.Closed(id)
 	}
 }

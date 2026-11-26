@@ -367,7 +367,7 @@ func TestObserveFaultsSaysNothingWhenTheWriteFailed(t *testing.T) {
 	}
 }
 
-func TestFaultTopbarLineCarriesAFailedDeployAlone(t *testing.T) {
+func TestFaultLoudLineCarriesAFailedDeployAlone(t *testing.T) {
 	ws := ids.WorkspaceID("ws-1")
 	build := DeployFailure{Step: DeployStepBuild, BuildStep: "webapp", Detail: "tsc: nope"}.Evidence()
 	tests := []struct {
@@ -389,17 +389,17 @@ func TestFaultTopbarLineCarriesAFailedDeployAlone(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := FaultTopbarLine(tc.fault, tc.fault.Workspace == nil)
+			got := FaultLoudLine(tc.fault, tc.fault.Workspace == nil)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("FaultTopbarLine = %q, want %q", got, tc.want)
+				t.Fatalf("FaultLoudLine = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestObserveFaultsHandsTheSinkAFailedDeploysTopbarLine(t *testing.T) {
+func TestObserveFaultsHandsTheSinkAFailedDeploysLoudLine(t *testing.T) {
 	// Arrange
 	db := &stubDB{openedID: "fault-9"}
 	sink := &recordingSink{}
@@ -414,7 +414,7 @@ func TestObserveFaultsHandsTheSinkAFailedDeploysTopbarLine(t *testing.T) {
 	}
 
 	// Assert
-	if len(sink.opened) != 1 || sink.opened[0].line.Topbar != "deploy failed: build: refused" {
-		t.Fatalf("sink saw %+v, want the failed deploy's topbar line", sink.opened)
+	if len(sink.opened) != 1 || sink.opened[0].line.Loud != "deploy failed: build: refused" {
+		t.Fatalf("sink saw %+v, want the failed deploy's loud line", sink.opened)
 	}
 }

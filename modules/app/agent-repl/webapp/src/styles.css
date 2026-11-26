@@ -477,10 +477,6 @@
      NAME LINE below it (owner ruling, 2026-10-17: "the topbar should be
      slightly taller, with the extra space being downward"). */
   --topbar-band-h: 2.75rem;
-  /* THE HEADING'S WARNINGS YELLOW (owner request, 2026-11-10): a true yellow,
-     clear of the rail's amber --async, for a heading whose list holds
-     warnings alone. */
-  --topbar-warnings-yellow: #b89400;
   --topbar-name-h: 0.75rem;
   --topbar-h: calc(var(--topbar-band-h) + var(--topbar-name-h));
   /* THE STRIP'S FRAME MEASURE (owner ruling 1, 2026-09-13, narrowed
@@ -541,7 +537,6 @@
        2026-10-24): at full foreground it dominated the OPEN section, so it
        sits a little below it, still well above the collapsed grey. */
     --repo-head-expanded: #d2cfc8;
-    --topbar-warnings-yellow: #f5d000;
     --repo-head-collapsed: #898782;
     --border: #2a2a2a;
     /* Above the #1a1a1a sidebar, so its hover and detail washes still lift
@@ -8631,23 +8626,33 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   white-space: nowrap;
   text-align: center;
 }
-/* THE SUMMARY: purple and italic, on the band (owner ruling, 2026-10-17). */
+/* THE SUMMARY: purple and italic, on the band (owner ruling, 2026-10-17),
+   ALWAYS, and never underlined (owner ruling, 2026-11-25): no state changes
+   it. */
 .topbar-title {
   font-style: italic;
   color: var(--tool-title);
 }
-/* THE SUMMARY WITH LINKS IS THE SUMMARY, UNDERLINED (owner ruling,
-   2026-10-27): the same purple, italic, font and size as a summary with none,
-   and only the underline and the pointer say links are there. The rule sets
-   those two on the summary itself, whether it opens its one link or drops
-   their menu, so it never touches the summary's own color or face. */
-.topbar-title-linked {
+/* THE SUMMARY'S HOVER POPUP: the long summary, wrapped to a reading width
+   beneath the heading. */
+.topbar-title-description {
+  max-width: 32rem;
+  padding: 0.5rem 0.7rem;
+  color: var(--fg);
+  line-height: 1.4;
+  white-space: normal;
+}
+/* THE NAME WITH LINKS IS THE NAME, UNDERLINED (owner ruling, 2026-11-25): the
+   same white, weight and size as a name with none, and only the underline and
+   the pointer say links are there, whether it opens its one link or drops
+   their menu. */
+.topbar-name-linked {
   text-decoration: underline;
   cursor: pointer;
 }
 /* The one link's anchor would otherwise take the agent's link color and the
-   user agent's link face, so it takes the summary's whole look instead. */
-.topbar-title-linked .external-link {
+   user agent's link face, so it takes the name's whole look instead. */
+.topbar-name-linked .external-link {
   color: inherit;
   font: inherit;
   text-decoration: inherit;
@@ -8845,8 +8850,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-option,
 .topbar-mode-option,
 .topbar-queue-bypass-option,
-.topbar-warning-row,
-.topbar-title-link-option {
+.topbar-name-link-option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -8865,26 +8869,25 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-effort-option:hover,
 .topbar-mode-option:hover,
 .topbar-queue-bypass-option:hover,
-.topbar-warning-row:hover,
-.topbar-title-link-option:hover {
+.topbar-name-link-option:hover {
   background: var(--border);
 }
 /* A link row's label is a menu row's title, not a link in prose (owner
    ruling, 2026-10-27): the foreground white and the size of the model
    selector's names, and no underline; the row's hover is what says it is
    clickable. */
-.topbar-title-link-option .external-link {
+.topbar-name-link-option .external-link {
   color: inherit;
   font: inherit;
   text-decoration: none;
 }
-/* A summary link's service icon sits left of its label, sized to the text. */
-.topbar-title-link-option .external-link {
+/* A name link's service icon sits left of its label, sized to the text. */
+.topbar-name-link-option .external-link {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
 }
-.topbar-title-link-icon {
+.topbar-name-link-icon {
   width: 1em;
   height: 1em;
   flex: none;
@@ -8892,11 +8895,11 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 /* A SERVICE ICON IS NEVER TINTED (owner request, 2026-11-23): an owned row's
    label wears the summary's purple, but the icon before it stays the
    foreground white on every row. */
-.topbar-title-link-option .topbar-title-link-icon {
+.topbar-name-link-option .topbar-name-link-icon {
   color: var(--fg);
 }
 /* A ROW'S FIRST LINE: the label, then its marks beside it. */
-.topbar-title-link-head {
+.topbar-name-link-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -8906,33 +8909,33 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    feed's badge pill (`.badge`) at the topbar's own size, since the feed's
    text zoom never reaches the topbar. Each mark's border is its text color:
    owned in the foreground white, subscribed in the status green. */
-.topbar-title-link-mark {
+.topbar-name-link-mark {
   font-size: 0.7rem;
   line-height: 1.2;
   white-space: nowrap;
   border-color: currentColor;
 }
-.topbar-title-link-mark[data-mark="owned"] {
+.topbar-name-link-mark[data-mark="owned"] {
   color: var(--fg);
 }
-.topbar-title-link-mark[data-mark="subscribed"] {
+.topbar-name-link-mark[data-mark="subscribed"] {
   color: var(--ok);
 }
 /* AN OWNED LINK'S ROW (owner request, 2026-11-09): a link the workspace's
    work made rides a slightly lighter ground than the reference rows, halfway
    between the menu's own ground and the topbar's (--sidebar-ground), so it
    reads as set apart without being as light as the topbar itself. */
-.topbar-title-link-option.is-owned {
+.topbar-name-link-option.is-owned {
   background: color-mix(in srgb, var(--bg) 50%, var(--sidebar-ground));
 }
-.topbar-title-link-option.is-owned:hover {
+.topbar-name-link-option.is-owned:hover {
   background: var(--border);
 }
 /* AN OWNED LINK'S LABEL IS THE SUMMARY'S PURPLE (owner request, 2026-11-18):
    the label, never the url line beneath it, wears the canonical purple the
    summary that drops the menu is drawn in, so the links the workspace's work
    made read as its own at a glance. */
-.topbar-title-link-option.is-owned .external-link {
+.topbar-name-link-option.is-owned .external-link {
   color: var(--tool-title);
 }
 /* A PULL REQUEST'S BADGE (owner request, 2026-11-18): small, subtle text in
@@ -8941,11 +8944,11 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    that carries one reserves the margin so a long label never runs under it.
    Open is the foreground white, a draft the muted grey, a merge the status
    green, a close the status red. */
-.topbar-title-link-option.has-badge {
+.topbar-name-link-option.has-badge {
   position: relative;
   padding-right: 4.2rem;
 }
-.topbar-title-link-badge {
+.topbar-name-link-badge {
   position: absolute;
   top: 0.4rem;
   right: 0.7rem;
@@ -8957,30 +8960,30 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   padding: 0 0.35rem;
   opacity: 0.85;
 }
-.topbar-title-link-badge[data-badge="open"] {
+.topbar-name-link-badge[data-badge="open"] {
   color: var(--fg);
 }
-.topbar-title-link-badge[data-badge="draft"] {
+.topbar-name-link-badge[data-badge="draft"] {
   color: var(--muted);
 }
-.topbar-title-link-badge[data-badge="merged"] {
+.topbar-name-link-badge[data-badge="merged"] {
   color: var(--ok);
 }
-.topbar-title-link-badge[data-badge="closed"] {
+.topbar-name-link-badge[data-badge="closed"] {
   color: var(--err);
 }
 /* A ROW'S SECOND LINE: what identifies the row rather than what the reader
    chooses by, dim and a step smaller, ONE look in every menu. An account
-   row's root path, a model's description, a summary link's url. */
+   row's root path, a model's description, a name link's url. */
 .topbar-account-option-dir,
 .topbar-model-description,
-.topbar-title-link-url {
+.topbar-name-link-url {
   color: var(--muted);
   font-size: 0.9em;
 }
 /* A url has no spaces to wrap at, so a long one breaks anywhere rather than
    widening the menu past the panel's cap. */
-.topbar-title-link-url {
+.topbar-name-link-url {
   overflow-wrap: anywhere;
 }
 /* A model row's top-right corner (owner request, 2026-10-27): "Make default",
@@ -9070,41 +9073,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   font-variant-numeric: tabular-nums;
   min-width: 3.5rem;
   text-align: right;
-}
-
-.topbar-warning-detail {
-  padding: 0.35rem 0;
-}
-/* The way back to the list. A chevron rather than a word so it reads as
-   navigation at a glance. */
-.topbar-warning-back {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-  padding: 0.2rem 0.7rem;
-}
-.topbar-warning-back:hover {
-  color: var(--fg);
-}
-.topbar-warning-body {
-  padding: 0.25rem 0.7rem 0.5rem;
-}
-.topbar-warning-name {
-  color: var(--fg);
-  font-weight: 600;
-}
-.topbar-warning-detail-line,
-.topbar-warning-clock,
-.topbar-warning-span {
-  color: var(--muted);
-  font-size: 0.95em;
-}
-/* A failed deploy's whole account: its lines kept, a long path wrapped. */
-.topbar-warning-whole {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 /* ---- login overlay (src/login) ----------------------------------------- */
@@ -10496,14 +10464,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
     animation: sb-deploy-pulse 2.6s ease-in-out infinite;
   }
 }
-
-/* THE HEADING CARRIES THE WARNINGS (owner request, 2026-11-10): while anything
-   is wrong, the heading's first line is the control that opens the list, in
-   red for an error and yellow for warnings alone. No underline: the color is
-   the whole signal. */
-.topbar-heading-warnings { cursor: pointer; text-decoration: none; }
-.topbar-heading-warnings[data-severity="errors"] { color: var(--err); }
-.topbar-heading-warnings[data-severity="warnings"] { color: var(--topbar-warnings-yellow); }
 
 /* ---- Recently Merged count while partly loaded (src/sidebar/roster.ts) ----
    The band's rows are paged on demand (src/sidebar/merged-pages.ts), so its

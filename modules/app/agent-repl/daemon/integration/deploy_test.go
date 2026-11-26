@@ -475,12 +475,10 @@ func emacsUserEnv(t *testing.T) []string {
 	}
 }
 
-// ---- a failed deploy: the deploy_failed fault on the footer -----------------
+// ---- a failed deploy: rolled back -----------------------------------------
 
-// ---- a failed deploy: on the topbar, and rolled back -----------------------
-
-// buildFailedTopbarLine is the topbar line the harness's failing build stands as.
-var buildFailedTopbarLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
+// buildFailedLine is the loud line the harness's failing build stands as.
+var buildFailedLine = "deploy failed: build: " + harness.FakeDeployBuildRefusal
 
 // failSidecarRestart makes the next deploy judge the sidecar stale and its
 // service manager restart fail, before AND after the rollback: the cache bin under
@@ -520,30 +518,6 @@ func TestADeployWhoseServiceRestartFailsRollsTheCacheBinBack(t *testing.T) {
 	if _, err := os.Stat(fmt.Sprint(removed.Context["live"])); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the installed sidecar after the rollback: stat = %v, want it absent as it was", err)
 	}
-}
-
-func TestADeployWhoseRollbackFailsStandsAsItsOwnFaultOnTheTopbar(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	topbar := f.d.WatchTopbar(f.ws)
-	failSidecarRestart(t, f.d)
-
-	// Act
-	if _, err := f.d.Client().Deploy(f.d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
-		t.Fatalf("Deploy = error %v, want the typed refusal", err)
-	}
-
-	// Assert: the step's fault and the rollback's own both stand.
-	awaitTopbar(t, f, topbar, "the step's and the rollback's warning lines", func(v *frontendv1.TopbarView) bool {
-		var step, rollback bool
-		for _, w := range v.GetWarnings().GetWarnings() {
-			text := w.GetLine().GetText()
-			step = step || strings.HasPrefix(text, "deploy failed: restart services sidecar, rollback failed: ")
-			rollback = rollback || strings.HasPrefix(text, "deploy failed: rollback sidecar: ")
-		}
-		return step && rollback
-	})
 }
 
 // ---- a failed deploy: every client is told --------------------------------
@@ -589,9 +563,32 @@ func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
 		t.Fatalf("agent-repld deploy = (%v, %q), want a non-zero exit carrying the build's words", err, out)
 	}
 	faults := awaitStanding(t, d, emacs, "the failed deploy on the Emacs stream", func(f []*agentreplv1.DaemonStandingFault) bool {
-		return standsLine(f, buildFailedTopbarLine)
+		return standsLine(f, buildFailedLine)
 	})
 	if got := faults[0]; got.GetFaultId() == "" || got.GetFault().GetDeployFailed().GetBuild().GetStep() != "build" {
 		t.Fatalf("standing fault = %v, want its id and the typed build arm", got)
 	}
+}
+
+func TestAFailedRollbackReachesEmacsAsItsOwnFault(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+	emacs := d.WatchDaemonStream()
+	failSidecarRestart(t, d)
+
+	// Act
+	if _, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the typed refusal", err)
+	}
+
+	// Assert: the step's fault and the rollback's own both stand.
+	awaitStanding(t, d, emacs, "the step's and the rollback's faults", func(f []*agentreplv1.DaemonStandingFault) bool {
+		var step, rollback bool
+		for _, fault := range f {
+			step = step || strings.HasPrefix(fault.GetLine(), "deploy failed: restart services sidecar, rollback failed: ")
+			rollback = rollback || fault.GetFault().GetDeployFailed().GetRollback() != nil
+		}
+		return step && rollback
+	})
 }

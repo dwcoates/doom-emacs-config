@@ -30,9 +30,6 @@ import (
 const (
 	opSetEffort      = "daemon.workspace.set_effort"
 	opEffortSettings = "daemon.workspace.effort_settings"
-	// effortSettingsWarning keys the warning strip's line for a settings file
-	// the daemon could not read.
-	effortSettingsWarning = "effort_settings"
 )
 
 // ArmEffortNotSupported is a level the selected model was not served as
@@ -159,8 +156,7 @@ func switchFoundNoSession(err error) bool {
 // the running one runs in.
 //
 // A REFUSAL IS LOUD, NEVER FATAL to the caller: it is recorded at ERROR
-// (SetEffort) and stated on the warning strip, the reader's one error
-// surface, as a failed put-back is. A switch that found no session, or that
+// (SetEffort), as a failed put-back is. A switch that found no session, or that
 // the daemon's exit cut, is recorded at INFO by SetEffort: the pick stands.
 func (f *Fleet) SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) {
 	f.Detach(ws, func(ctx context.Context) {
@@ -171,8 +167,7 @@ func (f *Fleet) SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversa
 		case switchFoundNoSession(err) || ctx.Err() != nil:
 			log.Info(opSetEffort, "the effort switch found no session to take it; the pick stands for the session's next start", dlog.Context{"effort": level.String()})
 		default:
-			f.deps.Topbar.RaiseWarning(ws, opSetEffort,
-				fmt.Sprintf("the session could not be switched to effort %s: %v", effortlevel.Word(level), err))
+			// SetEffort recorded the refusal at ERROR, its one ownership point.
 		}
 	})
 }
@@ -187,7 +182,7 @@ func (f *Fleet) SwitchEffort(log dlog.Logger, ws ids.WorkspaceID, level conversa
 //
 // A REFUSAL RETRACTS NOTHING SILENTLY. The selector keeps naming the pick,
 // so the session would run at a level the strip does not show; the failure is
-// logged and stated on the warning strip, the reader's one error surface.
+// logged at ERROR.
 //
 // EACH PUT-BACK RECORDS HOW LONG THE SHIM TOOK (elapsed_ms): the call has no
 // bound of its own yet, and its bound is sized from these measurements before
@@ -205,8 +200,6 @@ func (f *Fleet) reapplyEffort(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Error(opSetEffort, "the new shim could not be put back at the picked effort", dlog.Context{
 			"effort": level.String(), "cause": err.Error(), "elapsed_ms": elapsed,
 		})
-		f.deps.Topbar.RaiseWarning(ws, opSetEffort,
-			fmt.Sprintf("the session restarted and could not be put back at effort %s: %v", effortlevel.Word(level), err))
 		return
 	}
 	log.Info(opSetEffort, "put the new shim back at the picked effort", dlog.Context{"effort": level.String(), "elapsed_ms": elapsed})
@@ -257,16 +250,14 @@ func setEffortArm(failure *shimv1.SetSessionEffortFailure) string {
 // the root decides which settings file the vendor reads.
 //
 // AN UNREADABLE FILE IS STATED, NOT FATAL. The vendor itself skips a settings
-// file it cannot parse, so the session still runs; the daemon logs the cause,
-// puts it on the warning strip, and states the root as naming no level.
+// file it cannot parse, so the session still runs; the daemon logs the cause
+// and states the root as naming no level.
 func (v *verbs) publishEffortSettings(log dlog.Logger, record wsm.Workspace, configDir string) {
 	settings, err := v.deps.ReadEffortSettings(configDir)
 	if err != nil {
 		log.Error(opEffortSettings, "the config root's settings file could not be read for its effort level", dlog.Context{
 			"workspace": string(record.ID), "config_dir": configDir, "cause": err.Error(),
 		})
-		v.deps.Topbar.RaiseWarning(record.ID, effortSettingsWarning,
-			fmt.Sprintf("could not read the effort level from %s: %v", settings.Path, err))
 		settings = claudesettings.Effort{Path: settings.Path}
 	}
 	log.Info(opEffortSettings, "read the config root's persisted effort level", dlog.Context{

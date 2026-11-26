@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 // The webhost's own services: the gate and the load button drawn over the
-// pages from the host's own daemon connection, its failures relayed to every
-// page. See src/host/services.ts.
+// pages from the host's own daemon connection. See src/host/services.ts.
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { WebhostFailure } from "../../src/host/protocol.js";
 import { startWebhostServices, watchColdGates, type WebhostServicesDeps } from "../../src/host/services.js";
 import type { Host } from "../../src/host/host.js";
-import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { create } from "@bufbuild/protobuf";
 import { RosterColdGateSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -28,13 +25,11 @@ afterEach(() => {
 /** A webhost that records what the services tell it. */
 function recordingHost() {
   const told = {
-    failures: [] as Array<readonly WebhostFailure[]>,
     shown: null as ((id: string) => void) | null,
     slots: null as ((id: string, pixels: number) => void) | null,
     dismissed: [] as string[],
   };
   const host = {
-    setFailures: (failures: readonly WebhostFailure[]) => told.failures.push(failures),
     onShown: (listener: (id: string) => void) => {
       told.shown = listener;
       return () => {
@@ -238,36 +233,6 @@ describe("the webhost's gate", () => {
 });
 
 describe("startWebhostServices", () => {
-  it("hands every page the failures its services file", () => {
-    // Arrange
-    const { host, told } = recordingHost();
-    const { createGate } = recordingGate();
-    const { watchColdGates, watched } = recordingColdGates();
-    start(host, { gate: document.createElement("div"), createGate, watchColdGates });
-
-    // Act
-    watched.ctx?.failures.report(daemonUnreachable(1006, "gone"));
-
-    // Assert
-    expect(told.failures.at(-1)?.map((f) => f.arm)).toEqual(["daemonUnreachable"]);
-  });
-
-  it("lists services that failed to start in every page's chip", () => {
-    // Arrange
-    const { host, told } = recordingHost();
-
-    // Act
-    start(host, {
-      gate: document.createElement("div"),
-      createGate: () => {
-        throw new Error("no card");
-      },
-    });
-
-    // Assert
-    expect(told.failures.at(-1)?.map((f) => f.arm)).toEqual(["bootFailed"]);
-  });
-
   it("records services that failed to start at error", () => {
     // Arrange
     const capture = captureLogRecords();
@@ -283,7 +248,7 @@ describe("startWebhostServices", () => {
 
     // Assert
     capture.logger.flush();
-    const record = capture.sent.find((r) => r.operation === "webhost.services-start-failed");
+    const record = capture.sent.find((r) => r.operation === "failure.report");
     expect([record?.level.case, record?.context?.["cause"]]).toEqual(["error", "Error: no card"]);
   });
 

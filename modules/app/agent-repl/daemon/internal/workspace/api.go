@@ -627,11 +627,11 @@ type Verbs interface {
 	// SetLink stores a link under its label and ownership, or relabels a
 	// stored one (agentrepl.v1.ChangeWorkspaceLinksSet), subscribing the
 	// workspace to an owned pull request, answering every link the workspace
-	// then holds and republishing the summary's menu.
+	// then holds and republishing the name's link menu.
 	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool, announces string) ([]wsm.WorkspaceLink, error)
 	// RemoveLink removes one stored link, answering the rest.
 	RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error)
-	// ShowLinks names exactly the links the summary's menu shows, answering
+	// ShowLinks names exactly the links the name's link menu shows, answering
 	// every link.
 	ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error)
 	// ClearLinks removes every stored link.
@@ -654,10 +654,10 @@ type Verbs interface {
 	// FinishMovingMoves finishes, at boot and before the registry is read,
 	// every owed move that had stood its workspace's shim down.
 	FinishMovingMoves(ctx context.Context) error
-	// SetSummary records the workspace's one-sentence summary of its task and
-	// draws it in the topbar (agentrepl.v1.SetWorkspaceSummary), answering the
-	// summary the workspace now has.
-	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary string) (string, error)
+	// SetSummary records the workspace's long and short summary of its task
+	// and draws it in the topbar (agentrepl.v1.SetWorkspaceSummary),
+	// answering the summary the workspace now has.
+	SetSummary(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) (wsm.WorkspaceSummary, error)
 	// SetBacklogged moves the workspace into the roster's backlog, or back
 	// out of it, and republishes the roster. A show also reveals a hidden
 	// merge workspace, so it ends with the workspace drawn or with an error.
@@ -1122,7 +1122,7 @@ type Summaries interface {
 	// edge every workspace passes, so a restarted daemon draws it at once.
 	Restore(ctx context.Context, ws ids.WorkspaceID) error
 	// Set records the summary the workspace's agent set and draws it.
-	Set(ctx context.Context, ws ids.WorkspaceID, summary string) error
+	Set(ctx context.Context, ws ids.WorkspaceID, summary wsm.WorkspaceSummary) error
 	// OwedNote answers the note a prompt closes with while the workspace has
 	// no summary, and false while one stands.
 	OwedNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, error)

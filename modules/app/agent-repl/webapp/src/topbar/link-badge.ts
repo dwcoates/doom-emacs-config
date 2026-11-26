@@ -1,17 +1,17 @@
 /**
- * The badges a summary-menu row draws. The pull request badge sits in the
+ * The badges a name link-menu row draws. The pull request badge sits in the
  * row's right margin, its state named by the daemon from its latest read of
- * the pull request (frontend.v1.TopbarTitleLinkBadge). The row's marks sit
+ * the pull request (frontend.v1.TopbarWorkspaceNameLinkBadge). The row's marks sit
  * beside its label: "owned" for a link the workspace's work made, and
  * "subscribed" for a link whose updates the workspace is told
- * (frontend.v1.TopbarTitleLinkMenuItem.owned and .subscribed). This file never
+ * (frontend.v1.TopbarWorkspaceNameLinkMenuItem.owned and .subscribed). This file never
  * inspects a url: it only draws what the daemon served.
  */
-import type { TopbarTitleLinkBadge } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import type { TopbarWorkspaceNameLinkBadge } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { unreachableArm } from "../rpc/strict.js";
 
 /** The badge's class; `data-badge` names the state it draws. */
-export const LINK_BADGE_CLASS = "topbar-title-link-badge";
+export const LINK_BADGE_CLASS = "topbar-name-link-badge";
 
 /**
  * The badge for a menu row, or null for a row with none: no badge served, or
@@ -19,7 +19,7 @@ export const LINK_BADGE_CLASS = "topbar-title-link-badge";
  * build has no case for throws, so a newer daemon's state is a loud refusal
  * rather than a silently missing badge.
  */
-export function drawLinkBadge(badge: TopbarTitleLinkBadge | undefined): HTMLElement | null {
+export function drawLinkBadge(badge: TopbarWorkspaceNameLinkBadge | undefined): HTMLElement | null {
   const state = badge?.state.case;
   if (state === undefined) return null;
   const el = document.createElement("span");
@@ -29,7 +29,7 @@ export function drawLinkBadge(badge: TopbarTitleLinkBadge | undefined): HTMLElem
   return el;
 }
 
-function wordFor(state: NonNullable<TopbarTitleLinkBadge["state"]["case"]>): string {
+function wordFor(state: NonNullable<TopbarWorkspaceNameLinkBadge["state"]["case"]>): string {
   switch (state) {
     case "open":
       return "open";
@@ -40,12 +40,12 @@ function wordFor(state: NonNullable<TopbarTitleLinkBadge["state"]["case"]>): str
     case "closed":
       return "closed";
     default:
-      return unreachableArm("TopbarTitleLinkBadge.state", String(state));
+      return unreachableArm("TopbarWorkspaceNameLinkBadge.state", String(state));
   }
 }
 
 /** A label mark's class; `data-mark` names which mark it draws. */
-export const LINK_MARK_CLASS = "topbar-title-link-mark";
+export const LINK_MARK_CLASS = "topbar-name-link-mark";
 
 /** The marks a row can carry beside its label, in the order drawn. */
 export type LinkMark = "owned" | "subscribed";

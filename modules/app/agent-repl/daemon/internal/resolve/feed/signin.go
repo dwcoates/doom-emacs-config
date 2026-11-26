@@ -129,7 +129,6 @@ func (r *resolver) answerSignIn(s *wsState) *storeOutcome {
 		into:     s.signedIn,
 		nothing:  logsite.Msg("a sign-in completed and no drawn turn ending offered it; nothing was retired"),
 		failed:   logsite.Msg("a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again"),
-		warning:  "the answered sign-in failures could not be saved and will reappear after a daemon restart",
 		answered: logsite.Msg("a sign-in answered the account failures drawn in the feed; their rows were retired and recorded"),
 	}
 	if r.deps.SignedIn != nil {
@@ -156,10 +155,9 @@ func (r *resolver) restoreSignedIn(s *wsState, primed *primedWorkspace) {
 		return
 	}
 	r.restoreTurnSet(s, turnSetRestore{
-		op:      opSignedInRestore,
-		read:    primed.turnSets[turnSetSignedIn],
-		failed:  logsite.Msg("the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again"),
-		warning: "answered sign-in failures could not be loaded and may be drawn again",
-		loaded:  logsite.Msg("the workspace's sign-in-answered turns were loaded; their failures are not drawn"),
+		op:     opSignedInRestore,
+		read:   primed.turnSets[turnSetSignedIn],
+		failed: logsite.Msg("the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again"),
+		loaded: logsite.Msg("the workspace's sign-in-answered turns were loaded; their failures are not drawn"),
 	}, s.signedIn)
 }

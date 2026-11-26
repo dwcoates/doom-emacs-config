@@ -27,7 +27,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
-import { bootColdOnce, chipFailureArms, sharedMount, startHarness, type Harness } from "./harness";
+import { bootColdOnce, filedFailureArms, sharedMount, startHarness, type Harness } from "./harness";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import { userRefusalArms } from "../agent-only-arms.js";
@@ -965,7 +965,7 @@ describe("AdoptWebWorkspace's refusals", () => {
       startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
     ).rejects.toThrow();
     // Assert
-    expect(chipFailureArms()).toContain("controlPlaneFailed");
+    expect(filedFailureArms()).toContain("controlPlaneFailed");
   });
 
   it.each(TERMINAL_ARMS)("fails the boot on the %s arm", async (arm) => {
@@ -974,7 +974,7 @@ describe("AdoptWebWorkspace's refusals", () => {
       startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
     ).rejects.toThrow();
     // Assert
-    expect(chipFailureArms()).toContain("bootFailed");
+    expect(filedFailureArms()).toContain("bootFailed");
   });
 });
 

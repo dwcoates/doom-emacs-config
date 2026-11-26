@@ -42,11 +42,8 @@ func Lines(text string) []string {
 // held to: a link's label in the topbar summary's menu, and the summary
 // itself.
 func OneSentence(noun, text string, min, max int) error {
-	if strings.ContainsAny(text, "\r\n") {
-		return errors.New("a " + noun + " is one line")
-	}
-	if strings.TrimSpace(text) != text {
-		return errors.New("a " + noun + " carries no whitespace at either end")
+	if err := trimmedLine(noun, text, "one line"); err != nil {
+		return err
 	}
 	words := strings.Fields(text)
 	if len(words) < min || len(words) > max {
@@ -56,6 +53,54 @@ func OneSentence(noun, text string, min, max int) error {
 		if last, _ := utf8.DecodeLastRuneInString(word); isSentenceEnd(last) {
 			return fmt.Errorf("a %s is one sentence, and %q ends one before its last word", noun, word)
 		}
+	}
+	return nil
+}
+
+// Paragraph answers why TEXT is not one line holding MIN to MAX sentences of
+// at most MAXWORDS words in all, with no whitespace at either end, worded for
+// NOUN ("a long summary is one paragraph"); nil when it is. A sentence ends on
+// a word ending in a sentence terminator, and the text's last word ends the
+// last sentence.
+//
+// It is the rule a longer text the daemon draws in a bounded popup is held
+// to: the long summary a hover on the topbar's title shows.
+func Paragraph(noun, text string, min, max, maxWords int) error {
+	if err := trimmedLine(noun, text, "one paragraph, with no line break"); err != nil {
+		return err
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return errors.New("a " + noun + " is never empty")
+	}
+	if len(words) > maxWords {
+		return fmt.Errorf("a %s is at most %d words, not %d", noun, maxWords, len(words))
+	}
+	if last, _ := utf8.DecodeLastRuneInString(words[len(words)-1]); !isSentenceEnd(last) {
+		return fmt.Errorf("a %s ends its last sentence with its last word", noun)
+	}
+	sentences := 0
+	for _, word := range words {
+		if last, _ := utf8.DecodeLastRuneInString(word); isSentenceEnd(last) {
+			sentences++
+		}
+	}
+	if sentences < min || sentences > max {
+		return fmt.Errorf("a %s is %d to %d sentences, not %d", noun, min, max, sentences)
+	}
+	return nil
+}
+
+// trimmedLine answers why TEXT is not one line with no whitespace at either
+// end, worded for NOUN and the SHAPE a line break breaks ("a label is one
+// line"); nil when it is. It is the first check OneSentence and Paragraph
+// share.
+func trimmedLine(noun, text, shape string) error {
+	if strings.ContainsAny(text, "\r\n") {
+		return errors.New("a " + noun + " is " + shape)
+	}
+	if strings.TrimSpace(text) != text {
+		return errors.New("a " + noun + " carries no whitespace at either end")
 	}
 	return nil
 }

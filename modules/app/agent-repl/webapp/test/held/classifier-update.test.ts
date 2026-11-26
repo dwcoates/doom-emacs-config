@@ -338,7 +338,7 @@ describe("the classifier update form", () => {
     expect(record.level.case).toBe("info");
   });
 
-  it("files nothing on the warning chip while the card is on screen", async () => {
+  it("files nothing in the failure sink while the card is on screen", async () => {
     // Arrange
     const { registry, reported } = forms(refusal("unchanged"));
     const form = attached(registry.formFor("turn-1", EXAMPLE));
@@ -350,7 +350,7 @@ describe("the classifier update form", () => {
     expect(reported).toEqual([]);
   });
 
-  it("files a refusal on the warning chip when the card left while it ran", async () => {
+  it("files a refusal in the failure sink when the card left while it ran", async () => {
     // Arrange: the form is detached, as a delivered prompt's card is.
     const { registry, reported } = forms(refusal("unchanged"));
     const form = registry.formFor("turn-1", EXAMPLE);

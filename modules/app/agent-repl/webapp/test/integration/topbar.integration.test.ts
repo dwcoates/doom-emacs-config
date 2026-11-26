@@ -19,14 +19,13 @@ import { create } from "@bufbuild/protobuf";
 
 import {
   TopbarAccountSchema,
-  TopbarWarningSchema,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
 import { pressurePercentColor } from "../../src/pressure-color.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import { bootColdOnce, chipFailureText, sharedMount, startHarness, type Harness } from "./harness";
+import { bootColdOnce, filedFailureText, sharedMount, startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER, MODEL_TOOLTIP } from "../../src/topbar/model";
 import { EFFORT_TOOLTIP } from "../../src/topbar/effort";
 import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
@@ -38,12 +37,9 @@ import {
   EFFORT_LEVELS,
   PERMISSION_MODES,
   TOPBAR_ACCOUNT_ARMS,
-  TOPBAR_WARNING_ARMS,
   WORKSPACE_ID,
   assertCoversOneof,
-  degradedWindowClosedWarning,
   topbarView,
-  topbarWarning,
 } from "./fixtures";
 
 let harness: Harness;
@@ -98,10 +94,6 @@ async function withTopbar(init: Parameters<typeof topbarView>[0]): Promise<Harne
 describe("arm coverage", () => {
   it("covers every account arm", () => {
     assertCoversOneof(TopbarAccountSchema, "state", [...TOPBAR_ACCOUNT_ARMS]);
-  });
-
-  it("covers every warning detail arm", () => {
-    assertCoversOneof(TopbarWarningSchema, "detail", [...TOPBAR_WARNING_ARMS]);
   });
 
   it("lists every tone the vocabulary permits", () => {
@@ -777,185 +769,6 @@ describe("the context chip", () => {
   });
 });
 
-describe("the warning strip", () => {
-  it("draws no strip for an empty warning list", async () => {
-    // Arrange / Act
-    await withTopbar({ warnings: [] });
-    // Assert
-    expect(harness.$(".topbar-heading-warnings")).toBeNull();
-  });
-
-  it("draws the strip once a warning arrives", async () => {
-    // Arrange / Act
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    // Assert
-    expect(harness.$(".topbar-heading-warnings")).not.toBeNull();
-  });
-
-  it.each(TOPBAR_WARNING_ARMS)("draws the %s warning's line verbatim", async (arm) => {
-    // Arrange / Act
-    await withTopbar({ warnings: [topbarWarning(arm)] });
-    // Act
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warnings"]')).toContain(`warning: ${arm}`);
-  });
-
-  it.each(TOPBAR_WARNING_ARMS)("carries the %s arm on its list row", async (arm) => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning(arm)] });
-    // Act
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.$(`.topbar-warning-row[data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it("draws every warning in the list", async () => {
-    // Arrange
-    await withTopbar({ warnings: TOPBAR_WARNING_ARMS.map((arm) => topbarWarning(arm)) });
-    // Act
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.$$(".topbar-warning-row")).toHaveLength(TOPBAR_WARNING_ARMS.length);
-  });
-
-  it("draws the reveal below the strip", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    // Act
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.$('.topbar-reveal[data-reveal="warnings"]')).not.toBeNull();
-  });
-});
-
-/** What each warning's DETAIL overlay must show once its row is opened. */
-const WARNING_DETAILS = [
-  { arm: "accounting" as const, expected: "cache reads uncounted" },
-  { arm: "unmodeledTool" as const, expected: "mcp__weather__forecast" },
-  { arm: "detachedUnmodeled" as const, expected: "mcp__weather__watch" },
-  { arm: "sessionFault" as const, expected: "store writes rejected" },
-  { arm: "degradedWindow" as const, expected: "disk pressure" },
-  { arm: "deployFailed" as const, expected: "rename store: permission denied" },
-];
-
-describe.each(WARNING_DETAILS)("the $arm warning's detail", ({ arm, expected }) => {
-  it("opens on the list row", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning(arm)] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click(`.topbar-warning-row[data-arm="${arm}"]`);
-    // Assert
-    expect(harness.$('.topbar-reveal[data-reveal="warning-detail"]')).not.toBeNull();
-  });
-
-  it("draws its own evidence verbatim", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning(arm)] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click(`.topbar-warning-row[data-arm="${arm}"]`);
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain(expected);
-  });
-});
-
-describe("the session-fault detail", () => {
-  it("draws the faulted component verbatim beside the detail", async () => {
-    // Arrange: the daemon projects a session fault into the PUSHED view; the
-    // strip is its only home, and the component names who faulted.
-    await withTopbar({ warnings: [topbarWarning("sessionFault")] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click('.topbar-warning-row[data-arm="sessionFault"]');
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain("shim");
-  });
-});
-
-/**
- * A FAILED DEPLOY (owner request, 2026-09-28): the daemon raises it on every
- * workspace's topbar; its row opens what failed, and the page logs it loudly
- * the first time it appears.
- */
-describe("the failed-deploy detail", () => {
-  it("draws what became of the install beside the step", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("deployFailed")] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click('.topbar-warning-row[data-arm="deployFailed"]');
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"] [data-datum="rollback"]')).toBe(
-      "it was rolled back to the previous build",
-    );
-  });
-
-  it("is logged to the daemon at ERROR when it first appears on the page", async () => {
-    // Arrange / Act: the page boots over a standing failed deploy.
-    harness = await startHarness({
-      clientLog: true,
-      arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("deployFailed")] })),
-    });
-    await harness.settle();
-    // Assert
-    const records = harness.fake
-      .calls<{ record?: { operation: string; level: { case: string } } }>("clientLog")
-      .map((call) => call.record)
-      .filter((record) => record?.operation === "topbar.deploy-failed");
-    expect(records.map((record) => record?.level.case)).toEqual(["error"]);
-  });
-});
-
-describe("the unmodeled-tool detail", () => {
-  it("draws every argument line verbatim", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("unmodeledTool")] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click('.topbar-warning-row[data-arm="unmodeledTool"]');
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain("days=3");
-  });
-});
-
-describe("the degraded-window detail", () => {
-  it("ticks while the window is open", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("degradedWindow")] });
-    await harness.click(".topbar-heading-warnings");
-    await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
-    const before = harness.text('.topbar-reveal[data-reveal="warning-detail"]');
-    // Act
-    await harness.tick(10_000);
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).not.toBe(before);
-  });
-
-  it("draws a settled extent rather than ticking once closed", async () => {
-    // Arrange
-    await withTopbar({ warnings: [degradedWindowClosedWarning()] });
-    await harness.click(".topbar-heading-warnings");
-    await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
-    const before = harness.text('.topbar-reveal[data-reveal="warning-detail"]');
-    // Act
-    await harness.tick(10_000);
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toBe(before);
-  });
-
-  it("draws the closed window's dropped count verbatim", async () => {
-    // Arrange
-    await withTopbar({ warnings: [degradedWindowClosedWarning()] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    await harness.click('.topbar-warning-row[data-arm="degradedWindow"]');
-    // Assert
-    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain("12");
-  });
-});
-
 describe("the login terminal", () => {
   // A FRESH MOUNT PER CASE: the login is the page's own modal state, and a
   // terminal's death leaves a client failure on the whole page.
@@ -1189,64 +1002,6 @@ describe("the login terminal", () => {
 // strength of an older push.
 // ---------------------------------------------------------------------------
 
-describe("the warning strip's omission", () => {
-  it("removes the strip when the next push carries no warnings", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    // Act
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
-    await harness.settle();
-    // Assert
-    expect(harness.$(".topbar-heading-warnings")).toBeNull();
-  });
-
-  it("drops a warning the next push omits", async () => {
-    // Arrange
-    await withTopbar({
-      warnings: [topbarWarning("accounting"), topbarWarning("unmodeledTool")],
-    });
-    // Act
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("accounting")] }));
-    await harness.settle();
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.$$(".topbar-warning-row").map((el) => el.dataset.arm)).toEqual(["accounting"]);
-  });
-
-  it("closes the reveal along with the strip it belonged to", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    await harness.click(".topbar-heading-warnings");
-    // Act
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
-    await harness.settle();
-    // Assert
-    expect(harness.$('.topbar-reveal[data-reveal="warnings"]')).toBeNull();
-  });
-
-  it("draws the strip again when a warning comes back", async () => {
-    // Arrange
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
-    await harness.settle();
-    // Act
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("sessionFault")] }));
-    await harness.settle();
-    await harness.click(".topbar-heading-warnings");
-    // Assert
-    expect(harness.$('.topbar-warning-row[data-arm="sessionFault"]')).not.toBeNull();
-  });
-
-  it("reports no failure for an empty warning list", async () => {
-    // Arrange / Act: an empty repeated field is a fact, not a malformed view.
-    await withTopbar({ warnings: [topbarWarning("accounting")] });
-    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
-    await harness.settle();
-    // Assert
-    expect(harness.failureArms()).toEqual([]);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // THE LOGIN PTY DYING WITHOUT `closed` (audit 1, item 13)
 //
@@ -1282,7 +1037,7 @@ describe("the login terminal's transport death", () => {
     // Arrange / Act
     await killTerminal();
     // Assert
-    expect(await chipFailureText(harness, "controlPlaneFailed")).toContain("login terminal");
+    expect(filedFailureText("controlPlaneFailed")).toContain("login terminal");
   });
 
   it("does not re-probe the pty", async () => {
@@ -1356,39 +1111,6 @@ describe("the model selector with nothing selected", () => {
   });
 });
 
-describe("the detached-unmodeled detail", () => {
-  const openDetail = async (): Promise<void> => {
-    await withTopbar({ warnings: [topbarWarning("detachedUnmodeled")] });
-    await harness.click(".topbar-heading-warnings");
-    await harness.click('.topbar-warning-row[data-arm="detachedUnmodeled"]');
-  };
-
-  it("names the tool that is still running", async () => {
-    // Arrange / Act
-    await openDetail();
-    // Assert
-    expect(harness.text('[data-reveal="warning-detail"] .topbar-warning-body')).toContain(
-      "mcp__weather__watch",
-    );
-  });
-
-  it("reads its age from the served start instant", async () => {
-    // Arrange / Act: started 1 s, the page's clock starts at the epoch (10 s).
-    await openDetail();
-    // Assert
-    expect(harness.text(".topbar-warning-clock")).toBe("running 9s");
-  });
-
-  it("ticks the age while the detail stands open", async () => {
-    // Arrange
-    await openDetail();
-    // Act
-    await harness.tick(5_000);
-    // Assert
-    expect(harness.text(".topbar-warning-clock")).toBe("running 14s");
-  });
-});
-
 /**
  * THE STRIP'S SPACING, ON THE WHOLE MOUNTED PAGE.
  *
@@ -1416,7 +1138,6 @@ describe("the strip's spacing", () => {
         },
       ],
       contextText: "184.3k",
-      warnings: [topbarWarning("sessionFault"), topbarWarning("detachedUnmodeled")],
     });
     const row = harness.$(".topbar-row");
     if (!row) throw new Error("the topbar drew no row");

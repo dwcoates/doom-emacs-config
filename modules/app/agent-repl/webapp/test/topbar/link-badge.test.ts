@@ -2,15 +2,15 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
-  TopbarTitleLinkBadgeSchema,
-  type TopbarTitleLinkBadge,
+  TopbarWorkspaceNameLinkBadgeSchema,
+  type TopbarWorkspaceNameLinkBadge,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { drawLinkBadge, drawLinkMarks, LINK_BADGE_CLASS, LINK_MARK_CLASS } from "../../src/topbar/link-badge.js";
 
 describe("drawLinkBadge", () => {
   it.each(["open", "draft", "merged", "closed"] as const)("draws the %s arm as its word, named by data-badge", (state) => {
     // Arrange
-    const badge = create(TopbarTitleLinkBadgeSchema, { state: { case: state, value: {} } });
+    const badge = create(TopbarWorkspaceNameLinkBadgeSchema, { state: { case: state, value: {} } });
     // Act
     const el = drawLinkBadge(badge)!;
     // Assert
@@ -22,14 +22,14 @@ describe("drawLinkBadge", () => {
   });
 
   it("draws nothing for a badge whose state this schema does not name", () => {
-    expect(drawLinkBadge(create(TopbarTitleLinkBadgeSchema, {}))).toBeNull();
+    expect(drawLinkBadge(create(TopbarWorkspaceNameLinkBadgeSchema, {}))).toBeNull();
   });
 
   it("refuses a state arm this build cannot draw", () => {
     // Arrange
-    const future = { state: { case: "locked", value: {} } } as unknown as TopbarTitleLinkBadge;
+    const future = { state: { case: "locked", value: {} } } as unknown as TopbarWorkspaceNameLinkBadge;
     // Act / Assert
-    expect(() => drawLinkBadge(future)).toThrow(/TopbarTitleLinkBadge.state/);
+    expect(() => drawLinkBadge(future)).toThrow(/TopbarWorkspaceNameLinkBadge.state/);
   });
 });
 

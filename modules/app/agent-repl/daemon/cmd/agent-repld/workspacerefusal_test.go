@@ -280,8 +280,12 @@ var workspaceSettingRefusals = func() []describedRefusal {
 			}},
 		{name: "summary", empty: summary, oneof: "cause",
 			cases: append(sharedWorkspaceCases(summary, "set the summary again", theFourWorkspaceArms...),
-				refusalCase{name: "invalid_summary", err: armedWith(summary, "invalid_summary", map[string]any{"summary": "hi", "reason": "one word"}),
-					want: `the summary "hi" is not one plain sentence of two to fifteen words (one word)`}),
+				refusalCase{name: "invalid_summary of the long summary", err: &agentreplv1.SetWorkspaceSummaryError{Cause: &agentreplv1.SetWorkspaceSummaryError_InvalidSummary{InvalidSummary: &agentreplv1.SetWorkspaceSummaryInvalidSummary{
+					Part: &agentreplv1.SetWorkspaceSummaryInvalidSummary_LongSummary{LongSummary: &agentreplv1.SetWorkspaceSummaryInvalidLongSummary{LongSummary: "Hi.", Reason: "one sentence"}}}}},
+					want: `the long summary "Hi." is not two to four sentences in one paragraph of at most eighty words (one sentence)`},
+				refusalCase{name: "invalid_summary of the short summary", err: &agentreplv1.SetWorkspaceSummaryError{Cause: &agentreplv1.SetWorkspaceSummaryError_InvalidSummary{InvalidSummary: &agentreplv1.SetWorkspaceSummaryInvalidSummary{
+					Part: &agentreplv1.SetWorkspaceSummaryInvalidSummary_ShortSummary{ShortSummary: &agentreplv1.SetWorkspaceSummaryInvalidShortSummary{ShortSummary: "hi", Reason: "one word"}}}}},
+					want: `the short summary "hi" is not one plain sentence of two to fifteen words (one word)`}),
 			describe: func(e proto.Message) (string, error) {
 				return describeSummaryRefusal("ws", e.(*agentreplv1.SetWorkspaceSummaryError))
 			}},

@@ -13,17 +13,10 @@ import {
   workspaceGone,
 } from "../../src/failure/sink.js";
 import { clearClientFailures, standingClientFailure } from "../../src/rpc/link.js";
-import { createLocalFailures, evidenceRows } from "../../src/failure/local.js";
-import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
+import { ARM_HEADLINE, createLocalFailures, evidenceContext, evidenceRows } from "../../src/failure/local.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords, type LogCapture } from "../log-capture.js";
 
 const NOW = 1_700_000_000_000;
-
-/** Every operation CAPTURE forwarded, once the batch has flushed. */
-async function forwardedOperations(capture: LogCapture): Promise<string[]> {
-  capture.logger.flush();
-  await Promise.resolve();
-  return capture.sent.map((record) => record.operation);
-}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -40,29 +33,31 @@ const MINTS = [
   ["frameUndrawable", () => frameUndrawable("WatchFeed", "TypeError: boom")],
 ] as const;
 
-const armsOf = (failures: ReturnType<typeof createLocalFailures>): string[] =>
-  failures.standing().map((failure) => failure.arm);
+/** Every forwarded record under OPERATION, once the batch has flushed. */
+async function recordsUnder(capture: LogCapture, operation: string) {
+  return (await forwardedRecords(capture)).filter((record) => record.operation === operation);
+}
 
 describe("createLocalFailures: filing an arm", () => {
   for (const [arm, mint] of MINTS) {
-    it(`stands ${arm} once it is reported`, () => {
+    it(`records ${arm} at error, stated with its arm's sentence`, async () => {
       // ARRANGE
+      const capture = captureLogRecords("debug");
       const failures = createLocalFailures();
       // ACT
       failures.report(mint());
       // ASSERT
-      expect(armsOf(failures)).toEqual([arm]);
+      const record = await forwardedRecord(capture, "failure.report");
+      expect([record.level.case, record.message]).toEqual(["error", `filing the ${arm} failure: ${ARM_HEADLINE[arm]}`]);
     });
   }
 
-  it("starts empty, so a healthy page lists nothing", () => {
-    expect(createLocalFailures().standing()).toEqual([]);
-  });
-
-  it("leads with a headline chosen by the arm", () => {
-    const failures = createLocalFailures();
-    failures.report(workspaceGone());
-    expect(failures.standing()[0]?.headline).toContain("no longer exists");
+  it("carries the arm's own evidence on its record", async () => {
+    const capture = captureLogRecords("debug");
+    createLocalFailures().report(daemonUnreachable(1006, "abnormal"));
+    expect((await forwardedRecord(capture, "failure.report")).context).toEqual(
+      expect.objectContaining({ close_code: "1006", close_reason: "abnormal" }),
+    );
   });
 });
 
@@ -118,121 +113,57 @@ describe("evidenceRows", () => {
   });
 });
 
-describe("createLocalFailures: reconciliation by arm", () => {
-  it("stands two DIFFERENT arms, in the order they were filed", () => {
+describe("evidenceContext", () => {
+  it("keys each evidence value by its label, spaces as underscores", () => {
+    expect(evidenceContext(controlPlaneFailed("OpenLogin", "unavailable"))).toEqual({ request: "OpenLogin", cause: "unavailable" });
+  });
+
+  it("is the evidence rows, so a record and the rows never differ", () => {
+    const kind = daemonUnreachable(1006, "abnormal closure");
+    expect(Object.values(evidenceContext(kind))).toEqual(evidenceRows(kind).map(([, value]) => value));
+  });
+});
+
+describe("createLocalFailures: one standing failure per arm", () => {
+  it("records a repeat of a standing arm at debug, not as a second error", async () => {
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
     failures.report(daemonUnreachable(1006, "a"));
-    failures.report(staleBundle("b"));
-    expect(armsOf(failures)).toEqual(["daemonUnreachable", "staleBundle"]);
+    failures.report(daemonUnreachable(1006, "b"));
+    expect([(await recordsUnder(capture, "failure.report")).length, (await recordsUnder(capture, "failure.replace")).length]).toEqual([1, 1]);
   });
 
-  it("REPLACES the entry when the same arm reports again", () => {
-    // ARRANGE: a reconnect loop must not append a row per attempt.
+  it("records two DIFFERENT arms each at error", async () => {
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    // ACT
-    failures.report(daemonUnreachable(1006, "first"));
-    failures.report(daemonUnreachable(1000, "second"));
-    // ASSERT
-    expect(failures.standing()).toHaveLength(1);
-  });
-
-  it("keeps the LATEST evidence after a replacement", () => {
-    const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "first"));
-    failures.report(daemonUnreachable(1000, "second"));
-    expect(failures.standing()[0]?.evidence).toContainEqual(["close reason", "second"]);
-  });
-
-  it("keeps a repeat of one arm from disturbing another's place", () => {
-    const failures = createLocalFailures();
-    failures.report(staleBundle("standing"));
     failures.report(daemonUnreachable(1006, "a"));
-    failures.report(daemonUnreachable(1000, "b"));
-    expect(armsOf(failures)).toEqual(["staleBundle", "daemonUnreachable"]);
+    failures.report(staleBundle("drift"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(2);
   });
 });
 
 describe("createLocalFailures: retraction", () => {
-  for (const [arm, mint] of MINTS) {
-    it(`takes ${arm} down when it is retracted`, () => {
-      const failures = createLocalFailures();
-      failures.report(mint());
-      failures.retract(arm);
-      expect(failures.standing()).toEqual([]);
-    });
-  }
-
-  it("leaves the other arms standing", () => {
+  it("records the retraction of a standing arm", async () => {
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "a"));
-    failures.report(staleBundle("b"));
+    failures.report(daemonUnreachable(1006, "gone"));
     failures.retract("daemonUnreachable");
-    expect(armsOf(failures)).toEqual(["staleBundle"]);
+    expect(await recordsUnder(capture, "failure.retract")).toHaveLength(1);
   });
 
-  it("is a no-op for an arm that does not stand", () => {
-    const failures = createLocalFailures();
-    expect(() => failures.retract("daemonUnreachable")).not.toThrow();
+  it("records nothing for an arm that does not stand", async () => {
+    const capture = captureLogRecords("debug");
+    createLocalFailures().retract("daemonUnreachable");
+    expect(await recordsUnder(capture, "failure.retract")).toHaveLength(0);
   });
 
-  it("lets workspaceGone stand, since nothing retracts it", () => {
-    const failures = createLocalFailures();
-    failures.report(workspaceGone());
-    failures.retract("daemonUnreachable");
-    expect(armsOf(failures)).toEqual(["workspaceGone"]);
-  });
-
-  it("re-files an arm after it was retracted", () => {
+  it("re-files an arm after it was retracted, at error again", async () => {
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
     failures.report(daemonUnreachable(1006, "a"));
     failures.retract("daemonUnreachable");
     failures.report(daemonUnreachable(1006, "b"));
-    expect(armsOf(failures)).toEqual(["daemonUnreachable"]);
-  });
-});
-
-describe("createLocalFailures: subscribers", () => {
-  it("tells a subscriber when an arm is filed", () => {
-    const failures = createLocalFailures();
-    const listener = vi.fn();
-    failures.subscribe(listener);
-    failures.report(staleBundle("x"));
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  it("tells a subscriber when an arm is retracted", () => {
-    const failures = createLocalFailures();
-    failures.report(staleBundle("x"));
-    const listener = vi.fn();
-    failures.subscribe(listener);
-    failures.retract("staleBundle");
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  it("says nothing for a retraction that changed nothing", () => {
-    const failures = createLocalFailures();
-    const listener = vi.fn();
-    failures.subscribe(listener);
-    failures.retract("staleBundle");
-    expect(listener).not.toHaveBeenCalled();
-  });
-
-  it("has the entry standing by the time the subscriber is told", () => {
-    const failures = createLocalFailures();
-    let seen: string[] = [];
-    failures.subscribe(() => {
-      seen = armsOf(failures);
-    });
-    failures.report(bootFailed("x"));
-    expect(seen).toEqual(["bootFailed"]);
-  });
-
-  it("stops telling a subscriber once it unsubscribes", () => {
-    const failures = createLocalFailures();
-    const listener = vi.fn();
-    failures.subscribe(listener)();
-    failures.report(staleBundle("x"));
-    expect(listener).not.toHaveBeenCalled();
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(2);
   });
 });
 
@@ -242,143 +173,92 @@ describe("createLocalFailures: refusals", () => {
     expect(() => failures.report(create(FailureKindSchema, {}))).toThrow(MalformedView);
   });
 
-  it("files nothing for a DAEMON-minted arm, which a frontend may not mint", () => {
-    const failures = createLocalFailures();
-    failures.report(
+  it("records a foreign arm at error and files nothing", async () => {
+    const capture = captureLogRecords("debug");
+    createLocalFailures().report(
       create(FailureKindSchema, { kind: { case: "shimDegraded", value: { component: "stdout" } } }),
     );
-    expect(failures.standing()).toEqual([]);
-  });
-
-  it("logs a foreign arm at error rather than swallowing it", async () => {
-    const capture = captureLogRecords();
-    const failures = createLocalFailures();
-    failures.report(
-      create(FailureKindSchema, { kind: { case: "shimDegraded", value: { component: "stdout" } } }),
-    );
-    expect((await forwardedRecord(capture, "warning-chip.foreign-arm")).level.case).toBe("error");
-  });
-});
-
-describe("createLocalFailures: logging", () => {
-  it("logs one record when a failure is filed", async () => {
-    const capture = captureLogRecords();
-    const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "gone"));
-    const operations = await forwardedOperations(capture);
-    expect(operations.filter((op) => op === "warning-chip.report")).toHaveLength(1);
-  });
-
-  it("logs a filed failure at error", async () => {
-    const capture = captureLogRecords();
-    const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "gone"));
-    expect((await forwardedRecord(capture, "warning-chip.report")).level.case).toBe("error");
-  });
-
-  it("logs one record when a failure is cleared", async () => {
-    const capture = captureLogRecords();
-    const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "gone"));
-    failures.retract("daemonUnreachable");
-    const operations = await forwardedOperations(capture);
-    expect(operations.filter((op) => op === "warning-chip.retract")).toHaveLength(1);
+    expect((await forwardedRecord(capture, "failure.foreign-arm")).level.case).toBe("error");
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(0);
   });
 });
 
 describe("createLocalFailures: dispose", () => {
-  it("forgets what stood", () => {
+  it("forgets what stood, so a later report is an error again", async () => {
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
     failures.report(daemonUnreachable(1006, "a"));
     failures.dispose();
-    expect(failures.standing()).toEqual([]);
-  });
-
-  it("tells subscribers the standing set emptied", () => {
-    const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "a"));
-    const listener = vi.fn();
-    failures.subscribe(listener);
-    failures.dispose();
-    expect(listener).toHaveBeenCalledTimes(1);
+    failures.report(daemonUnreachable(1006, "b"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(2);
   });
 });
 
 describe("createLocalFailures: suppress", () => {
-  it("withholds the arm while the announced window stands", () => {
-    // ARRANGE
+  it("records a report it withholds at info, with its evidence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    // ACT
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    failures.report(daemonUnreachable(1006, "gone"));
-    // ASSERT
-    expect(failures.standing()).toEqual([]);
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    failures.report(daemonUnreachable(1006, "abnormal"));
+    const record = await forwardedRecord(capture, "failure.suppressed");
+    expect([record.level.case, record.context?.close_code, (await recordsUnder(capture, "failure.report")).length]).toEqual(["info", "1006", 0]);
   });
 
-  it("still logs a report it withholds", async () => {
+  it("files normally once the window has expired, since an overrun outage is news", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-    const capture = captureLogRecords();
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    failures.report(daemonUnreachable(1006, "gone"));
-    expect(await forwardedOperations(capture)).toContain("warning-chip.suppressed");
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    vi.setSystemTime(NOW + 9_000);
+    failures.report(daemonUnreachable(1006, "abnormal"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(1);
   });
 
-  it("files normally once the window has expired, since an overrun outage is news", () => {
+  it("stands down a failure already standing for the arm it starts suppressing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    vi.setSystemTime(NOW + 8001);
-    failures.report(daemonUnreachable(1006, "gone"));
-    expect(armsOf(failures)).toEqual(["daemonUnreachable"]);
+    failures.report(daemonUnreachable(1006, "before"));
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    vi.setSystemTime(NOW + 9_000);
+    failures.report(daemonUnreachable(1006, "after"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(2);
   });
 
-  it("takes down an entry already standing for the arm it starts suppressing", () => {
+  it("suppresses only the arm it names", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    failures.report(daemonUnreachable(1006, "gone"));
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    expect(failures.standing()).toEqual([]);
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    failures.report(staleBundle("drift"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(1);
   });
 
-  it("suppresses only the arm it names", () => {
+  it("keeps the announced window standing across a retract, so a handover's next stream end stays expected", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
+    const capture = captureLogRecords("debug");
     const failures = createLocalFailures();
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    failures.report(bootFailed("no shell"));
-    expect(armsOf(failures)).toEqual(["bootFailed"]);
-  });
-
-  it("keeps the announced window standing across a retract, so a handover's next stream end stays expected", () => {
-    // ARRANGE: a deploy's handover moves streams one at a time; one reading
-    // again is not the outage over (owner ruling, 2026-10-22).
-    vi.useFakeTimers();
-    vi.setSystemTime(NOW);
-    const failures = createLocalFailures();
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    // ACT
+    failures.suppress("daemonUnreachable", NOW + 8_000);
     failures.retract("daemonUnreachable");
-    failures.report(daemonUnreachable(1006, "gone"));
-    // ASSERT
-    expect([failures.standing(), failures.suppressing("daemonUnreachable")]).toEqual([[], true]);
+    failures.report(daemonUnreachable(1006, "next stream"));
+    expect(await recordsUnder(capture, "failure.report")).toHaveLength(0);
   });
 
   it("answers suppressing only while the window stands, and only for its arm", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const failures = createLocalFailures();
-    failures.suppress("daemonUnreachable", NOW + 8000);
-    const inside = [failures.suppressing("daemonUnreachable"), failures.suppressing("bootFailed")];
-    vi.setSystemTime(NOW + 8001);
-    expect([...inside, failures.suppressing("daemonUnreachable")]).toEqual([true, false, false]);
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    const during = [failures.suppressing("daemonUnreachable"), failures.suppressing("staleBundle")];
+    vi.setSystemTime(NOW + 9_000);
+    expect([...during, failures.suppressing("daemonUnreachable")]).toEqual([true, false, false]);
   });
-
 });
 
 describe("createLocalFailures and the client's link verdict", () => {
@@ -421,5 +301,31 @@ describe("createLocalFailures and the client's link verdict", () => {
     failures.suppress("daemonUnreachable", Date.now() + 60_000);
     failures.report(daemonUnreachable(1006, "abnormal"));
     expect(standingClientFailure()).toBeNull();
+  });
+});
+
+describe("createLocalFailures: standing arms", () => {
+  it("answers the arms standing, in the order first filed", () => {
+    const failures = createLocalFailures();
+    failures.report(staleBundle("drift"));
+    failures.report(daemonUnreachable(1006, "a"));
+    failures.report(staleBundle("again"));
+    expect(failures.standingArms()).toEqual(["staleBundle", "daemonUnreachable"]);
+  });
+
+  it("drops a retracted arm", () => {
+    const failures = createLocalFailures();
+    failures.report(daemonUnreachable(1006, "a"));
+    failures.retract("daemonUnreachable");
+    expect(failures.standingArms()).toEqual([]);
+  });
+
+  it("stands no arm the announced window withholds", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failures = createLocalFailures();
+    failures.suppress("daemonUnreachable", NOW + 8_000);
+    failures.report(daemonUnreachable(1006, "a"));
+    expect(failures.standingArms()).toEqual([]);
   });
 });

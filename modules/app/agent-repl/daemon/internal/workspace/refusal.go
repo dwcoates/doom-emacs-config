@@ -271,17 +271,18 @@ const (
 	// ArmInvalidLink is a ChangeWorkspaceLinks url the external browser
 	// would not open: not http or https, or carrying whitespace.
 	ArmInvalidLink = "invalid_link"
-	// ArmInvalidLabel is a ChangeWorkspaceLinks label the summary's menu does
-	// not draw: not two to eight words in one sentence.
+	// ArmInvalidLabel is a ChangeWorkspaceLinks label the name's link menu
+	// does not draw: not two to eight words in one sentence.
 	ArmInvalidLabel = "invalid_label"
-	// ArmInvalidSummary is a SetWorkspaceSummary summary the title line does
-	// not draw: not one plain sentence of two to fifteen words.
+	// ArmInvalidSummary is a SetWorkspaceSummary summary a part of which
+	// breaks its form. Its `part` field names the part (a refusalarm.Nested),
+	// which carries the part's text and the reason.
 	ArmInvalidSummary = "invalid_summary"
 	// ArmUnknownLink is a ChangeWorkspaceLinks removal or show naming a url
 	// the workspace does not hold.
 	ArmUnknownLink = "unknown_link"
 	// ArmTooManyShown is a ChangeWorkspaceLinks show naming more links than
-	// the summary's menu shows.
+	// the name's link menu shows.
 	ArmTooManyShown = "too_many_shown"
 	// ArmUnknownAnnouncedLink is a ChangeWorkspaceLinks set whose owned link
 	// announces a url the workspace does not hold. Its `url` field names it.

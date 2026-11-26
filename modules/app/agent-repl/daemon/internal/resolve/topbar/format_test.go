@@ -112,26 +112,6 @@ func TestJoinNonEmptyDropsWhatWasNotStated(t *testing.T) {
 	}
 }
 
-func TestPluralRendersTheSingular(t *testing.T) {
-	// Arrange, Act
-	got := plural(1, "response")
-
-	// Assert
-	if got != "1 response" {
-		t.Fatalf("plural = %q, want %q", got, "1 response")
-	}
-}
-
-func TestPluralRendersThePlural(t *testing.T) {
-	// Arrange, Act
-	got := plural(3, "response")
-
-	// Assert
-	if got != "3 responses" {
-		t.Fatalf("plural = %q, want %q", got, "3 responses")
-	}
-}
-
 func TestTruncationMarksWhatItCut(t *testing.T) {
 	// Arrange, Act
 	got := truncate("abcdefghij", 5)
@@ -149,15 +129,5 @@ func TestTruncationCountsRunesNotBytes(t *testing.T) {
 	// Assert
 	if got != "ααα…" {
 		t.Fatalf("truncate = %q, want three runes and the mark", got)
-	}
-}
-
-func TestAbbreviatingNoArgumentsYieldsNoLines(t *testing.T) {
-	// Arrange, Act
-	got := abbreviateArguments(nil)
-
-	// Assert
-	if got != nil {
-		t.Fatalf("lines = %+v, want none", got)
 	}
 }
