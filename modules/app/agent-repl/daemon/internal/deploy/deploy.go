@@ -894,7 +894,9 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 		}
 		v, hashErr := fn()
 		if hashErr != nil {
-			err = &BuildFailed{Step: component, Detail: hashErr.Error()}
+			// The build reported success, so its log has nothing to say:
+			// the hash failure is the whole story.
+			err = &BuildFailed{Step: component, Detail: "the staged " + component + " could not be hashed, though its build reported success: " + hashErr.Error()}
 			return
 		}
 		*value = v

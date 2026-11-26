@@ -888,6 +888,28 @@ func TestABuildThatStagedNoArtifactDeploysNothing(t *testing.T) {
 	}
 }
 
+func TestAStagedArtifactThatCannotBeHashedReadsAsAHashFailure(t *testing.T) {
+	// Arrange: the build reports success, so it has no log to point at.
+	h := newHarness(t)
+	h.builder.build = artifacts{}
+	h.builder.stageNothing = true
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) {
+		t.Fatalf("Deploy = %v, want a BuildFailed", err)
+	}
+	if want := "the staged shim could not be hashed, though its build reported success: "; !strings.HasPrefix(failed.Detail, want) {
+		t.Fatalf("Detail = %q, want it to begin %q", failed.Detail, want)
+	}
+	if strings.Contains(err.Error(), "output in") {
+		t.Fatalf("Error() = %q, want no output clause for a build with no log", err.Error())
+	}
+}
+
 func TestAnUnlistableWorkspaceSetIsTheDeploysAnswer(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -311,6 +311,35 @@ func TestABuildThatCannotMakeItsLogDirectoryBuildsNothing(t *testing.T) {
 	}
 }
 
+func TestABuildFailureNamesItsLogOnlyWhenItHasOne(t *testing.T) {
+	tests := []struct {
+		name   string
+		failed BuildFailed
+		want   string
+	}{
+		{name: "a failure with a log points at it",
+			failed: BuildFailed{Step: "webapp", Detail: "tsc: 3 errors", Log: "/logs/build.log"},
+			want:   "deploy: the webapp build failed (output in /logs/build.log): tsc: 3 errors"},
+		{name: "a failure with no log names no output",
+			failed: BuildFailed{Step: "launcher", Detail: "the staged launcher could not be hashed"},
+			want:   "deploy: the launcher build failed: the staged launcher could not be hashed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			failed := tc.failed
+
+			// Act
+			got := failed.Error()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Error() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStagedNamesTheBuildFrontendLayout(t *testing.T) {
 	// Arrange
 	s := Staged{Dir: "/s"}
