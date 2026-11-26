@@ -93,9 +93,18 @@ type PersistentWifiState struct {
 	// redraw and polling work while it is set, and draw current state at once
 	// when it clears; the daemon stops resolving the views those readers show
 	// for the same span. Session work is never part of it.
-	Quiet         *PersistentWifiQuiet `protobuf:"bytes,10,opt,name=quiet,proto3,oneof" json:"quiet,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Quiet *PersistentWifiQuiet `protobuf:"bytes,10,opt,name=quiet,proto3,oneof" json:"quiet,omitempty"`
+	// The persistent-wifi service the daemon reads this standing from cannot be
+	// reached: it is down, restarting, or has not answered since the daemon
+	// started. SET ONLY THEN, and then every other field is unset, since none of
+	// the facts they carry is current: nothing holds the machine quiet, so
+	// readers draw the facts as unread (the daemon lifts its views) and the
+	// tooltip names this arm's detail. The daemon publishes it the moment its
+	// watch of the service ends, and from its own start until the service first
+	// answers; the service's next standing replaces it.
+	ServiceUnreachable *PersistentWifiServiceUnreachable `protobuf:"bytes,11,opt,name=service_unreachable,json=serviceUnreachable,proto3,oneof" json:"service_unreachable,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PersistentWifiState) Reset() {
@@ -228,6 +237,13 @@ func (x *PersistentWifiState) GetQuiet() *PersistentWifiQuiet {
 	return nil
 }
 
+func (x *PersistentWifiState) GetServiceUnreachable() *PersistentWifiServiceUnreachable {
+	if x != nil {
+		return x.ServiceUnreachable
+	}
+	return nil
+}
+
 type isPersistentWifiState_Wifi interface {
 	isPersistentWifiState_Wifi()
 }
@@ -288,6 +304,54 @@ func (*PersistentWifiState_NoLid) isPersistentWifiState_Lid() {}
 
 func (*PersistentWifiState_LidUnwatched) isPersistentWifiState_Lid() {}
 
+// The persistent-wifi service cannot be reached, and why.
+type PersistentWifiServiceUnreachable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A one-line account of why the daemon holds no standing from the service,
+	// for the chip's tooltip and the record: not yet answered, the watch ended
+	// with its cause, or no first standing within the daemon's bound.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PersistentWifiServiceUnreachable) Reset() {
+	*x = PersistentWifiServiceUnreachable{}
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PersistentWifiServiceUnreachable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PersistentWifiServiceUnreachable) ProtoMessage() {}
+
+func (x *PersistentWifiServiceUnreachable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PersistentWifiServiceUnreachable.ProtoReflect.Descriptor instead.
+func (*PersistentWifiServiceUnreachable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PersistentWifiServiceUnreachable) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 // The Wi-Fi interface has an active link to a network.
 type PersistentWifiJoined struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -302,7 +366,7 @@ type PersistentWifiJoined struct {
 
 func (x *PersistentWifiJoined) Reset() {
 	*x = PersistentWifiJoined{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -314,7 +378,7 @@ func (x *PersistentWifiJoined) String() string {
 func (*PersistentWifiJoined) ProtoMessage() {}
 
 func (x *PersistentWifiJoined) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -327,7 +391,7 @@ func (x *PersistentWifiJoined) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiJoined.ProtoReflect.Descriptor instead.
 func (*PersistentWifiJoined) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PersistentWifiJoined) GetNetworkName() string {
@@ -347,7 +411,7 @@ type PersistentWifiNotJoined struct {
 
 func (x *PersistentWifiNotJoined) Reset() {
 	*x = PersistentWifiNotJoined{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +423,7 @@ func (x *PersistentWifiNotJoined) String() string {
 func (*PersistentWifiNotJoined) ProtoMessage() {}
 
 func (x *PersistentWifiNotJoined) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +436,7 @@ func (x *PersistentWifiNotJoined) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiNotJoined.ProtoReflect.Descriptor instead.
 func (*PersistentWifiNotJoined) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{3}
 }
 
 // System sleep is disabled: the lid can be closed without sleeping the
@@ -385,7 +449,7 @@ type PersistentWifiModeOn struct {
 
 func (x *PersistentWifiModeOn) Reset() {
 	*x = PersistentWifiModeOn{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +461,7 @@ func (x *PersistentWifiModeOn) String() string {
 func (*PersistentWifiModeOn) ProtoMessage() {}
 
 func (x *PersistentWifiModeOn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +474,7 @@ func (x *PersistentWifiModeOn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiModeOn.ProtoReflect.Descriptor instead.
 func (*PersistentWifiModeOn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{4}
 }
 
 // System sleep is enabled: closing the lid sleeps the machine and drops its
@@ -423,7 +487,7 @@ type PersistentWifiModeOff struct {
 
 func (x *PersistentWifiModeOff) Reset() {
 	*x = PersistentWifiModeOff{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -435,7 +499,7 @@ func (x *PersistentWifiModeOff) String() string {
 func (*PersistentWifiModeOff) ProtoMessage() {}
 
 func (x *PersistentWifiModeOff) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -448,7 +512,7 @@ func (x *PersistentWifiModeOff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiModeOff.ProtoReflect.Descriptor instead.
 func (*PersistentWifiModeOff) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{5}
 }
 
 // The lid is open.
@@ -460,7 +524,7 @@ type PersistentWifiLidOpen struct {
 
 func (x *PersistentWifiLidOpen) Reset() {
 	*x = PersistentWifiLidOpen{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -472,7 +536,7 @@ func (x *PersistentWifiLidOpen) String() string {
 func (*PersistentWifiLidOpen) ProtoMessage() {}
 
 func (x *PersistentWifiLidOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -485,7 +549,7 @@ func (x *PersistentWifiLidOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiLidOpen.ProtoReflect.Descriptor instead.
 func (*PersistentWifiLidOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{6}
 }
 
 // The lid is closed.
@@ -497,7 +561,7 @@ type PersistentWifiLidClosed struct {
 
 func (x *PersistentWifiLidClosed) Reset() {
 	*x = PersistentWifiLidClosed{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -509,7 +573,7 @@ func (x *PersistentWifiLidClosed) String() string {
 func (*PersistentWifiLidClosed) ProtoMessage() {}
 
 func (x *PersistentWifiLidClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -522,7 +586,7 @@ func (x *PersistentWifiLidClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiLidClosed.ProtoReflect.Descriptor instead.
 func (*PersistentWifiLidClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{7}
 }
 
 // The machine reports no lid (a desktop Mac): the display never follows a lid.
@@ -534,7 +598,7 @@ type PersistentWifiNoLid struct {
 
 func (x *PersistentWifiNoLid) Reset() {
 	*x = PersistentWifiNoLid{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -546,7 +610,7 @@ func (x *PersistentWifiNoLid) String() string {
 func (*PersistentWifiNoLid) ProtoMessage() {}
 
 func (x *PersistentWifiNoLid) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -559,7 +623,7 @@ func (x *PersistentWifiNoLid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiNoLid.ProtoReflect.Descriptor instead.
 func (*PersistentWifiNoLid) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{8}
 }
 
 // The daemon is NOT hearing the lid: its subscription to the operating
@@ -576,7 +640,7 @@ type PersistentWifiLidUnwatched struct {
 
 func (x *PersistentWifiLidUnwatched) Reset() {
 	*x = PersistentWifiLidUnwatched{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -588,7 +652,7 @@ func (x *PersistentWifiLidUnwatched) String() string {
 func (*PersistentWifiLidUnwatched) ProtoMessage() {}
 
 func (x *PersistentWifiLidUnwatched) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -601,7 +665,7 @@ func (x *PersistentWifiLidUnwatched) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiLidUnwatched.ProtoReflect.Descriptor instead.
 func (*PersistentWifiLidUnwatched) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PersistentWifiLidUnwatched) GetDetail() string {
@@ -633,7 +697,7 @@ type PersistentWifiQuiet struct {
 
 func (x *PersistentWifiQuiet) Reset() {
 	*x = PersistentWifiQuiet{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -645,7 +709,7 @@ func (x *PersistentWifiQuiet) String() string {
 func (*PersistentWifiQuiet) ProtoMessage() {}
 
 func (x *PersistentWifiQuiet) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -658,7 +722,7 @@ func (x *PersistentWifiQuiet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiQuiet.ProtoReflect.Descriptor instead.
 func (*PersistentWifiQuiet) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PersistentWifiQuiet) GetFrozenApps() []*PersistentWifiFrozenApp {
@@ -723,7 +787,7 @@ type PersistentWifiFrozenApp struct {
 
 func (x *PersistentWifiFrozenApp) Reset() {
 	*x = PersistentWifiFrozenApp{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -735,7 +799,7 @@ func (x *PersistentWifiFrozenApp) String() string {
 func (*PersistentWifiFrozenApp) ProtoMessage() {}
 
 func (x *PersistentWifiFrozenApp) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -748,7 +812,7 @@ func (x *PersistentWifiFrozenApp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiFrozenApp.ProtoReflect.Descriptor instead.
 func (*PersistentWifiFrozenApp) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PersistentWifiFrozenApp) GetName() string {
@@ -775,7 +839,7 @@ type PersistentWifiQuietDisplayAsleep struct {
 
 func (x *PersistentWifiQuietDisplayAsleep) Reset() {
 	*x = PersistentWifiQuietDisplayAsleep{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +851,7 @@ func (x *PersistentWifiQuietDisplayAsleep) String() string {
 func (*PersistentWifiQuietDisplayAsleep) ProtoMessage() {}
 
 func (x *PersistentWifiQuietDisplayAsleep) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +864,7 @@ func (x *PersistentWifiQuietDisplayAsleep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiQuietDisplayAsleep.ProtoReflect.Descriptor instead.
 func (*PersistentWifiQuietDisplayAsleep) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{12}
 }
 
 // The display could not be put to sleep; the daemon logged why at ERROR and
@@ -815,7 +879,7 @@ type PersistentWifiQuietDisplayAwake struct {
 
 func (x *PersistentWifiQuietDisplayAwake) Reset() {
 	*x = PersistentWifiQuietDisplayAwake{}
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -827,7 +891,7 @@ func (x *PersistentWifiQuietDisplayAwake) String() string {
 func (*PersistentWifiQuietDisplayAwake) ProtoMessage() {}
 
 func (x *PersistentWifiQuietDisplayAwake) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_persistent_wifi_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -840,7 +904,7 @@ func (x *PersistentWifiQuietDisplayAwake) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistentWifiQuietDisplayAwake.ProtoReflect.Descriptor instead.
 func (*PersistentWifiQuietDisplayAwake) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PersistentWifiQuietDisplayAwake) GetDetail() string {
@@ -854,7 +918,7 @@ var File_agentrepl_v1_persistent_wifi_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_persistent_wifi_proto_rawDesc = "" +
 	"\n" +
-	"\"agentrepl/v1/persistent_wifi.proto\x12\fagentrepl.v1\"\x8f\x05\n" +
+	"\"agentrepl/v1/persistent_wifi.proto\x12\fagentrepl.v1\"\x8d\x06\n" +
 	"\x13PersistentWifiState\x12<\n" +
 	"\x06joined\x18\x01 \x01(\v2\".agentrepl.v1.PersistentWifiJoinedH\x00R\x06joined\x12F\n" +
 	"\n" +
@@ -867,12 +931,16 @@ const file_agentrepl_v1_persistent_wifi_proto_rawDesc = "" +
 	"\x06no_lid\x18\a \x01(\v2!.agentrepl.v1.PersistentWifiNoLidH\x02R\x05noLid\x12O\n" +
 	"\rlid_unwatched\x18\b \x01(\v2(.agentrepl.v1.PersistentWifiLidUnwatchedH\x02R\flidUnwatched\x12<\n" +
 	"\x05quiet\x18\n" +
-	" \x01(\v2!.agentrepl.v1.PersistentWifiQuietH\x03R\x05quiet\x88\x01\x01B\x06\n" +
+	" \x01(\v2!.agentrepl.v1.PersistentWifiQuietH\x03R\x05quiet\x88\x01\x01\x12d\n" +
+	"\x13service_unreachable\x18\v \x01(\v2..agentrepl.v1.PersistentWifiServiceUnreachableH\x04R\x12serviceUnreachable\x88\x01\x01B\x06\n" +
 	"\x04wifiB\x06\n" +
 	"\x04modeB\x05\n" +
 	"\x03lidB\b\n" +
-	"\x06_quietJ\x04\b\t\x10\n" +
-	"R\alid_dim\"O\n" +
+	"\x06_quietB\x16\n" +
+	"\x14_service_unreachableJ\x04\b\t\x10\n" +
+	"R\alid_dim\":\n" +
+	" PersistentWifiServiceUnreachable\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"O\n" +
 	"\x14PersistentWifiJoined\x12&\n" +
 	"\fnetwork_name\x18\x01 \x01(\tH\x00R\vnetworkName\x88\x01\x01B\x0f\n" +
 	"\r_network_name\"\x19\n" +
@@ -909,40 +977,42 @@ func file_agentrepl_v1_persistent_wifi_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_persistent_wifi_proto_rawDescData
 }
 
-var file_agentrepl_v1_persistent_wifi_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_persistent_wifi_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_persistent_wifi_proto_goTypes = []any{
 	(*PersistentWifiState)(nil),              // 0: agentrepl.v1.PersistentWifiState
-	(*PersistentWifiJoined)(nil),             // 1: agentrepl.v1.PersistentWifiJoined
-	(*PersistentWifiNotJoined)(nil),          // 2: agentrepl.v1.PersistentWifiNotJoined
-	(*PersistentWifiModeOn)(nil),             // 3: agentrepl.v1.PersistentWifiModeOn
-	(*PersistentWifiModeOff)(nil),            // 4: agentrepl.v1.PersistentWifiModeOff
-	(*PersistentWifiLidOpen)(nil),            // 5: agentrepl.v1.PersistentWifiLidOpen
-	(*PersistentWifiLidClosed)(nil),          // 6: agentrepl.v1.PersistentWifiLidClosed
-	(*PersistentWifiNoLid)(nil),              // 7: agentrepl.v1.PersistentWifiNoLid
-	(*PersistentWifiLidUnwatched)(nil),       // 8: agentrepl.v1.PersistentWifiLidUnwatched
-	(*PersistentWifiQuiet)(nil),              // 9: agentrepl.v1.PersistentWifiQuiet
-	(*PersistentWifiFrozenApp)(nil),          // 10: agentrepl.v1.PersistentWifiFrozenApp
-	(*PersistentWifiQuietDisplayAsleep)(nil), // 11: agentrepl.v1.PersistentWifiQuietDisplayAsleep
-	(*PersistentWifiQuietDisplayAwake)(nil),  // 12: agentrepl.v1.PersistentWifiQuietDisplayAwake
+	(*PersistentWifiServiceUnreachable)(nil), // 1: agentrepl.v1.PersistentWifiServiceUnreachable
+	(*PersistentWifiJoined)(nil),             // 2: agentrepl.v1.PersistentWifiJoined
+	(*PersistentWifiNotJoined)(nil),          // 3: agentrepl.v1.PersistentWifiNotJoined
+	(*PersistentWifiModeOn)(nil),             // 4: agentrepl.v1.PersistentWifiModeOn
+	(*PersistentWifiModeOff)(nil),            // 5: agentrepl.v1.PersistentWifiModeOff
+	(*PersistentWifiLidOpen)(nil),            // 6: agentrepl.v1.PersistentWifiLidOpen
+	(*PersistentWifiLidClosed)(nil),          // 7: agentrepl.v1.PersistentWifiLidClosed
+	(*PersistentWifiNoLid)(nil),              // 8: agentrepl.v1.PersistentWifiNoLid
+	(*PersistentWifiLidUnwatched)(nil),       // 9: agentrepl.v1.PersistentWifiLidUnwatched
+	(*PersistentWifiQuiet)(nil),              // 10: agentrepl.v1.PersistentWifiQuiet
+	(*PersistentWifiFrozenApp)(nil),          // 11: agentrepl.v1.PersistentWifiFrozenApp
+	(*PersistentWifiQuietDisplayAsleep)(nil), // 12: agentrepl.v1.PersistentWifiQuietDisplayAsleep
+	(*PersistentWifiQuietDisplayAwake)(nil),  // 13: agentrepl.v1.PersistentWifiQuietDisplayAwake
 }
 var file_agentrepl_v1_persistent_wifi_proto_depIdxs = []int32{
-	1,  // 0: agentrepl.v1.PersistentWifiState.joined:type_name -> agentrepl.v1.PersistentWifiJoined
-	2,  // 1: agentrepl.v1.PersistentWifiState.not_joined:type_name -> agentrepl.v1.PersistentWifiNotJoined
-	3,  // 2: agentrepl.v1.PersistentWifiState.on:type_name -> agentrepl.v1.PersistentWifiModeOn
-	4,  // 3: agentrepl.v1.PersistentWifiState.off:type_name -> agentrepl.v1.PersistentWifiModeOff
-	5,  // 4: agentrepl.v1.PersistentWifiState.lid_open:type_name -> agentrepl.v1.PersistentWifiLidOpen
-	6,  // 5: agentrepl.v1.PersistentWifiState.lid_closed:type_name -> agentrepl.v1.PersistentWifiLidClosed
-	7,  // 6: agentrepl.v1.PersistentWifiState.no_lid:type_name -> agentrepl.v1.PersistentWifiNoLid
-	8,  // 7: agentrepl.v1.PersistentWifiState.lid_unwatched:type_name -> agentrepl.v1.PersistentWifiLidUnwatched
-	9,  // 8: agentrepl.v1.PersistentWifiState.quiet:type_name -> agentrepl.v1.PersistentWifiQuiet
-	10, // 9: agentrepl.v1.PersistentWifiQuiet.frozen_apps:type_name -> agentrepl.v1.PersistentWifiFrozenApp
-	11, // 10: agentrepl.v1.PersistentWifiQuiet.display_asleep:type_name -> agentrepl.v1.PersistentWifiQuietDisplayAsleep
-	12, // 11: agentrepl.v1.PersistentWifiQuiet.display_awake:type_name -> agentrepl.v1.PersistentWifiQuietDisplayAwake
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	2,  // 0: agentrepl.v1.PersistentWifiState.joined:type_name -> agentrepl.v1.PersistentWifiJoined
+	3,  // 1: agentrepl.v1.PersistentWifiState.not_joined:type_name -> agentrepl.v1.PersistentWifiNotJoined
+	4,  // 2: agentrepl.v1.PersistentWifiState.on:type_name -> agentrepl.v1.PersistentWifiModeOn
+	5,  // 3: agentrepl.v1.PersistentWifiState.off:type_name -> agentrepl.v1.PersistentWifiModeOff
+	6,  // 4: agentrepl.v1.PersistentWifiState.lid_open:type_name -> agentrepl.v1.PersistentWifiLidOpen
+	7,  // 5: agentrepl.v1.PersistentWifiState.lid_closed:type_name -> agentrepl.v1.PersistentWifiLidClosed
+	8,  // 6: agentrepl.v1.PersistentWifiState.no_lid:type_name -> agentrepl.v1.PersistentWifiNoLid
+	9,  // 7: agentrepl.v1.PersistentWifiState.lid_unwatched:type_name -> agentrepl.v1.PersistentWifiLidUnwatched
+	10, // 8: agentrepl.v1.PersistentWifiState.quiet:type_name -> agentrepl.v1.PersistentWifiQuiet
+	1,  // 9: agentrepl.v1.PersistentWifiState.service_unreachable:type_name -> agentrepl.v1.PersistentWifiServiceUnreachable
+	11, // 10: agentrepl.v1.PersistentWifiQuiet.frozen_apps:type_name -> agentrepl.v1.PersistentWifiFrozenApp
+	12, // 11: agentrepl.v1.PersistentWifiQuiet.display_asleep:type_name -> agentrepl.v1.PersistentWifiQuietDisplayAsleep
+	13, // 12: agentrepl.v1.PersistentWifiQuiet.display_awake:type_name -> agentrepl.v1.PersistentWifiQuietDisplayAwake
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_persistent_wifi_proto_init() }
@@ -960,8 +1030,8 @@ func file_agentrepl_v1_persistent_wifi_proto_init() {
 		(*PersistentWifiState_NoLid)(nil),
 		(*PersistentWifiState_LidUnwatched)(nil),
 	}
-	file_agentrepl_v1_persistent_wifi_proto_msgTypes[1].OneofWrappers = []any{}
-	file_agentrepl_v1_persistent_wifi_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_persistent_wifi_proto_msgTypes[2].OneofWrappers = []any{}
+	file_agentrepl_v1_persistent_wifi_proto_msgTypes[10].OneofWrappers = []any{
 		(*PersistentWifiQuiet_DisplayAsleep)(nil),
 		(*PersistentWifiQuiet_DisplayAwake)(nil),
 	}
@@ -971,7 +1041,7 @@ func file_agentrepl_v1_persistent_wifi_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_persistent_wifi_proto_rawDesc), len(file_agentrepl_v1_persistent_wifi_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
