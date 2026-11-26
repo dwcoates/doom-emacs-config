@@ -935,3 +935,19 @@ func TestEveryDeferredBriefIsQueuedThroughQueueBrief(t *testing.T) {
 		t.Fatalf("files queuing a deferred brief outside queueBrief = %v, want none", direct)
 	}
 }
+
+// TestEveryReadAnsweringASummaryTakesSummaryFields fails when a workspace
+// read maps a stored summary to its wire fields by hand instead of through
+// SummaryFields.
+func TestEveryReadAnsweringASummaryTakesSummaryFields(t *testing.T) {
+	sourcescan.InPackage(t, internalWorkspaceDir)
+	// Act
+	callers := sourcescan.Sites(t, internalWorkspaceDir, "SummaryFields(")
+	handRolled := sourcescan.Sites(t, internalWorkspaceDir, "LongSummary = &")
+
+	// Assert: the status read and its own definition, and no hand-rolled
+	// mapping. The find read is the server's (TestFindTakesSummaryFields).
+	if !reflect.DeepEqual(callers, []string{"status.go", "summary.go"}) || len(handRolled) != 0 {
+		t.Fatalf("SummaryFields sites = %v, hand-rolled = %v; want the status read and its own definition, and none hand-rolled", callers, handRolled)
+	}
+}

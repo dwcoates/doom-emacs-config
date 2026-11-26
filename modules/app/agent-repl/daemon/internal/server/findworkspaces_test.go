@@ -20,7 +20,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -771,16 +770,5 @@ func TestFindWorkspacesRefusesAMalformedLogin(t *testing.T) {
 				t.Fatalf("err = %v, want InvalidArgument", err)
 			}
 		})
-	}
-}
-
-func TestFindTakesSummaryFields(t *testing.T) {
-	// Act
-	callers := sourcescan.Sites(t, "workspace.SummaryFields(")
-	handRolled := sourcescan.Sites(t, "LongSummary = &")
-
-	// Assert: the find read maps a summary through the one mapping.
-	if len(callers) != 1 || callers[0] != "findworkspaces.go" || len(handRolled) != 0 {
-		t.Fatalf("SummaryFields sites = %v, hand-rolled = %v; want the find read alone", callers, handRolled)
 	}
 }

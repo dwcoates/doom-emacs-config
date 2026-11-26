@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -137,17 +136,5 @@ func TestSummaryFieldsAnswerEachPartAsTheWireCarriesIt(t *testing.T) {
 				t.Fatalf("SummaryFields = (%v, %v), want (%v, %v)", gotShort, gotLong, tt.wantShort, tt.wantLong)
 			}
 		})
-	}
-}
-
-func TestEveryReadAnsweringASummaryTakesSummaryFields(t *testing.T) {
-	// Act
-	callers := sourcescan.Sites(t, "SummaryFields(")
-	handRolled := sourcescan.Sites(t, "LongSummary = &")
-
-	// Assert: the status read and its own definition, and no hand-rolled
-	// mapping. The find read is the server's (TestFindTakesSummaryFields).
-	if !reflect.DeepEqual(callers, []string{"status.go", "summary.go"}) || len(handRolled) != 0 {
-		t.Fatalf("SummaryFields sites = %v, hand-rolled = %v; want the status read and its own definition, and none hand-rolled", callers, handRolled)
 	}
 }
