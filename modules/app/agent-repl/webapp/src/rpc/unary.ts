@@ -53,6 +53,32 @@ export interface UnaryContext {
 export const QUIESCED_MESSAGE = "transferring to the new daemon";
 
 /**
+ * The metadata marking a call refused locally during the quiet window. The
+ * refusal is marked by type, as the daemon marks a withheld or handed-away
+ * one, so a reader asks `isQuiescedRefusal` rather than matching the message.
+ */
+export const QUIESCED_HEADER = "Agent-Repl-Quiesced";
+
+/** Whether ERR is a call this page refused locally during its quiet window. */
+export function isQuiescedRefusal(err: unknown): boolean {
+  if (!(err instanceof ConnectError)) return false;
+  const marked = err.metadata.get(QUIESCED_HEADER);
+  return marked !== null && marked !== "";
+}
+
+/**
+ * Whether ERR, a failure `callUnary` threw, is PLANNED rather than a fault:
+ * the page's quiet window during a deploy handover, the workspace handed to a
+ * successor, or a call withheld from a workspace that is not visible.
+ * `callUnary` has already recorded each at INFO and raised what the page shows
+ * for it (the move notice), so a caller that files transport failures on the
+ * warning chip asks this first and files nothing for a planned one.
+ */
+export function isPlannedRefusal(err: unknown): boolean {
+  return isQuiescedRefusal(err) || successorOf(err) !== undefined || isWithheld(err);
+}
+
+/**
  * Issue one verb. NAME is the rpc's own name ("SubmitPrompt") and rides every
  * log record; SCHEMA is the RESPONSE schema the strict check walks.
  */
@@ -67,7 +93,7 @@ export async function callUnary<Res extends Message>(
     // round trip to be told the same thing by a daemon that has already
     // released it. A deploy handover is expected and the successor page
     // carries on, so the refusal is INFO; the caller renders its own refusal.
-    const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
+    const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable, { [QUIESCED_HEADER]: "1" });
     log.info("{name} was not sent: {quiesced_message}", {
       operation: "rpc.unary-quiesced",
       context: { rpc: name },

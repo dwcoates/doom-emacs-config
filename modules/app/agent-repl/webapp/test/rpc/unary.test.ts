@@ -17,7 +17,14 @@ import {
   reportClientFailure,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { QUIESCED_MESSAGE, callUnary, type UnaryContext } from "../../src/rpc/unary.js";
+import {
+  QUIESCED_HEADER,
+  QUIESCED_MESSAGE,
+  callUnary,
+  isPlannedRefusal,
+  isQuiescedRefusal,
+  type UnaryContext,
+} from "../../src/rpc/unary.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
 import { settledByNextTask } from "../settled.js";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -236,6 +243,37 @@ describe("the quiet window", () => {
     const response = await call(ctx);
     // ASSERT
     expect(response.result.case).toBe("success");
+  });
+});
+
+describe("isQuiescedRefusal", () => {
+  it("reads a call refused during the quiet window as quiesced", async () => {
+    // Arrange
+    const ctx: UnaryContext = { ...ctxAnswering(() => create(OpenExternalResponseSchema, {})), isQuiesced: () => true };
+    // Act
+    const err = await call(ctx).catch((e: unknown) => e);
+    // Assert
+    expect(isQuiescedRefusal(err)).toBe(true);
+  });
+
+  it("does not read a daemon's own Unavailable with the same words as quiesced", () => {
+    // Arrange
+    const err = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
+    // Act, Assert
+    expect(isQuiescedRefusal(err)).toBe(false);
+  });
+});
+
+describe("isPlannedRefusal", () => {
+  it.each([
+    ["the quiet window", new ConnectError(QUIESCED_MESSAGE, Code.Unavailable, { [QUIESCED_HEADER]: "1" }), true],
+    ["a handover to a successor", new ConnectError("transferring_away", Code.FailedPrecondition, { [SUCCESSOR_HEADER]: "/s.sock" }), true],
+    ["a call withheld from a workspace not visible", new ConnectError("not_visible", Code.FailedPrecondition, { [WITHHELD_HEADER]: "1" }), true],
+    ["a daemon that cannot be reached", new ConnectError("connection refused", Code.Unavailable), false],
+    ["a thrown value that is not a ConnectError", new Error("boom"), false],
+  ])("says whether %s is planned", (_name, err, planned) => {
+    // Act, Assert
+    expect(isPlannedRefusal(err)).toBe(planned);
   });
 });
 

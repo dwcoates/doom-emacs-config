@@ -13,6 +13,7 @@ import {
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
+import type { AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { createTicker } from "../../src/clock.js";
 import {
@@ -57,6 +58,7 @@ function forms(answer: () => UpdateClassifierPromptResponse | Promise<UpdateClas
   registry: ClassifierUpdateForms;
   seen: UpdateClassifierPromptRequest[];
   reported: FailureKind[];
+  ctx: AppContext;
 } {
   const seen: UpdateClassifierPromptRequest[] = [];
   const failures = recordingFailures();
@@ -75,7 +77,7 @@ function forms(answer: () => UpdateClassifierPromptResponse | Promise<UpdateClas
     failures,
     composerEnabled: false,
   });
-  return { registry: new ClassifierUpdateForms(ctx), seen, reported: failures.reports };
+  return { registry: new ClassifierUpdateForms(ctx), seen, reported: failures.reports, ctx };
 }
 
 /** The form's parts, by their hooks. */
@@ -360,6 +362,32 @@ describe("the classifier update form", () => {
     await settle();
     // Assert
     expect(reported).toHaveLength(1);
+  });
+
+  it("files nothing on the warning chip for a call refused during the quiet window", async () => {
+    // Arrange: the form is detached, as a delivered prompt's card is.
+    const { registry, reported, ctx } = forms();
+    const form = registry.formFor("turn-1", EXAMPLE);
+    type(form, "interrupt for 'after'");
+    ctx.quiesce();
+    // Act
+    parts(form).apply.click();
+    await settle();
+    // Assert
+    expect(reported).toEqual([]);
+  });
+
+  it("says a call refused during the quiet window at the form", async () => {
+    // Arrange
+    const { registry, ctx } = forms();
+    const form = attached(registry.formFor("turn-1", EXAMPLE));
+    type(form, "interrupt for 'after'");
+    ctx.quiesce();
+    // Act
+    parts(form).apply.click();
+    await settle();
+    // Assert
+    expect(parts(form).status.getAttribute("data-arm")).toBe("transport");
   });
 
   it("says a transport failure at the form and records it at ERROR", async () => {

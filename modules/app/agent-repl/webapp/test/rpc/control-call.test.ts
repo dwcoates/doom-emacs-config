@@ -13,6 +13,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { controlCall } from "../../src/rpc/control-call.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { SUCCESSOR_HEADER, registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { scriptedAppContext } from "./app-context.js";
 import { recordingFailures } from "../failure-sink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -102,6 +103,31 @@ describe("controlCall", () => {
     const success = await clear(ctx);
     // Assert
     expect([success, reported.length]).toEqual([undefined, 1]);
+  });
+
+  it("files nothing for a call refused during the quiet window of a deploy handover", async () => {
+    // Arrange
+    const { ctx, reported } = page(() =>
+      create(SelectFeedRowResponseSchema, { result: { case: "success", value: { outcome: { case: "none", value: {} } } } }),
+    );
+    ctx.quiesce();
+    // Act
+    const success = await clear(ctx);
+    // Assert
+    expect([success, reported]).toEqual([undefined, []]);
+  });
+
+  it("files nothing for a call refused because the workspace was handed to a successor", async () => {
+    // Arrange
+    const { ctx, reported } = page(() => {
+      throw new ConnectError("transferring_away", Code.FailedPrecondition, { [SUCCESSOR_HEADER]: "/sock/successor.sock" });
+    });
+    const uninstall = registerWorkspaceMoved(() => undefined);
+    // Act
+    const success = await clear(ctx);
+    uninstall();
+    // Assert
+    expect([success, reported]).toEqual([undefined, []]);
   });
 
   it("refuses a result that sets no arm as malformed", async () => {

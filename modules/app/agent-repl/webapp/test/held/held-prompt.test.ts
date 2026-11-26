@@ -2146,6 +2146,18 @@ describe("the Edit control", () => {
     expect(filed(reported[0])?.[0]).toBe(EDIT_REQUEST);
   });
 
+  it("files nothing on the warning chip for a begin refused during the quiet window", async () => {
+    // Arrange
+    const { tc, reported } = editContext();
+    tc.ctx.quiesce();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(reported).toEqual([]);
+  });
+
   it("logs a begin that failed at the transport at error", async () => {
     // Arrange
     const capture = captureLogRecords();

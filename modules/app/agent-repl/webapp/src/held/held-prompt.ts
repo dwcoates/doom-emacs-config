@@ -112,7 +112,7 @@ import { expandedOnly } from "../bubble/expanded-only.js";
 import { drawBubble } from "../bubble/draw.js";
 import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
-import { callUnary } from "../rpc/unary.js";
+import { callUnary, isPlannedRefusal } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
 import {
@@ -1088,6 +1088,9 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
       );
     } catch (err) {
       if (!(err instanceof ConnectError)) throw err;
+      // A planned refusal (the quiet window of a deploy handover, a move) is
+      // no fault: `callUnary` recorded it, and the chip files nothing.
+      if (isPlannedRefusal(err)) return;
       const failed = callFailure(err);
       log.error("EditHeldPrompt failed for a begin: {text}", {
         operation: "held.held-prompt.edit-failed",
