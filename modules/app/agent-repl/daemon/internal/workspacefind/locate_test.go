@@ -1,6 +1,8 @@
 package workspacefind
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -16,17 +18,26 @@ import (
 // workspace the closed stream draws, a closed one it no longer draws, a
 // merged workspace (in no stream), and a thread sharing the open workspace's
 // directory.
-func locateRegistry() []wsm.Workspace {
+func locateRegistry() []wsm.WorkspaceHead {
 	landed := epoch()
-	return []wsm.Workspace{
-		{ID: "ws-open", Dir: "/wt/open", Name: "open-one"},
-		{ID: "ws-merge", Dir: "/wt/merge", Name: "merge-one", Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}},
-		{ID: "ws-nested", Dir: "/wt/open/nested", Name: "nested-one"},
-		{ID: "ws-drawn", Dir: "/wt/drawn", Name: "drawn-one", Closed: true},
-		{ID: "ws-gone", Dir: "/wt/gone", Name: "gone-one", Closed: true},
-		{ID: "ws-merged", Dir: "/wt/merged", Name: "merged-one", Closed: true, MergedAt: &landed},
-		{ID: "ws-thread", Dir: "/wt/open", Name: "open-one", Kind: wsm.WorkspaceKindThread},
+	return heads(
+		wsm.Workspace{ID: "ws-open", Dir: "/wt/open", Name: "open-one"},
+		wsm.Workspace{ID: "ws-merge", Dir: "/wt/merge", Name: "merge-one", Backlogged: true, MergeOf: &wsm.MergeOrigin{Requester: "ws-open"}},
+		wsm.Workspace{ID: "ws-nested", Dir: "/wt/open/nested", Name: "nested-one"},
+		wsm.Workspace{ID: "ws-drawn", Dir: "/wt/drawn", Name: "drawn-one", Closed: true},
+		wsm.Workspace{ID: "ws-gone", Dir: "/wt/gone", Name: "gone-one", Closed: true},
+		wsm.Workspace{ID: "ws-merged", Dir: "/wt/merged", Name: "merged-one", Closed: true, MergedAt: &landed},
+		wsm.Workspace{ID: "ws-thread", Dir: "/wt/open", Name: "open-one", Kind: wsm.WorkspaceKindThread},
+	)
+}
+
+// heads answers the heads of WORKSPACES, in order.
+func heads(workspaces ...wsm.Workspace) []wsm.WorkspaceHead {
+	out := make([]wsm.WorkspaceHead, 0, len(workspaces))
+	for _, ws := range workspaces {
+		out = append(out, ws.Head())
 	}
+	return out
 }
 
 // epoch is a fixed merge instant.
@@ -79,7 +90,7 @@ func TestLocate(t *testing.T) {
 
 func TestLocateAnswersEveryWorkspaceOfAName(t *testing.T) {
 	// Arrange
-	registry := []wsm.Workspace{{ID: "ws-1", Dir: "/wt/one", Name: "twin"}, {ID: "ws-2", Dir: "/wt/two", Name: "twin"}}
+	registry := heads(wsm.Workspace{ID: "ws-1", Dir: "/wt/one", Name: "twin"}, wsm.Workspace{ID: "ws-2", Dir: "/wt/two", Name: "twin"})
 
 	// Act
 	located := Locate(registry, &frontendv1.RosterPush{}, LocateBy{Name: "twin"})
@@ -93,7 +104,7 @@ func TestLocateAnswersEveryWorkspaceOfAName(t *testing.T) {
 func TestLocateContainingPrefersTheOpenWorkspaceAtAReusedDirectory(t *testing.T) {
 	// Arrange: a drawn closed workspace and an open one at the same worktree,
 	// the closed one first in registry order.
-	registry := []wsm.Workspace{{ID: "ws-old", Dir: "/wt/reused", Closed: true}, {ID: "ws-new", Dir: "/wt/reused"}}
+	registry := heads(wsm.Workspace{ID: "ws-old", Dir: "/wt/reused", Closed: true}, wsm.Workspace{ID: "ws-new", Dir: "/wt/reused"})
 	roster := &frontendv1.RosterPush{Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{
 		Row: &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-old"}}}}}}}
 
@@ -116,4 +127,156 @@ func TestLocatePanicsOnALocateThatNamesNothing(t *testing.T) {
 
 	// Act
 	Locate(locateRegistry(), &frontendv1.RosterPush{}, LocateBy{})
+}
+
+// recordingReader answers the head reads with ANSWER (or ERR) and records
+// what each was asked.
+type recordingReader struct {
+	answer []wsm.WorkspaceHead
+	err    error
+	dirs   []string
+	name   string
+	reads  int
+}
+
+func (r *recordingReader) WorkspaceHeadsAt(_ context.Context, dirs []string) ([]wsm.WorkspaceHead, error) {
+	r.reads++
+	r.dirs = dirs
+	return r.answer, r.err
+}
+
+func (r *recordingReader) WorkspaceHeadsNamed(_ context.Context, name string) ([]wsm.WorkspaceHead, error) {
+	r.reads++
+	r.name = name
+	return r.answer, r.err
+}
+
+func TestCandidatesReadsOnlyTheRowsALocateCouldMatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		by       LocateBy
+		wantDirs []string
+		wantName string
+	}{
+		{name: "a name reads the workspaces of that name", by: LocateBy{Name: "open-one"}, wantName: "open-one"},
+		{name: "a directory reads the workspace at it, cleaned", by: LocateBy{At: "/wt/open/"}, wantDirs: []string{"/wt/open"}},
+		{name: "a containing directory reads it and every ancestor", by: LocateBy{Containing: "/wt/open/src/"},
+			wantDirs: []string{"/wt/open/src", "/wt/open", "/wt", "/"}},
+		{name: "the root contains only itself", by: LocateBy{Containing: "/"}, wantDirs: []string{"/"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			want := locateRegistry()[:1]
+			reader := &recordingReader{answer: want}
+
+			// Act
+			got, err := Candidates(context.Background(), reader, tt.by)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Candidates = %v", err)
+			}
+			if reader.reads != 1 || !reflect.DeepEqual(reader.dirs, tt.wantDirs) || reader.name != tt.wantName {
+				t.Fatalf("read %d times, dirs %v name %q; want once, dirs %v name %q", reader.reads, reader.dirs, reader.name, tt.wantDirs, tt.wantName)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Candidates = %v, want the reader's %v", got, want)
+			}
+		})
+	}
+}
+
+func TestCandidatesFailsWithItsRead(t *testing.T) {
+	tests := []struct {
+		name string
+		by   LocateBy
+	}{
+		{name: "by name", by: LocateBy{Name: "open-one"}},
+		{name: "at a directory", by: LocateBy{At: "/wt/open"}},
+		{name: "containing a directory", by: LocateBy{Containing: "/wt/open/src"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			cause := errors.New("disk gone")
+			reader := &recordingReader{err: cause}
+
+			// Act
+			got, err := Candidates(context.Background(), reader, tt.by)
+
+			// Assert
+			if !errors.Is(err, cause) || got != nil {
+				t.Fatalf("Candidates = %v, %v; want no heads and %v", got, err, cause)
+			}
+		})
+	}
+}
+
+func TestCandidatesPanicsOnALocateThatNamesNothing(t *testing.T) {
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Candidates read for a locate naming nothing; want a panic")
+		}
+	}()
+
+	// Act
+	_, _ = Candidates(context.Background(), &recordingReader{}, LocateBy{})
+}
+
+// TestCandidatesThenLocateMatchesLocateOverTheWholeRegistry pins that reading
+// the candidates loses no match: for every locate, Locate over the
+// candidates a registry answers is Locate over the whole registry.
+func TestCandidatesThenLocateMatchesLocateOverTheWholeRegistry(t *testing.T) {
+	bys := []LocateBy{
+		{Name: "open-one"}, {Name: "merged-one"}, {Name: "gone-one"},
+		{At: "/wt/merge"}, {At: "/wt/open/"}, {At: "/wt/open/src"},
+		{Containing: "/wt/open/nested/src"}, {Containing: "/wt/open/src"}, {Containing: "/wt/merged/src"}, {Containing: "/wt/openly"},
+	}
+	for _, by := range bys {
+		t.Run(by.Name+by.At+by.Containing, func(t *testing.T) {
+			// Arrange
+			registry := registryReader(locateRegistry())
+
+			// Act
+			candidates, err := Candidates(context.Background(), registry, by)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Candidates = %v", err)
+			}
+			got := Locate(candidates, locatePush(), by)
+			want := Locate(locateRegistry(), locatePush(), by)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Locate over the candidates = %v, want Locate over the registry's %v", got, want)
+			}
+		})
+	}
+}
+
+// registryReader answers the head reads by filtering a whole registry, as
+// the store's indexed reads do.
+type registryReader []wsm.WorkspaceHead
+
+func (r registryReader) WorkspaceHeadsAt(_ context.Context, dirs []string) ([]wsm.WorkspaceHead, error) {
+	var out []wsm.WorkspaceHead
+	for _, h := range r {
+		for _, dir := range dirs {
+			if h.Dir == dir {
+				out = append(out, h)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r registryReader) WorkspaceHeadsNamed(_ context.Context, name string) ([]wsm.WorkspaceHead, error) {
+	var out []wsm.WorkspaceHead
+	for _, h := range r {
+		if h.Name == name {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }

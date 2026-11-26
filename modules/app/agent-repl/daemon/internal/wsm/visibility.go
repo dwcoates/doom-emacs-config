@@ -62,7 +62,7 @@ func (ws Workspace) InBacklog() bool {
 // closed and its merge landed. OPEN BEATS MERGED, so a merged workspace that
 // was reopened has not.
 func (ws Workspace) MergeSettled() bool {
-	return ws.Closed && ws.MergedAt != nil
+	return ws.Head().MergeSettled()
 }
 
 // InMergedBand reports whether the workspace is in the sidebar's merged set:
@@ -73,7 +73,7 @@ func (ws Workspace) MergeSettled() bool {
 // (MergeHidden). It is the ONE spelling of that set, for the roster and every
 // registry reader that answers for it.
 func (ws Workspace) InMergedBand() bool {
-	return !ws.IsThread() && ws.MergeSettled()
+	return ws.Head().InMergedBand()
 }
 
 // KeptWarm reports whether the workspace's prompt cache is kept warm by

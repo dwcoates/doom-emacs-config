@@ -18,7 +18,8 @@ import (
 // LocateWorkspace answers which workspace a name, a directory, or a directory
 // inside a worktree names, off the registry, so a hidden merge workspace and
 // an open workspace the sidebar does not draw are found
-// (workspacefind.Locate).
+// (workspacefind.Locate). It reads only the heads of the workspaces the
+// locate could name (workspacefind.Candidates), never the whole registry.
 func (s *server) LocateWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.LocateWorkspaceRequest],
@@ -28,9 +29,9 @@ func (s *server) LocateWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	records, lerr := s.deps.DB.ListWorkspaces(ctx)
+	records, lerr := workspacefind.Candidates(ctx, s.deps.DB, by)
 	if lerr != nil {
-		return nil, fail(s.log, rpc, fmt.Errorf("list the workspaces: %w", lerr))
+		return nil, fail(s.log, rpc, fmt.Errorf("read the workspaces the locate could name: %w", lerr))
 	}
 	roster, ok := s.deps.Sidebar.Topic().Latest()
 	if !ok {
