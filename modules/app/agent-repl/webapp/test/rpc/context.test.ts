@@ -370,3 +370,91 @@ describe("onDaemonMoved", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe("the adoption latch", () => {
+  /** Whether PROMISE has resolved once the microtasks queued so far have run. */
+  async function resolved(promise: Promise<void>): Promise<boolean> {
+    let done = false;
+    void promise.then(() => {
+      done = true;
+    });
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    return done;
+  }
+
+  it("resolves a wait at once when no adoption is held", async () => {
+    // Arrange
+    const context = ctx();
+
+    // Act
+    const wait = context.awaitAdopted(new AbortController().signal);
+
+    // Assert
+    expect(await resolved(wait)).toBe(true);
+  });
+
+  it("holds a wait while an adoption is held", async () => {
+    // Arrange
+    const context = ctx();
+    context.holdForAdoption();
+
+    // Act
+    const wait = context.awaitAdopted(new AbortController().signal);
+
+    // Assert
+    expect(await resolved(wait)).toBe(false);
+  });
+
+  it("resolves a held wait when the adoption settles", async () => {
+    // Arrange
+    const context = ctx();
+    context.holdForAdoption();
+    const wait = context.awaitAdopted(new AbortController().signal);
+
+    // Act
+    context.adoptionSettled();
+
+    // Assert
+    expect(await resolved(wait)).toBe(true);
+  });
+
+  it("resolves a held wait when its signal aborts", async () => {
+    // Arrange
+    const context = ctx();
+    context.holdForAdoption();
+    const abort = new AbortController();
+    const wait = context.awaitAdopted(abort.signal);
+
+    // Act
+    abort.abort();
+
+    // Assert
+    expect(await resolved(wait)).toBe(true);
+  });
+
+  it("treats a settle with no hold as a no-op, so a later wait resolves at once", async () => {
+    // Arrange
+    const context = ctx();
+
+    // Act
+    context.adoptionSettled();
+    const wait = context.awaitAdopted(new AbortController().signal);
+
+    // Assert
+    expect(await resolved(wait)).toBe(true);
+  });
+
+  it("keeps one hold for a second hold, which one settle releases", async () => {
+    // Arrange
+    const context = ctx();
+    context.holdForAdoption();
+    context.holdForAdoption();
+    const wait = context.awaitAdopted(new AbortController().signal);
+
+    // Act
+    context.adoptionSettled();
+
+    // Assert
+    expect(await resolved(wait)).toBe(true);
+  });
+});

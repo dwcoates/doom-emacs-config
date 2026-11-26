@@ -582,8 +582,10 @@ export function mountFeed(
    *
    * A refusal ENDS the attempt rather than throwing something the loop would
    * mislabel. The loop then treats the end as a stream that stopped on its own
-   * — which it is — files its card and retries with backoff, which is right for
-   * `not_yet_adopted` and no worse than a permanently empty feed for the rest.
+   * — which it is — files its card and retries with backoff, which is no worse
+   * than a permanently empty feed. A reopen waits behind the page's in-place
+   * adoption (`ctx.awaitAdopted`, rpc/context.ts), so `not_yet_adopted` no
+   * longer reaches it, and a refusal here is a defect.
    */
   async function* openAndTail(
     client: AgentReplClient,

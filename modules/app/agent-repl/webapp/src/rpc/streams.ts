@@ -50,6 +50,11 @@
  * pointed elsewhere. Waiting for the old daemon's stream to end instead left
  * the host's sidebar reading a daemon that no longer served the workspaces it
  * drew, for as long as that daemon stayed up.
+ *
+ * EVERY REOPEN WAITS BEHIND THE PAGE'S IN-PLACE ADOPTION (`ctx.awaitAdopted`,
+ * context.ts): a successor refuses every per-workspace rpc `not_yet_adopted`
+ * until the adoption it holds completes. The first run never waits: the boot's
+ * adoption precedes every first open (main.ts).
  */
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -131,6 +136,13 @@ export interface StreamContext {
    * (stream-cost.ts). Optional for the same reason.
    */
   noteStreamCost?: (stream: string, ms: number) => void;
+  /**
+   * Resolve once no in-place adoption is held (context.ts), or when SIGNAL
+   * aborts. Every reopen waits on it before it opens anything, since a
+   * successor refuses every per-workspace rpc `not_yet_adopted` until the
+   * adoption it holds completes. STREAM names the waiting stream in the log.
+   */
+  awaitAdopted(signal: AbortSignal, stream?: string): Promise<void>;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -380,11 +392,22 @@ export function watchStream<Res extends Message>(
   };
 
   const run = async (): Promise<void> => {
+    let reopening = false;
     while (!cancelled) {
       controller = new AbortController();
       endingSeen = false;
       daemonMoved = false;
       reopenAsked = false;
+      // A REOPEN WAITS BEHIND THE PAGE'S IN-PLACE ADOPTION: the daemon now
+      // answering would refuse it `not_yet_adopted` until that adoption
+      // completes. A cancel, a move or an owner's reopen aborts the wait; a
+      // cancel ends the run, and either of the others begins it again.
+      if (reopening) {
+        await ctx.awaitAdopted(controller.signal, opts.name);
+        if (cancelled) return;
+        if (controller.signal.aborted) continue;
+      }
+      reopening = true;
       let end: StreamEnd;
       // A DRAW THAT THREW is the page's defect, never the link's (owner
       // ruling, 2026-10-18): it ends this run apart from a transport failure,

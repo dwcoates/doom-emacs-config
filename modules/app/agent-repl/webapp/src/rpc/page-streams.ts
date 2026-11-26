@@ -385,10 +385,15 @@ export function startPageStreams(ctx: PageStreamContext, page: string, options: 
 
   /**
    * One run of the page's stream. Every run after the stream first ended
-   * waits for the page to be awake, so a page nobody sees opens nothing.
+   * waits for the page to be awake, so a page nobody sees opens nothing, and
+   * then behind the page's in-place adoption (context.ts), so the page does
+   * not attach to a successor still holding that adoption.
    */
   async function* openRun(client: PageStreamContext["client"], signal: AbortSignal): AsyncGenerator<WatchPageResponse> {
-    if (endedOnce) await awake(signal);
+    if (endedOnce) {
+      await awake(signal);
+      await ctx.awaitAdopted(signal, "WatchPage");
+    }
     if (signal.aborted) return;
     endingRead = false;
     runAttachment = attachment;

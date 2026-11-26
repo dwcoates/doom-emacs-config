@@ -1819,3 +1819,47 @@ describe("a page nobody sees", () => {
     ctx.quiesce();
   });
 });
+
+describe("the page's stream behind the in-place adoption", () => {
+  it("does not attach again while the adoption is held", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+    ctx.holdForAdoption();
+
+    // Act: the incumbent's promotion ends the page's stream.
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    // Assert.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(1);
+    ctx.quiesce();
+  });
+
+  it("attaches again once the adoption settles", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+    ctx.holdForAdoption();
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+
+    // Act.
+    ctx.adoptionSettled();
+    await settle();
+
+    // Assert.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(2);
+    ctx.quiesce();
+  });
+});
