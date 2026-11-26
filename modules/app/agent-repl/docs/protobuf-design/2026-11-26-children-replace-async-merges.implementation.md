@@ -8,34 +8,34 @@ ticked when its commit lands on the branch `main-white-foreground-selection`.
 
 ## Phase A: retire the async merge from the daemon
 
-- [ ] A1. CLI and server
+- [x] A1. CLI and server
   - The `workspace async-merge` verb (`cmd/agent-repld/agentcli.go`,
     `forward.go`, `graph.go`, `createrefusal.go`, `refusalsentences.go`)
   - `internal/server/asyncmerge.go`, and the async arms in
     `internal/server/validate.go` and `workspaces.go`
-- [ ] A2. The merge orchestrator
+- [x] A2. The merge orchestrator
   - `asyncrequests.go`, `pick.go`, `Request.Detached`, `DetachedRun`, and
     the async name claims
   - The off-queue causes `pick_failed` and `adopted`, the status kind, the
     requeue version, and the discard of a merge workspace
   - `RevealMergeWorkspace`, `mergeHidden`, and `asyncMergeBubble`
   - The roster queue's mode
-- [ ] A3. `internal/mergeworkspace` (the whole package) and
+- [x] A3. `internal/mergeworkspace` (the whole package) and
   `internal/mergenotice`'s async handback, keeping the one-shot failure
   handback
-- [ ] A4. wsm
+- [x] A4. wsm
   - The async request records, merge workspace records, hidden-merge
     columns, turn mirrors, owed handbacks, and reserved merge names
   - The historical DDL constants are kept for the migrations that replay
     them, and a new layout step drops the dead tables
-- [ ] A5. The feed resolver: `turnmirror.go`, `mergeworkspace.go`, the merge
+- [x] A5. The feed resolver: `turnmirror.go`, `mergeworkspace.go`, the merge
   head's mode and switch, and the resolving tab
-- [ ] A6. The sidebar resolver: the async-merging marker and the queue mode.
+- [x] A6. The sidebar resolver: the async-merging marker and the queue mode.
   The vocab: `render-colors.json#async_merge_mark` and its Go and TS readers.
 
 ## Phase B: new daemon behavior
 
-- [ ] B1. Create
+- [x] B1. Create (the subagent fork refuses loudly until the shim forks a side transcript)
   - `source_branch` on the standard and one-shot forms, cut with
     `git worktree add -b <new> <dir> <tip of source>`
   - The `subagent` context origin, using `internal/subagentmaker` to find
@@ -45,7 +45,7 @@ ticked when its commit lands on the branch `main-white-foreground-selection`.
     workspace and honored at its landing
   - The new refusals: `unknown_source_branch`, `unknown_subagent` and
     `unknown_close_after`
-- [ ] B2. A child's landing report to its parent is one line.
+- [x] B2. A child's landing report to its parent is one line.
 - [ ] B3. The feed: a `frontend.v1.FeedChild` row in the originator's root
   feed at create time, re-published on any change to the child's roster
   status, summary, standing, links, close or removal
@@ -198,3 +198,23 @@ log of the branch first.
     are async-only and should be retired, with their columns dropped in
     layout 221.
   - B2 to B5, and phases C, D and E.
+
+### Status at the third checkpoint
+
+- Every daemon package and its tests compile; the changed tests pass.
+- Retired beyond the plan: the detached landing record (`wsm.Landing`,
+  `RetireLanded`, landedbranch's recorded head; layout 221 drops
+  `landed_head` and `landed_at`), the pick tab and span, the
+  `merge_ended` stand-down, dead async refusal arms.
+- B2 is in `internal/workspacesubs`: `workspace-child-landed.md` is the
+  one-line parent notice, and `compactRequester` sends `/compact` after it.
+- The one-shot effects are honored: close-after and cleanup in the merge
+  terminal, profile_gate in `merge.Enqueue`.
+- Open cleanups, all in this branch before it lands:
+  - Rename `merge.DetachedOutcome` and its kinds; drop `InPlace`.
+  - Retire `wsm.MergeSourceBranch` and `wsm.MergeSourceWorkspace`, which
+    nothing produces now, with `merge.ArmUnknownBranch`.
+  - The merge package's remaining async comments and dead code
+    (`offqueue.go` name-off-queue refusal, `tabs.go` pick and reveal heads,
+    `rosterqueue.go`, `transfer.go`).
+- Next: B3 to B5, then phases C to E.
