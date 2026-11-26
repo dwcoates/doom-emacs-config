@@ -314,7 +314,7 @@ describe("this repository's committed metaprompt", () => {
     // Act
     const text = readLandingSection("deploy_mediator", home);
     // Assert — owner rulings 2026-11-18 and 2026-11-21.
-    expect(text).toContain("It NEVER creates a workspace of any kind (a child, a one-shot, a peer, an async merge) to do any part of it (owner ruling, 2026-11-18).");
+    expect(text).toContain("It NEVER creates a workspace of any kind (a child, a one-shot, a peer) to do any part of it (owner ruling, 2026-11-18).");
     expect(text).toContain("The subagents it dispatches a fix's implementation to are part of that session.");
   });
 
@@ -385,7 +385,7 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-14: deficiencies are remediated at once,
     // and the table is not a backlog.
     expect(text).toContain("I start its fix at once, without asking.");
-    expect(text).toContain("dispatches each fix as its own async merge the moment it notices it");
+    expect(text).toContain("dispatches each fix as its own one-shot child the moment it notices it");
     expect(text).toContain("A workspace in queue bypass mode fixes it itself");
     expect(text).toContain("A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.");
     expect(text).not.toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");

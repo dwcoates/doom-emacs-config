@@ -842,22 +842,11 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(0);
 }
 
-describe("a pick tab", () => {
-  it("draws its rows like any agentic tab", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "resolving", state: "live" }), childRow("r1", "t1")]);
-    const { host } = mountWith(view);
-    expect(host.querySelector(".merge-tab-panel .merge-tab-rows [data-feed-row]")?.getAttribute("data-feed-row")).toBe("r1");
-  });
-});
-
-
 describe("an agent stream's stop control", () => {
   it.each([
     ["a live conflict resolution", () => conflictResolution("live"), true],
     ["a conflict resolution waiting on the user", () => conflictResolution("waitingOnUser"), true],
     ["a settled conflict resolution", () => conflictResolution("settled"), false],
-    ["a live resolving tab", () => [tabRow("t1", { kind: "resolving", state: "live" })], true],
-    ["a settled resolving tab", () => [tabRow("t1", { kind: "resolving", state: "settled" })], false],
     ["a live fixing attempt", () => fixingRun({ kind: "testsRunFixing", state: "live" }), true],
     ["a live rebasing tab with no conflict", () => [tabRow("t-rebase", { kind: "rebasing", state: "live" })], false],
   ] as const)("is offered on %s: %s", (_name, rows, offered) => {
@@ -884,14 +873,14 @@ describe("an agent stream's stop control", () => {
 
   it("stops the tab by its own row id, sent as a merge tab", async () => {
     // Arrange
-    const { host, h } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "resolving", state: "live" })]));
+    const { host, h } = mountWith(new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" })));
     // Act
     host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
     await settle();
     // Assert
     expect(h.calls.interrupt[0]?.target).toEqual({
       case: "mergeTab",
-      value: { $typeName: "frontend.v1.FeedId", value: "t1" },
+      value: { $typeName: "frontend.v1.FeedId", value: "t-fix" },
     });
   });
 
@@ -903,7 +892,7 @@ describe("an agent stream's stop control", () => {
           result: { case: "error", value: { kind: { case: "notMergeTab", value: {} } } },
         }),
     });
-    const { host } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "resolving", state: "live" })]), h);
+    const { host } = mountWith(new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" })), h);
     // Act
     host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
     await settle();
@@ -913,10 +902,10 @@ describe("an agent stream's stop control", () => {
 
   it("is taken down when the tab settles", () => {
     // Arrange
-    const view = new FakeSubfeed([tabRow("t1", { kind: "resolving", state: "live" })]);
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
     const { host } = mountWith(view);
     // Act
-    view.push([tabRow("t1", { kind: "resolving", state: "settled" })]);
+    view.push(fixingRun({ kind: "testsRunFixing", state: "settled", outcome: "failed" }));
     // Assert
     expect(host.querySelector(".merge-tab-stop")).toBeNull();
   });

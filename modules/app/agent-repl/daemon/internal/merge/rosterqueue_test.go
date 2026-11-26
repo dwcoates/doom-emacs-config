@@ -94,30 +94,6 @@ func TestAPauseReadCutByItsContextTellsTheRosterNothingAtInfo(t *testing.T) {
 	}
 }
 
-func TestAnUnreadableQueuedWorkspaceTellsTheRosterNothingAndIsAnError(t *testing.T) {
-	// Arrange: a queue row naming a workspace with no record.
-	h := newHarness(t)
-	h.db.mu.Lock()
-	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: "ws-gone", State: wsm.MergeQueued,
-		Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
-	h.db.mu.Unlock()
-
-	// Act
-	h.o.publishRosterQueue(context.Background(), h.repoKey())
-
-	// Assert
-	if told := h.sidebar.toldCount(); told != 0 {
-		t.Fatalf("the roster was told %d queues, want none", told)
-	}
-	rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.roster_queue")
-	if !ok {
-		t.Fatal("the unreadable workspace was not recorded at ERROR")
-	}
-	if rec.Context["repo"] != string(h.repoKey()) || rec.Context["entries"] != 1 || rec.Context["error"] == nil {
-		t.Fatalf("record context = %v, want the repo, the entry count and the cause", rec.Context)
-	}
-}
-
 func TestAFailedQueueWriteTellsTheRosterNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

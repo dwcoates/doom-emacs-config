@@ -1,8 +1,9 @@
 /**
  * The refusal arms ONLY AN AGENT'S REQUEST can provoke, by rpc.
  *
- * The webapp asks every rpc as the user: a create is never an async merge (an
- * agent's request), and a prompt is never an agent's slash command. So these
+ * The webapp asks every rpc as the user: a create never cuts a landing child
+ * from a source branch, forks a subagent or closes a workspace after it lands
+ * (an agent's request), and a prompt is never an agent's slash command. So these
  * arms can never answer a request the webapp sent, the call sites word none
  * of them, and one reaching a call site is a breach (`unreachableArm`).
  *
@@ -13,17 +14,9 @@
  */
 export const AGENT_ONLY_REFUSAL_ARMS = {
   createWorkspace: new Set<string>([
-    "asyncMergeUnknownBranch",
-    "asyncMergeUnknownSubagent",
-    "asyncMergeUnknownMaker",
-    "asyncMergeContextNotMaker",
-    "asyncMergeNameTaken",
-    "asyncMergeUnknownCloseAfter",
-    "opIdWithAsyncMerge",
-    "versionIncrementRequired",
-    "versionIncrementUnexpected",
-    "asyncMergeRequesterMerging",
-    "asyncMergeRequesterSessionDeleted",
+    "unknownSourceBranch",
+    "unknownSubagent",
+    "unknownCloseAfter",
     "originFetchFailed",
   ]),
   submitPrompt: new Set<string>(["slashCommandFromAgent", "unknownSender", "fanOutRefused"]),

@@ -29,7 +29,6 @@ type FeedId = ReturnType<typeof create<typeof FeedIdSchema>>;
 /** How a tab fixture is asked for: its kind, its state, its payload. */
 export interface TabSpec {
   kind:
-    | "resolving"
     | "queue"
     | "hookPrompt"
     | "rebasing"
@@ -44,9 +43,9 @@ export interface TabSpec {
     | "updatingMain"
     | "hookScript";
   /**
-   * `waitingOnUser` only for the kinds that carry it (resolving, rebasing, a
-   * commit, resolving conflicts, a conflict resolution, tests, fixing tests,
-   * a fixing attempt); `pending` only for a commit.
+   * `waitingOnUser` only for the kinds that carry it (rebasing, a commit,
+   * resolving conflicts, a conflict resolution, tests, fixing tests, a fixing
+   * attempt); `pending` only for a commit.
    */
   state: "live" | "settled" | "waitingOnUser" | "pending" | "onHold";
   /** For `onHold`, when the merge was held; 0 when its queue's hold holds it. */
