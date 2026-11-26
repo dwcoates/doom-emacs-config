@@ -799,7 +799,7 @@ func routeArm(route classifier.Route) wsm.ClassificationArm {
 // at EPOCH is about the content that still stands, reporting true. A stale
 // verdict is discarded (verdictStaleLocked records it) with the lock released
 // again, reporting false. THE ONE way a verdict is settled under the lock
-// (TestEveryVerdictSettlesThroughLockFreshVerdict).
+// (daemonrules.TestEveryVerdictSettlesThroughLockFreshVerdict).
 func (state *wsState) lockFreshVerdict(turn ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) bool {
 	state.verdicts.Lock()
 	if state.verdictStaleLocked(turn, epoch, c, log) {
