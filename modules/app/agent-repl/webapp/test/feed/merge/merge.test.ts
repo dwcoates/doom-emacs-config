@@ -10,11 +10,12 @@ import { scriptedAppContext } from "../../rpc/app-context.js";
 import {
   type FeedMerge,
   FeedMergeSchema,
+  FeedMergeGlyphSchema,
   FeedMergeBranchLineTargetPullRequestSchema,
   FeedMergeErrorSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { BRANCH_LINE_TARGET_LINK_CLASS, drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
+import { BRANCH_LINE_TARGET_LINK_CLASS, drawBranchTarget, drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, drawMergeGlyphIcon, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
@@ -502,5 +503,41 @@ describe("the merge-styled head's shared parts (merge.ts, cards/fix-gate.ts)", (
       const badge = draw(msg).querySelector(".merge-badge");
       expect(badge?.className.startsWith("merge-badge ")).toBe(true);
     }
+  });
+});
+
+describe("drawMergeGlyphIcon: the glyph every merge-styled head draws", () => {
+  it("draws the vocabulary's merge icon as ⇄", () => {
+    expect(drawMergeGlyphIcon("merge").textContent).toBe("⇄");
+  });
+
+  it("states the icon's name on the glyph", () => {
+    expect(drawMergeGlyphIcon("merge").getAttribute("data-glyph")).toBe("merge");
+  });
+
+  it("draws an icon this build does not know as the generic glyph", () => {
+    expect(drawMergeGlyphIcon("no-such-icon").textContent).toBe("⇄");
+  });
+
+  it("is the glyph the merge head draws, so the two cannot drift", () => {
+    const glyph = create(FeedMergeGlyphSchema, { icon: "merge" });
+    expect(drawFeedMergeGlyph(glyph).outerHTML).toBe(drawMergeGlyphIcon("merge").outerHTML);
+  });
+});
+
+describe("drawBranchTarget: where every merge-styled head says the work lands", () => {
+  const PR = "https://github.com/o/r/pull/7";
+
+  it("draws a target with no pull request as plain text", () => {
+    const h = harness();
+    const node = drawBranchTarget("/repo", undefined, rowContext(h.ctx, mergeRow("m1")));
+    expect(node.nodeType).toBe(Node.TEXT_NODE);
+    expect(node.textContent).toBe("/repo");
+  });
+
+  it("draws a target with a pull request as a link to it, text unchanged", () => {
+    const h = harness();
+    const node = drawBranchTarget("/repo", PR, rowContext(h.ctx, mergeRow("m1"))) as HTMLAnchorElement;
+    expect([node.textContent, node.getAttribute("href"), node.classList.contains(BRANCH_LINE_TARGET_LINK_CLASS)]).toEqual(["/repo", PR, true]);
   });
 });

@@ -1,14 +1,18 @@
 /**
  * child — a child workspace's bubble in the feed of the workspace that made
- * it (`frontend.v1.FeedChild`): the door to the child. ONE ROW: the head line
- * (⇄, the child's name in the canonical purple, where it lands, how it
- * stands, its clock), beneath it the child's summary, and a thin border in
- * the child's canonical status color while it is open.
+ * it (`frontend.v1.FeedChild`): the door to the child. A BUBBLE ROW, drawn
+ * by the one bubble chrome every bubble wears (bubble.ts): this module draws
+ * only its HEAD, and the bubble's SUB-FEED is the child's own root feed,
+ * opened on the row's FeedId as a subagent bubble's is.
  *
- * THE FOLD IS THE READER'S (webview-local): the bubble is drawn folded,
- * showing the short summary, and a click on its body opens it to the long
- * one. Both summaries ride every push, so a fold needs no round-trip; a push
- * redraws the bubble keeping the reader's fold.
+ * THE HEAD is the merge head's line (⇄, the child's name in the canonical
+ * purple, where it lands, how it stands, its clock) over the child's summary:
+ * the short one while the bubble is folded, the long one while it is open.
+ * Both ride every push, and the stylesheet shows the one the fold calls for
+ * (the bubble head's `aria-expanded`), so a fold needs no redraw.
+ *
+ * THE FRAME'S TONE is the child's canonical status color while it is open,
+ * stated on the head (`FRAME_TONE_ATTRIBUTE`) for the chrome to wear.
  *
  * A click on the name selects the child (`FeedChildNameSelect`), the switch
  * its sidebar row makes, which reopens a closed child. A removed child's name
@@ -24,22 +28,26 @@ import type {
 import { renderMarkdown } from "../markdown.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { toneClass, wireColor } from "../vocab.js";
+import { wireColor } from "../vocab.js";
+import { FRAME_TONE_ATTRIBUTE } from "./bubble-frame.js";
 import { jumpToWorkspace, type JumpSite } from "./merge/jump.js";
-import { liveMergeClock, mergeBadge, settledMergeClock } from "./merge/merge.js";
+import { drawBranchTarget, drawMergeGlyphIcon, liveMergeClock, mergeBadge, settledMergeClock } from "./merge/merge.js";
 import { armName } from "./renderers.js";
 import type { RowContext } from "./renderers.js";
 
 const PATH = "FeedChild";
 
-/** The bubble's class. */
+/** The head's class. */
 export const CHILD_CLASS = "feed-child";
 
-/** The class of the bubble's name, drawn in the canonical purple. */
+/** The class of the head's name, drawn in the canonical purple. */
 export const CHILD_NAME_CLASS = "feed-child-name";
 
-/** The attribute an OPEN (unfolded) bubble carries. */
-export const CHILD_OPEN_ATTR = "data-open";
+/** The class of the summary a folded bubble shows. */
+export const CHILD_SHORT_SUMMARY_CLASS = "feed-child-summary-short";
+
+/** The class of the summary an open bubble shows. */
+export const CHILD_LONG_SUMMARY_CLASS = "feed-child-summary-long";
 
 /** Where a child bubble's jump is recorded and its refusal drawn. */
 const CHILD_JUMP: JumpSite = {
@@ -48,40 +56,28 @@ const CHILD_JUMP: JumpSite = {
   refusalClass: "feed-child-refusal",
 };
 
-/** The children this page has unfolded, by the child's row id: the reader's fold. */
-const unfolded = new Set<string>();
-
-/** Draw a child's bubble, its row id ROWID keying the reader's fold. */
-export function drawFeedChild(u: FeedChild, rowId: string, rc: RowContext): HTMLElement {
+/** Draw a child bubble's head: its line over its summaries. */
+export function drawFeedChild(u: FeedChild, rc: RowContext): HTMLElement {
   const head = requireMessage(u.head, `${PATH}.head`);
   const el = document.createElement("div");
   el.className = CHILD_CLASS;
-  el.setAttribute("data-child-row", rowId);
+  el.setAttribute("data-state", requireCase(requireMessage(head.standing, `${PATH}.head.standing`).standing, `${PATH}.head.standing.standing`).case);
   if (u.border !== undefined) {
-    el.classList.add("has-border", toneClass(wireColor(u.border.tone, `${PATH}.border.tone`)));
+    el.setAttribute(FRAME_TONE_ATTRIBUTE, wireColor(u.border.tone, `${PATH}.border.tone`));
   }
   el.append(drawFeedChildHead(head, rc));
   if (u.summary !== undefined) {
-    const summary = u.summary;
-    const short = requireMessage(summary.shortSummary, `${PATH}.summary.short_summary`).text;
-    const body = document.createElement("div");
-    body.className = "feed-child-summary";
-    const paint = (): void => {
-      const open = unfolded.has(rowId);
-      el.toggleAttribute(CHILD_OPEN_ATTR, open);
-      if (open && summary.longSummary !== undefined) {
-        body.innerHTML = renderMarkdown(summary.longSummary.markdown);
-      } else {
-        body.textContent = short;
-      }
-    };
-    paint();
-    body.addEventListener("click", () => {
-      if (unfolded.has(rowId)) unfolded.delete(rowId);
-      else unfolded.add(rowId);
-      paint();
-    });
-    el.append(body);
+    const short = document.createElement("div");
+    short.className = `feed-child-summary ${CHILD_SHORT_SUMMARY_CLASS}`;
+    short.textContent = requireMessage(u.summary.shortSummary, `${PATH}.summary.short_summary`).text;
+    el.append(short);
+    if (u.summary.longSummary !== undefined) {
+      el.setAttribute("data-has-long", "");
+      const long = document.createElement("div");
+      long.className = `feed-child-summary ${CHILD_LONG_SUMMARY_CLASS}`;
+      long.innerHTML = renderMarkdown(u.summary.longSummary.markdown);
+      el.append(long);
+    }
   }
   return el;
 }
@@ -90,10 +86,7 @@ export function drawFeedChild(u: FeedChild, rowId: string, rc: RowContext): HTML
 export function drawFeedChildHead(u: FeedChildHead, rc: RowContext): HTMLElement {
   const line = document.createElement("div");
   line.className = "merge-head feed-child-head";
-  const glyph = document.createElement("span");
-  glyph.className = "merge-glyph";
-  glyph.textContent = requireMessage(u.glyph, `${PATH}.head.glyph`).icon;
-  line.append(glyph);
+  line.append(drawMergeGlyphIcon(requireMessage(u.glyph, `${PATH}.head.glyph`).icon));
   const name = requireMessage(u.name, `${PATH}.head.name`);
   const label = document.createElement("span");
   label.className = CHILD_NAME_CLASS;
@@ -110,7 +103,7 @@ export function drawFeedChildHead(u: FeedChildHead, rc: RowContext): HTMLElement
   if (u.target !== undefined) {
     const target = document.createElement("span");
     target.className = "merge-label feed-child-target";
-    target.textContent = `→ ${u.target.text}`;
+    target.append("→ ", drawBranchTarget(u.target.text, u.target.pullRequest?.url, rc));
     line.append(target);
   }
   const standing = drawFeedChildStanding(requireMessage(u.standing, `${PATH}.head.standing`));

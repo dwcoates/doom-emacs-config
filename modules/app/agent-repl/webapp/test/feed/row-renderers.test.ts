@@ -34,6 +34,7 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "mergeHead",
   "subagentHead",
   "detachedSubagentHead",
+  "childHead",
   "commandPanel",
   "commandRefused",
   "mergeBody",

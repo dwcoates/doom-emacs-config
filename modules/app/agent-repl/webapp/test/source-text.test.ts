@@ -45,6 +45,22 @@ describe("functionBody", () => {
     expect(body).toBe(want);
   });
 
+  it("cuts a nested function at its own indent, not the enclosing function's", () => {
+    // Arrange
+    const code = "function outer() {\n  function inner() {\n    g();\n  }\n  h();\n}\n";
+    // Act
+    const body = functionBody(code, "inner");
+    // Assert
+    expect(body).toBe("function inner() {\n    g();");
+  });
+
+  it("refuses a nested function with no closing brace at its own indent", () => {
+    // Arrange
+    const code = "function outer() {\n  function inner() { g(); }\n}\n";
+    // Act + Assert
+    expect(() => functionBody(code, "inner")).toThrow("the function inner has no closing brace at its own indent");
+  });
+
   it("finds no function whose name merely opens another's", () => {
     // Arrange
     const code = "function fg() {\n}\n";

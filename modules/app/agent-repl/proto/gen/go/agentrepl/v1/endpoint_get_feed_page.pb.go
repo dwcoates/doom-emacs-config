@@ -46,7 +46,9 @@ type GetFeedPageRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
-	// address (a subagent bubble row's own FeedId), echoed as served.
+	// address (a bubble row's own FeedId), echoed as served. A feed of this
+	// workspace or of any workspace beneath it is served, as OpenFeed's is
+	// (agentrepl.v1.OpenFeedRequest.feed).
 	Feed *v11.FeedId `protobuf:"bytes,2,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
 	// WHICH page. THE ARM IS THE ASK: the newest page, or the page above the
 	// rows the reader holds.
@@ -438,7 +440,8 @@ type isGetFeedPageError_Cause interface {
 }
 
 type GetFeedPageError_UnknownWorkspace struct {
-	// The workspace id is not in the daemon's registry.
+	// The workspace id, or the workspace whose feed `feed` addresses, is not
+	// in the daemon's registry.
 	UnknownWorkspace *GetFeedPageUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
 }
 
@@ -463,7 +466,8 @@ type GetFeedPageError_FeedUndecodable struct {
 }
 
 type GetFeedPageError_FeedNotInWorkspace struct {
-	// The FeedId decodes to another workspace.
+	// The FeedId decodes to a workspace that is neither this one nor beneath
+	// it.
 	FeedNotInWorkspace *GetFeedPageFeedNotInWorkspace `protobuf:"bytes,7,opt,name=feed_not_in_workspace,json=feedNotInWorkspace,proto3,oneof"`
 }
 

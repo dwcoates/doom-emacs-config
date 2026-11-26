@@ -1656,11 +1656,18 @@ the parent's feed and no second kind of queue member; the one-shot effects
   ladder.** The bubble's border, the footer row and the sidebar row can never
   disagree. The child's name is the canonical purple (`vocab.wireColor` in the
   webapp refuses a name outside the closed set).
-- **The bubble is a door, never a mirror**: its content is the child's
-  summaries, and a click on the name selects the child. Its fold is
-  webview-local. The webapp draws it in `src/feed/child.ts`, the footer's
-  panel in `src/footer/expanded.ts` and the summary's menu in
-  `src/topbar/strip.ts`.
+- **The bubble is a bubble like every other, and its sub-feed is the child's
+  own feed, never a copy**: the row is a bubble row (`isBubbleRow`) the one
+  bubble chrome draws (`src/feed/bubble.ts`), its head is the child's line
+  over its summaries (`src/feed/child.ts`, the `childHead` renderer), and
+  opening it opens the row's FeedId, which addresses the child's root feed
+  (`feedid.DecodeFeed`), served from the child's workspace. A feed of any
+  workspace beneath the page's opens on the page (`server.resolveFeed`), and
+  the page's root-only pushes ride only its own root. A click on the name
+  selects the child. Its fold is webview-local. The footer's panel is drawn
+  in `src/footer/expanded.ts` and the summary's menu in
+  `src/topbar/strip.ts`. `webapp/rules/feed/bubble-heads.rules.test.ts` holds
+  every bubble head to the chrome.
 
 ## ONE deploy per complete change landing on master, and the daemon runs it
 

@@ -25,13 +25,18 @@ export function codeOf(source: string): string {
 
 /**
  * The text of the function NAME declared in CODE, from its `function NAME(`
- * to its closing brace at the start of a line. A CODE that declares no such
- * function fails the test that asked, naming it.
+ * to its closing brace at the declaration's own indent: the start of a line
+ * for a top-level function, the enclosing body's indent for a nested one. A
+ * CODE that declares no such function fails the test that asked, naming it.
  */
 export function functionBody(code: string, name: string): string {
   const start = code.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`the code declares no function ${name}`);
-  const end = code.indexOf("\n}\n", start);
-  if (end < 0) throw new Error(`the function ${name} has no closing brace at the start of a line`);
+  const lineStart = code.lastIndexOf("\n", start) + 1;
+  const indent = /^[ \t]*/.exec(code.slice(lineStart, start))?.[0] ?? "";
+  const end = code.indexOf(`\n${indent}}\n`, start);
+  if (end < 0) {
+    throw new Error(`the function ${name} has no closing brace at ${indent === "" ? "the start of a line" : "its own indent"}`);
+  }
   return code.slice(start, end);
 }

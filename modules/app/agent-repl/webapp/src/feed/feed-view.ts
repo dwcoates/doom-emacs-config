@@ -127,7 +127,6 @@ import {
   separationEndsHistory,
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
-import { drawFeedChild } from "./child.js";
 import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { childrenMatching, queryAll } from "../dom.js";
@@ -1827,7 +1826,10 @@ export function createFeedController(
         // own row through the same badge and body the strip uses.
         return drawFeedMergeTabRow(row, arm.value, subfeed, rc);
       case "child":
-        return drawFeedChild(arm.value, requireMessage(row.id, "FeedRow.id").value, rc);
+        throw new MalformedView(
+          "FeedRow.row.child",
+          "a bubble row reached the ordinary row path",
+        );
       case "detachedSubagent":
         throw new MalformedView(
           "FeedRow.row.detached_subagent",
@@ -2435,6 +2437,8 @@ export function isBubbleRow(row: FeedRow): boolean {
   // A detached shell HEAD is a canonical bubble: its spool streams on the
   // sub-feed its FeedId addresses (the detached_shell BODY row rides there).
   if (row.row.case === "shellHead") return true;
+  // A child's bubble: its sub-feed is the child workspace's own root feed.
+  if (row.row.case === "child") return true;
   if (row.row.case !== "activity") return false;
   return (
     row.row.value.unit.case === "subagent" ||

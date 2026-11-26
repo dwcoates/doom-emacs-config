@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { FRAME_TONE_ATTRIBUTE } from "../../src/feed/bubble-frame.js";
 import { createControl } from "../../src/control.js";
 import { READER_TOGGLE_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -906,6 +907,26 @@ describe("mountBubble: the head's state is the bubble's", () => {
     bubble.update(subagentRow("b1", { tokens: "9k" }));
     // Assert: the bubble decides nothing of its own.
     expect(bubble.element.hasAttribute("data-state")).toBe(false);
+  });
+});
+
+describe("mountBubble: the head's frame tone is the bubble's", () => {
+  it("draws the frame in the tone each draw of the head states", () => {
+    // Arrange: the first head states red, the redrawn one states none.
+    const tones = ["red", null];
+    const { bubble } = mount(subagentRow("b1"), harness(), {
+      head: () => {
+        const el = document.createElement("div");
+        const tone = tones.shift();
+        if (tone !== null && tone !== undefined) el.setAttribute(FRAME_TONE_ATTRIBUTE, tone);
+        return el;
+      },
+    });
+    const first = bubble.element.getAttribute(FRAME_TONE_ATTRIBUTE);
+    // Act
+    bubble.update(subagentRow("b1", { tokens: "9k" }));
+    // Assert
+    expect([first, bubble.element.hasAttribute(FRAME_TONE_ATTRIBUTE)]).toEqual(["red", false]);
   });
 });
 

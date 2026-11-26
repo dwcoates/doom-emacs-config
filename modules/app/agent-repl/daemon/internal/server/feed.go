@@ -11,10 +11,10 @@ import (
 	"agentrepl/logging/logsite"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 )
 
@@ -24,32 +24,66 @@ import (
 // held. The daemon keeps no walk between requests: the reader's oldest held
 // row is the position.
 
-// feedOf resolves an optional FeedId onto the feed it addresses, refusing an
-// undecodable value and a feed that belongs to another workspace. An UNSET id
-// is the ROOT feed, which is the only feed every workspace always has.
-func feedOf(ws ids.WorkspaceID, id *frontendv1.FeedId) (feedid.Feed, *refusal) {
+// feedSubject is the feed a request's FeedId addresses and the workspace that
+// owns it.
+type feedSubject struct {
+	// Owner is the workspace whose feed it is: the request's own workspace, or
+	// a workspace beneath it (a child bubble's sub-feed is the child's own root
+	// feed, feedid.KindChild).
+	Owner resolved
+	// Feed is the feed within Owner.
+	Feed feedid.Feed
+}
+
+// resolveFeed resolves an optional FeedId onto the feed it addresses, for a
+// request on VIEWER's page. An UNSET id is the viewer's ROOT feed, the only
+// feed every workspace always has. It refuses an undecodable id, and a feed
+// whose owner is neither the viewer nor beneath it; an owner beneath the
+// viewer is resolved as any request's workspace is (resolveRef), so one this
+// daemon does not serve, or no longer registered, is refused as itself. An
+// error is the caller's to answer through failResolution, which records it.
+func (s *server) resolveFeed(ctx context.Context, rpc string, viewer resolved, id *frontendv1.FeedId) (feedSubject, *refusal, error) {
 	if id == nil {
-		return feedid.Feed{Root: true}, nil
+		return feedSubject{Owner: viewer, Feed: feedid.Feed{Root: true}}, nil, nil
 	}
 	owner, decoded, err := feedid.DecodeFeed(id)
 	if err != nil {
-		return feedid.Feed{}, &refusal{
+		r := s.fill(refusal{
 			Arm:    "feed_undecodable",
 			Reason: fmt.Sprintf("the feed id %q does not decode: %v", id.GetValue(), err),
-		}
+		})
+		return feedSubject{}, &r, nil
 	}
-	if owner != ws {
-		return feedid.Feed{}, &refusal{
+	if owner == viewer.Record.ID {
+		return feedSubject{Owner: viewer, Feed: decoded}, nil, nil
+	}
+	ownerSubject, r, err := s.resolveRef(ctx, rpc, &workspacev1.WorkspaceRef{Id: string(owner)})
+	if err != nil || r != nil {
+		return feedSubject{}, r, err
+	}
+	beneath, ended, err := readRegistryValue(s, func() (bool, error) {
+		return s.deps.DB.DescendsFrom(ctx, owner, viewer.Record.ID)
+	})
+	if ended {
+		return feedSubject{}, nil, connect.NewError(connect.CodeUnavailable,
+			fmt.Errorf("%s: feed of workspace %q: %w", rpc, owner, errServingEnded))
+	}
+	if err != nil {
+		return feedSubject{}, nil, fmt.Errorf("%s: whether the feed's workspace %q lies beneath %q: %w", rpc, owner, viewer.Record.ID, err)
+	}
+	if !beneath {
+		r := s.fill(refusal{
 			Arm: "feed_not_in_workspace",
-			Reason: fmt.Sprintf("the feed id %q belongs to workspace %q, not %q",
-				id.GetValue(), owner, ws),
-		}
+			Reason: fmt.Sprintf("the feed id %q belongs to workspace %q, which is neither %q nor beneath it",
+				id.GetValue(), owner, viewer.Record.ID),
+		})
+		return feedSubject{}, &r, nil
 	}
-	return decoded, nil
+	return feedSubject{Owner: ownerSubject, Feed: decoded}, nil, nil
 }
 
-// OpenFeed opens ONE feed — the root, or a subagent bubble's sub-feed —
-// answering the newest page and MINTING the watch token WatchFeed echoes. The
+// OpenFeed opens ONE feed — the root, or a bubble's sub-feed (a child
+// bubble's is the child's own root feed, resolveFeed) — answering the newest page and MINTING the watch token WatchFeed echoes. The
 // token's pin is what keeps a row from falling between the page and the stream.
 func (s *server) OpenFeed(
 	ctx context.Context,
@@ -68,31 +102,42 @@ func (s *server) OpenFeed(
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
 	}
-	target, feedRefusal := feedOf(subject.Record.ID, req.Msg.Feed)
-	if feedRefusal != nil {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(*feedRefusal)))
+	fs, feedRefusal, err := s.resolveFeed(ctx, rpc, subject, req.Msg.Feed)
+	if err != nil {
+		return nil, failResolution(subject.Log, rpc, err)
 	}
+	if feedRefusal != nil {
+		return answer(resp, s.refuse(subject.Log, rpc, resp, *feedRefusal))
+	}
+	target := fs.Feed
 
 	started := time.Now()
-	page, token, held, err := s.deps.Feed.OpenPage(ctx, subject.Record.ID, target)
+	page, token, held, err := s.deps.Feed.OpenPage(ctx, fs.Owner.Record.ID, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
+	// A CHILD'S ROOT FEED DRAWN IN ITS PARENT'S BUBBLE IS A SUB-FEED there,
+	// and a sub-feed has no held section: the child's held prompts are its
+	// own page's.
+	watched := tokenTarget{WS: fs.Owner.Record.ID, Feed: target, Viewer: subject.Record.ID}
+	if !watched.pageRoot() {
+		held = nil
+	}
 	var resumed *agentreplv1.OpenFeedResumed
 	if req.Msg.Resume != nil {
 		resumed = resumePage(page, req.Msg.GetResume())
 	}
-	s.rememberToken(token.GetValue(), subject.Record.ID, target)
+	s.rememberToken(token.GetValue(), watched)
 	// INFO: an open is a page's first paint waiting on the daemon, once per
 	// page load; its duration is half of what the page's own feed.open-answered
 	// record measures. resolve_ms is the workspace's resolution before it
 	// (its registry read), which `ms` does not count.
 	subject.Log.Info("daemon.server.open_feed", "opened a feed and minted its watch token",
 		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows()),
-			"root": target.Root, "held": len(held.GetItems()),
+			"root": target.Root, "owner": string(fs.Owner.Record.ID), "held": len(held.GetItems()),
 			"resumed": resumed != nil, "standing": len(resumed.GetStanding()),
 			"ms": time.Since(started).Milliseconds(), "resolve_ms": started.Sub(began).Milliseconds()})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
@@ -105,10 +150,10 @@ func (s *server) OpenFeed(
 // addresses. WatchFeedRequest carries ONLY the token, while the feed resolver's
 // Tail takes the workspace and the feed explicitly, so the mint site is the one
 // place that still knows both.
-func (s *server) rememberToken(token string, ws ids.WorkspaceID, target feedid.Feed) {
+func (s *server) rememberToken(token string, target tokenTarget) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.watchTokens[token] = tokenTarget{WS: ws, Feed: target}
+	s.watchTokens[token] = target
 }
 
 // tokenTargetFor answers a remembered token's address.
@@ -183,7 +228,7 @@ func (s *server) watchFeed(
 	// watch carries none, so it subscribes to no selection. A nil channel in
 	// the select below simply never fires, which is what a non-root feed wants.
 	var selections <-chan *selectionState
-	if target.Feed.Root {
+	if target.pageRoot() {
 		selections, ackSelection = s.selectionTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
@@ -199,7 +244,7 @@ func (s *server) watchFeed(
 	// it lies over the workspace's root feed. The topic replays its latest
 	// value, so a page opening after the image was opened draws it at once.
 	var overlays <-chan *frontendv1.FeedImageOverlay
-	if target.Feed.Root {
+	if target.pageRoot() {
 		overlays, ackOverlay = s.imageOverlayTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
@@ -207,7 +252,7 @@ func (s *server) watchFeed(
 	// selection: it names a row of the root feed. The topic replays its latest
 	// value, so a page opening mid-edit draws the highlight that stands.
 	var composerEntries <-chan *frontendv1.FeedComposerEntry
-	if target.Feed.Root {
+	if target.pageRoot() {
 		composerEntries, ackComposerEntry = s.composerEntryTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
@@ -215,7 +260,7 @@ func (s *server) watchFeed(
 	// selection: it names a row of the root feed. The topic replays its latest
 	// value, so a page opening while a question stands draws it.
 	var questions <-chan *frontendv1.FeedResponseQuestion
-	if target.Feed.Root {
+	if target.pageRoot() {
 		questions, ackQuestion = s.responseQuestionTopic(target.WS).SubscribeStream(streamCtx)
 	}
 
@@ -223,7 +268,7 @@ func (s *server) watchFeed(
 	// of the root feed. The topic is seeded with none, so every root watch is
 	// told the state the daemon holds, a just-restarted daemon's included.
 	var highlights <-chan *frontendv1.FeedResponseHighlight
-	if target.Feed.Root {
+	if target.pageRoot() {
 		highlights, ackHighlight = s.watchResponseHighlight(streamCtx, target.WS)
 	}
 
@@ -377,16 +422,19 @@ func (s *server) GetFeedPage(
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
 	}
-	target, feedRefusal := feedOf(subject.Record.ID, req.Msg.Feed)
+	fs, feedRefusal, err := s.resolveFeed(ctx, rpc, subject, req.Msg.Feed)
+	if err != nil {
+		return nil, failResolution(subject.Log, rpc, err)
+	}
 	if feedRefusal != nil {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(*feedRefusal)))
+		return answer(resp, s.refuse(subject.Log, rpc, resp, *feedRefusal))
 	}
 
 	var page *frontendv1.FeedPage
 	if older := req.Msg.GetOlderThan(); older != nil {
-		page, err = s.deps.Feed.OlderPage(ctx, subject.Record.ID, target, older.GetOldestHeld().GetKey())
+		page, err = s.deps.Feed.OlderPage(ctx, fs.Owner.Record.ID, fs.Feed, older.GetOldestHeld().GetKey())
 	} else {
-		page, _, _, err = s.deps.Feed.OpenPage(ctx, subject.Record.ID, target)
+		page, _, _, err = s.deps.Feed.OpenPage(ctx, fs.Owner.Record.ID, fs.Feed)
 	}
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {

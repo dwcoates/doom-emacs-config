@@ -2,17 +2,22 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/wsm"
 )
 
 // page is one answered feed page.
@@ -89,11 +94,12 @@ func TestOpenFeedCarriesTheResolversHeldSection(t *testing.T) {
 	}
 }
 
-// TestOpenFeedRefusesAForeignFeed pins that a feed id belonging to another
-// workspace is refused rather than served.
+// TestOpenFeedRefusesAForeignFeed pins that a feed id belonging to a
+// workspace neither this one nor beneath it is refused rather than served.
 func TestOpenFeedRefusesAForeignFeed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	registerStranger(h)
 
 	// Act.
 	resp, err := h.Client.OpenFeed(context.Background(),
@@ -235,11 +241,12 @@ func TestGetFeedPageOlderThanWithoutAKeyIsInvalid(t *testing.T) {
 	}
 }
 
-// TestGetFeedPageRefusesAForeignFeed pins that a feed id belonging to another
-// workspace is refused rather than walked.
+// TestGetFeedPageRefusesAForeignFeed pins that a feed id belonging to a
+// workspace neither this one nor beneath it is refused rather than walked.
 func TestGetFeedPageRefusesAForeignFeed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	registerStranger(h)
 
 	// Act.
 	resp, err := h.Client.GetFeedPage(context.Background(),
@@ -468,4 +475,188 @@ func TestOpenFeedRecordsTheOpenAtInfoWithItsDuration(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want a daemon.server.open_feed record", log.Records())
+}
+
+// registerStranger registers ws-other, a workspace with no parent: neither the
+// test workspace nor beneath it.
+func registerStranger(h *harness) {
+	h.DB.workspaces["ws-other"] = wsm.Workspace{ID: "ws-other", Dir: "/tmp/ws-other", Name: "other"}
+}
+
+// registerChild registers CHILD beneath PARENT.
+func registerChild(h *harness, child, parent ids.WorkspaceID) {
+	h.DB.workspaces[child] = wsm.Workspace{ID: child, Dir: "/tmp/" + string(child), Name: string(child), Parent: &parent}
+}
+
+// childRowID is the FeedId of CHILD's bubble row on the test workspace's root
+// feed (feedid.KindChild).
+func childRowID(child ids.WorkspaceID) *frontendv1.FeedId {
+	return feedid.Encode(feedid.Ref{WS: testWorkspaceID, Feed: feedid.Feed{Root: true},
+		Row: feedid.RowKey{Kind: feedid.KindChild, ID: string(child)}})
+}
+
+// TestOpenFeedOpensAChildsOwnRootFeed pins that a child bubble row's FeedId
+// opens the CHILD's root feed, served from the child's workspace.
+func TestOpenFeedOpensAChildsOwnRootFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	registerChild(h, "ws-child", testWorkspaceID)
+	h.Feed.page = page()
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
+
+	// Act.
+	resp, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref(), Feed: childRowID("ws-child")}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || h.Feed.lastWS != "ws-child" || !h.Feed.lastFeed.Root {
+		t.Fatalf("result = %v opening (%s, %+v), want the child's root feed opened", resp.Msg.GetResult(), h.Feed.lastWS, h.Feed.lastFeed)
+	}
+}
+
+// TestOpenFeedOpensAFeedOfAGrandchild pins that a feed of any workspace
+// beneath the page's opens, so a bubble inside a child's feed opens too.
+func TestOpenFeedOpensAFeedOfAGrandchild(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	registerChild(h, "ws-child", testWorkspaceID)
+	registerChild(h, "ws-grandchild", "ws-child")
+	h.Feed.page = page()
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
+
+	// Act.
+	resp, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref(), Feed: feedAddressFor("ws-grandchild")}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || h.Feed.lastWS != "ws-grandchild" {
+		t.Fatalf("result = %v opening %s, want the grandchild's feed opened", resp.Msg.GetResult(), h.Feed.lastWS)
+	}
+}
+
+// TestOpenFeedCarriesNoHeldSectionOnAChildsFeed pins that a child's root
+// feed, drawn as its parent's sub-feed, carries no held section.
+func TestOpenFeedCarriesNoHeldSectionOnAChildsFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	registerChild(h, "ws-child", testWorkspaceID)
+	h.Feed.page = page()
+	h.Feed.held = &frontendv1.FeedHeld{}
+
+	// Act.
+	resp, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref(), Feed: childRowID("ws-child")}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || resp.Msg.GetSuccess().GetHeld() != nil {
+		t.Fatalf("result = %v, want success with no held section", resp.Msg.GetResult())
+	}
+}
+
+// TestOpenFeedRefusesAFeedOfAnUnregisteredWorkspace pins that a feed whose
+// owner the registry does not hold (a removed child) is refused as unknown,
+// and nothing is opened.
+func TestOpenFeedRefusesAFeedOfAnUnregisteredWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref(), Feed: childRowID("ws-removed")}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil || h.Feed.openCalls != 0 {
+		t.Fatalf("result = %v after %d openings, want unknown_workspace and nothing opened", resp.Msg.GetResult(), h.Feed.openCalls)
+	}
+}
+
+// TestOpenFeedFailsLoudlyWhenTheParentsCannotBeRead pins that a failed read
+// of the recorded parents fails the open, recorded at ERROR with its cause,
+// and opens nothing.
+func TestOpenFeedFailsLoudlyWhenTheParentsCannotBeRead(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log}
+	})
+	registerChild(h, "ws-child", testWorkspaceID)
+	h.DB.descendsErr = errors.New("parents unreadable")
+
+	// Act.
+	_, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref(), Feed: childRowID("ws-child")}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal || h.Feed.openCalls != 0 {
+		t.Fatalf("err = %v after %d openings, want Internal and nothing opened", err, h.Feed.openCalls)
+	}
+	errs := log.at("ERROR")
+	if len(errs) != 1 || errs[0].Operation != "OpenFeed" || !strings.Contains(fmt.Sprint(errs[0].Context["cause"]), "parents unreadable") {
+		t.Fatalf("ERROR records = %+v, want one OpenFeed record carrying the cause", errs)
+	}
+}
+
+// TestGetFeedPageWalksAChildsOwnRootFeed pins that a child bubble row's
+// FeedId walks the child's root feed.
+func TestGetFeedPageWalksAChildsOwnRootFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	registerChild(h, "ws-child", testWorkspaceID)
+	h.Feed.olderPage = page()
+
+	// Act.
+	resp, err := h.Client.GetFeedPage(context.Background(),
+		connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+			Workspace: ref(),
+			Feed:      childRowID("ws-child"),
+			Page: &agentreplv1.GetFeedPageRequest_OlderThan{OlderThan: &agentreplv1.GetFeedPageOlderThan{
+				OldestHeld: &frontendv1.FeedRowOrder{Key: "k-7"},
+			}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetFeedPage: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || h.Feed.lastWS != "ws-child" || !h.Feed.lastFeed.Root {
+		t.Fatalf("result = %v walking (%s, %+v), want the child's root feed walked", resp.Msg.GetResult(), h.Feed.lastWS, h.Feed.lastFeed)
+	}
+}
+
+// TestTokenTargetPageRoot pins which watches carry the page's root-only
+// pushes: only the root feed of the workspace whose page opened it.
+func TestTokenTargetPageRoot(t *testing.T) {
+	agent := &conversationv1.AgentId{Value: "a-1"}
+	tests := []struct {
+		name   string
+		target tokenTarget
+		want   bool
+	}{
+		{name: "the page's own root feed", target: tokenTarget{WS: "ws-1", Feed: feedid.Feed{Root: true}, Viewer: "ws-1"}, want: true},
+		{name: "a child's root feed in its bubble", target: tokenTarget{WS: "ws-child", Feed: feedid.Feed{Root: true}, Viewer: "ws-1"}, want: false},
+		{name: "a subagent's sub-feed", target: tokenTarget{WS: "ws-1", Feed: feedid.Feed{Agent: agent}, Viewer: "ws-1"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := tt.target.pageRoot()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("pageRoot() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

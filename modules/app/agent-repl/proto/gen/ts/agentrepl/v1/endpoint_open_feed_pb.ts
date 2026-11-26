@@ -1,5 +1,6 @@
 // endpoint_open_feed.proto — OpenFeed: opens ONE feed — the workspace's root
-// feed, or a subagent bubble's sub-feed. FEED section. Answers with the
+// feed, or a bubble's sub-feed (a subagent's, a merge's, a shell's, or a
+// child's, which is the child workspace's own root feed). FEED section. Answers with the
 // feed's newest page and mints the watch token WatchFeed echoes; the client
 // paints the page, then tails. Called when a workspace view opens (root) and
 // when a bubble is expanded (sub-feed); a collapsed bubble's token is simply
@@ -40,8 +41,12 @@ export type OpenFeedRequest = Message<"agentrepl.v1.OpenFeedRequest"> & {
 
   /**
    * WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
-   * client was shown — a subagent bubble row's own FeedId, which addresses
-   * the feed within it. Only served ids open; a client never constructs one.
+   * client was shown — a bubble row's own FeedId, which addresses the feed
+   * within it. A child bubble's (frontend.v1.FeedChild) addresses the CHILD
+   * workspace's own root feed, and any row of that feed addresses its own
+   * sub-feed in the child: a feed of this workspace OR OF ANY WORKSPACE
+   * BENEATH IT opens on this workspace's page. Only served ids open; a client
+   * never constructs one.
    *
    * @generated from field: optional frontend.v1.FeedId feed = 2;
    */
@@ -179,8 +184,9 @@ export type OpenFeedSuccess = Message<"agentrepl.v1.OpenFeedSuccess"> & {
 
   /**
    * The root feed's held section as it stands at the pin, drawn after the
-   * page's rows. SET for the root feed and UNSET for every sub-feed, which has
-   * no held section. Every later change of it arrives as a WatchFeed
+   * page's rows. SET for the workspace's own root feed and UNSET for every
+   * sub-feed, a child's root feed drawn in its bubble included, which has no
+   * held section. Every later change of it arrives as a WatchFeed
    * held-section frame.
    *
    * @generated from field: optional frontend.v1.FeedHeld held = 3;
@@ -244,7 +250,8 @@ export type OpenFeedError = Message<"agentrepl.v1.OpenFeedError"> & {
    */
   cause: {
     /**
-     * The workspace id is not in the daemon's registry.
+     * The workspace id, or the workspace whose feed `feed` addresses, is not
+     * in the daemon's registry.
      *
      * @generated from field: agentrepl.v1.OpenFeedUnknownWorkspace unknown_workspace = 1;
      */
@@ -284,7 +291,8 @@ export type OpenFeedError = Message<"agentrepl.v1.OpenFeedError"> & {
     case: "feedUndecodable";
   } | {
     /**
-     * The FeedId decodes to another workspace.
+     * The FeedId decodes to a workspace that is neither this one nor beneath
+     * it.
      *
      * @generated from field: agentrepl.v1.OpenFeedFeedNotInWorkspace feed_not_in_workspace = 6;
      */

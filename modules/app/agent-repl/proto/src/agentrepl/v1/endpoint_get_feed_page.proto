@@ -29,7 +29,9 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message GetFeedPageRequest {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
-  // address (a subagent bubble row's own FeedId), echoed as served.
+  // address (a bubble row's own FeedId), echoed as served. A feed of this
+  // workspace or of any workspace beneath it is served, as OpenFeed's is
+  // (agentrepl.v1.OpenFeedRequest.feed).
   optional frontend.v1.FeedId feed = 2;
   // WHICH page. THE ARM IS THE ASK: the newest page, or the page above the
   // rows the reader holds.
@@ -76,7 +78,8 @@ message GetFeedPageResponse {
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message GetFeedPageError {
   oneof cause {
-    // The workspace id is not in the daemon's registry.
+    // The workspace id, or the workspace whose feed `feed` addresses, is not
+    // in the daemon's registry.
     GetFeedPageUnknownWorkspace unknown_workspace = 1;
     // The echoed dir disagrees with the registry's dir for this id.
     GetFeedPageWorkspaceRefMismatch workspace_ref_mismatch = 2;
@@ -86,7 +89,8 @@ message GetFeedPageError {
     GetFeedPageNotYetAdopted not_yet_adopted = 4;
     // The FeedId does not decode.
     GetFeedPageFeedUndecodable feed_undecodable = 6;
-    // The FeedId decodes to another workspace.
+    // The FeedId decodes to a workspace that is neither this one nor beneath
+    // it.
     GetFeedPageFeedNotInWorkspace feed_not_in_workspace = 7;
   }
   reserved 5;

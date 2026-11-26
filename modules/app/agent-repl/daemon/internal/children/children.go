@@ -48,14 +48,12 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/textline"
+	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
 
 // op is the operation every record of this package carries.
 const op = "daemon.children"
-
-// Glyph is the kind glyph every child bubble's head carries.
-const Glyph = "⇄"
 
 // Feed is where a child's bubble is drawn.
 type Feed interface {
@@ -325,7 +323,7 @@ func (t *Tracker) bubbleLocked(child wsm.Workspace) *frontendv1.FeedChild {
 	removedAt, removed := t.removed[child.ID]
 	open := !child.Closed && !removed
 	head := &frontendv1.FeedChildHead{
-		Glyph:    &frontendv1.FeedChildGlyph{Icon: Glyph},
+		Glyph:    &frontendv1.FeedChildGlyph{Icon: vocab.MergeHeadGlyph},
 		Name:     &frontendv1.FeedChildName{Text: child.Name},
 		Standing: t.standingLocked(child, removed, removedAt),
 		Runtime:  &frontendv1.FeedChildRuntime{StartedAtMs: child.CreatedAt.UnixMilli()},

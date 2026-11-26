@@ -171,15 +171,23 @@ export function drawFeedMergeHead(head: FeedMergeHead, rc: RowContext): HTMLElem
  * an icon this build has not learned would trade the substance for decoration.
  */
 export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
+  return drawMergeGlyphIcon(glyph.icon);
+}
+
+/**
+ * The glyph a merge-styled head draws for the vocabulary's icon NAME: the
+ * merge head's, and every head drawn in its look (a child's bubble).
+ */
+export function drawMergeGlyphIcon(icon: string): HTMLElement {
   const el = decorativeElement("span", "merge-glyph");
-  el.setAttribute("data-glyph", glyph.icon);
-  const known = MERGE_GLYPH_NAMES[glyph.icon];
+  el.setAttribute("data-glyph", icon);
+  const known = MERGE_GLYPH_NAMES[icon];
   if (known === undefined) {
     log.warn("merge glyph '{icon}' is not one this build draws; using the generic one", {
       operation: "merge.unknown-glyph",
       context: { known: FEED_MERGE_HEAD_GLYPH },
-      dedupKey: `merge.glyph:${glyph.icon}`,
-    }, { icon: glyph.icon });
+      dedupKey: `merge.glyph:${icon}`,
+    }, { icon });
     el.textContent = MERGE_GLYPH;
     return el;
   }
@@ -213,8 +221,18 @@ export const BRANCH_LINE_TARGET_LINK_CLASS = "merge-label-target";
  * the workspace's login (link.ts), never in the page.
  */
 export function drawFeedMergeBranchLineTarget(target: FeedMergeBranchLineTarget, rc: RowContext): Node {
-  if (target.pullRequest === undefined) return document.createTextNode(target.text);
-  const link = renderExternalLink(rc.ctx, { text: target.text, url: target.pullRequest.url });
+  return drawBranchTarget(target.text, target.pullRequest?.url, rc);
+}
+
+/**
+ * Where a merge-styled head says the work lands: TEXT, plain, or for work that
+ * deploys through a pull request at URL, a link that opens it through
+ * OpenExternal (link.ts), never in the page. The merge head's target and every
+ * head drawn in its look (a child's bubble) draw it here.
+ */
+export function drawBranchTarget(text: string, url: string | undefined, rc: RowContext): Node {
+  if (url === undefined) return document.createTextNode(text);
+  const link = renderExternalLink(rc.ctx, { text, url });
   link.classList.add(BRANCH_LINE_TARGET_LINK_CLASS);
   return link;
 }

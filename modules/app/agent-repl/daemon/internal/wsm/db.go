@@ -123,6 +123,9 @@ type DB interface {
 	// OpenChildren answers the open DIRECT children of PARENT, backlogged ones
 	// included and hidden merge workspaces excluded, in place order (family.go).
 	OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyRef, error)
+	// DescendsFrom answers whether WS is ANCESTOR itself or lies beneath it
+	// in the recorded parents (family.go).
+	DescendsFrom(ctx context.Context, ws, ancestor WorkspaceID) (bool, error)
 	// Reopen records that a workspace's editor state stands again, clearing
 	// its close record and, for a merged workspace, the merge's settlement,
 	// and records SERVING as the daemon serving it.

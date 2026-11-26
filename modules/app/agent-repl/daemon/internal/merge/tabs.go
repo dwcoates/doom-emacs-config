@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
 
@@ -167,7 +168,7 @@ func frontTabLabel(round tabRound) *frontendv1.FeedMergeTabLabel {
 func headRow(ws ids.WorkspaceID, lease ids.LeaseID, line branchLine, pullRequest string, startedMS int64, result any) *frontendv1.FeedRow {
 	merge := &frontendv1.FeedMerge{
 		Head: &frontendv1.FeedMergeHead{
-			Glyph:      &frontendv1.FeedMergeGlyph{Icon: "merge"},
+			Glyph:      &frontendv1.FeedMergeGlyph{Icon: vocab.MergeHeadGlyph},
 			BranchLine: line.view(pullRequest),
 			Runtime:    &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
 			// NO FOLD: the feed resolver settles it on publication, the

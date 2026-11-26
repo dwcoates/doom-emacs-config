@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
 
@@ -80,6 +81,16 @@ func TestHeadLivesOnTheRootFeed(t *testing.T) {
 // TestHeadShipsNoFold covers the producer's half of the bubble's fold: the
 // orchestrator composes every head with NO fold, in every state, because the
 // feed resolver alone decides it (resolve/feed/mergefold.go).
+func TestHeadCarriesTheMergeHeadGlyph(t *testing.T) {
+	// Arrange and act.
+	row := headRow(theWorkspace, "lease-1", branchLineOf("branch", "master"), "", 1, headMerging)
+
+	// Assert.
+	if got := row.GetActivity().GetMerge().GetHead().GetGlyph().GetIcon(); got != vocab.MergeHeadGlyph {
+		t.Fatalf("the head's glyph = %q, want %q (vocab.MergeHeadGlyph)", got, vocab.MergeHeadGlyph)
+	}
+}
+
 func TestHeadShipsNoFold(t *testing.T) {
 	tests := []struct {
 		name   string

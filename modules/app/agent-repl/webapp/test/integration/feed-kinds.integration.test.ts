@@ -1179,11 +1179,12 @@ describe("turn ended", () => {
 // ---------------------------------------------------------------------------
 
 describe("a child's bubble", () => {
-  it("draws the child's name and its short summary through the ordinary row path", async () => {
+  it("draws the child's name and its short summary as a bubble's head in the shared chrome", async () => {
     // Arrange / Act
     const row = await drawRow(childRow());
     // Assert
-    expect([row.querySelector(".feed-child-name")?.textContent, row.querySelector(".feed-child-summary")?.textContent]).toEqual([
+    const head = row.querySelector(".tool-card.bubble-fold > .bubble-head");
+    expect([head?.querySelector(".feed-child-name")?.textContent, head?.querySelector(".feed-child-summary")?.textContent]).toEqual([
       "fix-flaky",
       "Fix the flaky test",
     ]);

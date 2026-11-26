@@ -177,7 +177,9 @@ type fakeDB struct {
 	endsSub        bool
 	unsubscribeErr error
 	workspaces     map[ids.WorkspaceID]wsm.Workspace
-	repositories   []wsm.Repository
+	// descendsErr fails DescendsFrom.
+	descendsErr  error
+	repositories []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
 	// readRegistryErr fails the registry snapshot (ReadRegistry).
@@ -326,6 +328,27 @@ func (f *fakeDB) WorkspaceHead(ctx context.Context, id ids.WorkspaceID) (wsm.Wor
 		return wsm.WorkspaceHead{}, err
 	}
 	return record.Head(), nil
+}
+
+// DescendsFrom walks the fake's recorded parents upward from ws, answering
+// descendsErr when it is set.
+func (f *fakeDB) DescendsFrom(_ context.Context, ws, ancestor ids.WorkspaceID) (bool, error) {
+	if f.descendsErr != nil {
+		return false, f.descendsErr
+	}
+	for at := ws; ; {
+		if at == ancestor {
+			return true, nil
+		}
+		record, ok := f.workspaces[at]
+		if !ok {
+			return false, wsm.ErrNotFound
+		}
+		if record.Parent == nil {
+			return false, nil
+		}
+		at = *record.Parent
+	}
 }
 
 func (f *fakeDB) Workspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
@@ -2186,6 +2209,8 @@ type fakeFeed struct {
 	tail      *fakeTail
 	tailErr   error
 	lastFeed  feedid.Feed
+	// lastWS is the workspace whose feed OpenPage or OlderPage last read.
+	lastWS    ids.WorkspaceID
 	openCalls int
 	// olderKeys are the oldest held rows' keys OlderPage was asked above, in
 	// order.
@@ -2442,13 +2467,15 @@ func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
 	return f.rollBackTurnsErr
 }
 
-func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
+func (f *fakeFeed) OpenPage(_ context.Context, ws ids.WorkspaceID, target feedid.Feed) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	f.openCalls++
+	f.lastWS = ws
 	f.lastFeed = target
 	return f.page, f.token, f.held, f.openErr
 }
 
-func (f *fakeFeed) OlderPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, oldestHeld string) (*frontendv1.FeedPage, error) {
+func (f *fakeFeed) OlderPage(_ context.Context, ws ids.WorkspaceID, target feedid.Feed, oldestHeld string) (*frontendv1.FeedPage, error) {
+	f.lastWS = ws
 	f.lastFeed = target
 	f.olderKeys = append(f.olderKeys, oldestHeld)
 	return f.olderPage, f.olderErr

@@ -22,6 +22,7 @@
  * going quietly untested.
  */
 import { branchLineInit } from "../feed/branch-line.js";
+import { childHeadInit } from "../feed/child-init.js";
 import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
 
 import { WorkspaceRefSchema, RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -1260,13 +1261,7 @@ export const childRow = (overrides?: Partial<RowInit>): FeedRow =>
     {
       case: "child",
       value: {
-        head: {
-          glyph: { icon: "⇄" },
-          name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
-          target: { text: "~/.config/doom" },
-          standing: { standing: { case: "open", value: {} } },
-          runtime: { startedAtMs: 1_000n },
-        },
+        head: childHeadInit(1_000n),
         summary: { shortSummary: { text: "Fix the flaky test" } },
         border: { tone: "green" },
       },

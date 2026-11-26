@@ -7,8 +7,12 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { FeedChildSchema, type FeedChild } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { CHILD_CLASS, CHILD_NAME_CLASS, CHILD_OPEN_ATTR, drawFeedChild } from "../../src/feed/child.js";
+import { CHILD_CLASS, CHILD_LONG_SUMMARY_CLASS, CHILD_NAME_CLASS, CHILD_SHORT_SUMMARY_CLASS, drawFeedChild } from "../../src/feed/child.js";
+import { FRAME_TONE_ATTRIBUTE } from "../../src/feed/bubble-frame.js";
+import { BRANCH_LINE_TARGET_LINK_CLASS } from "../../src/feed/merge/merge.js";
+import { cascadedValue, inDocument } from "../stylesheet.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
+import { childHeadInit } from "./child-init.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "./harness.js";
 
 beforeEach(() => {
@@ -23,20 +27,14 @@ afterEach(() => {
 /** An open child, its head as the daemon draws one, edited by INIT. */
 function child(init: { summary?: undefined; border?: { tone: string } | undefined } = {}): FeedChild {
   return create(FeedChildSchema, {
-    head: {
-      glyph: { icon: "⇄" },
-      name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
-      target: { text: "~/.config/doom" },
-      standing: { standing: { case: "open", value: {} } },
-      runtime: { startedAtMs: 940_000n },
-    },
+    head: childHeadInit(940_000n),
     border: "border" in init ? init.border : { tone: "red" },
     summary: "summary" in init ? undefined : { shortSummary: { text: "Fix the flaky test" }, longSummary: { markdown: "- It fixes the test.\n- It pins the backoff." } },
   });
 }
 
-/** Draw U as row ROWID against a context recording every SelectInEditor. */
-function draw(u: FeedChild, rowId = "r|child|ws-child") {
+/** Draw U against a context recording every SelectInEditor. */
+function draw(u: FeedChild) {
   const calls: SelectInEditorRequest[] = [];
   const ctx = scriptedAppContext(
     {
@@ -47,7 +45,7 @@ function draw(u: FeedChild, rowId = "r|child|ws-child") {
     },
     { workspace: WORKSPACE, failures: new RecordingSink() },
   );
-  return { el: drawFeedChild(u, rowId, rowContext(ctx, mergeRow("m1"))), calls };
+  return { el: drawFeedChild(u, rowContext(ctx, mergeRow("m1"))), calls };
 }
 
 describe("drawFeedChild: the head", () => {
@@ -112,15 +110,13 @@ describe("drawFeedChild: the head", () => {
   });
 });
 
-describe("drawFeedChild: the border", () => {
-  it("draws the border in the child's canonical status color while open", () => {
-    const el = draw(child()).el;
-    expect([el.classList.contains("has-border"), el.classList.contains("tone-red")]).toEqual([true, true]);
+describe("drawFeedChild: the frame's tone", () => {
+  it("states the child's canonical status color for the frame while open", () => {
+    expect(draw(child()).el.getAttribute(FRAME_TONE_ATTRIBUTE)).toBe("red");
   });
 
-  it("draws no border once the child is not open", () => {
-    const el = draw(child({ border: undefined })).el;
-    expect(el.classList.contains("has-border")).toBe(false);
+  it("states no frame tone once the child is not open", () => {
+    expect(draw(child({ border: undefined })).el.hasAttribute(FRAME_TONE_ATTRIBUTE)).toBe(false);
   });
 
   it("refuses a color the vocabulary does not declare", () => {
@@ -128,31 +124,67 @@ describe("drawFeedChild: the border", () => {
   });
 });
 
-describe("drawFeedChild: the reader's fold", () => {
-  it("draws the short summary folded, and the long one once opened", () => {
-    const { el } = draw(child(), "r|child|fold-1");
-    const summary = el.querySelector<HTMLElement>(".feed-child-summary");
-    const folded = summary?.textContent;
-    summary?.click();
-    expect([folded, el.hasAttribute(CHILD_OPEN_ATTR), summary?.querySelectorAll("li").length]).toEqual(["Fix the flaky test", true, 2]);
+describe("drawFeedChild: the target", () => {
+  it("draws a target that deploys through a pull request as a link to it", () => {
+    const u = child();
+    u.head!.target!.pullRequest = create(FeedChildSchema, {
+      head: { target: { text: "x", pullRequest: { url: "https://github.com/o/r/pull/7" } } },
+    }).head!.target!.pullRequest;
+    const link = draw(u).el.querySelector<HTMLAnchorElement>(`.feed-child-target a.${BRANCH_LINE_TARGET_LINK_CLASS}`);
+    expect([link?.textContent, link?.getAttribute("href")]).toEqual(["~/.config/doom", "https://github.com/o/r/pull/7"]);
+  });
+});
+
+describe("drawFeedChild: the summaries", () => {
+  it("draws the short summary and the long one, rendered", () => {
+    const { el } = draw(child());
+    expect([
+      el.querySelector(`.${CHILD_SHORT_SUMMARY_CLASS}`)?.textContent,
+      el.querySelector(`.${CHILD_LONG_SUMMARY_CLASS}`)?.querySelectorAll("li").length,
+    ]).toEqual(["Fix the flaky test", 2]);
   });
 
-  it("keeps the reader's fold across a redraw of the same row", () => {
-    draw(child(), "r|child|fold-2").el.querySelector<HTMLElement>(".feed-child-summary")?.click();
-    const redrawn = draw(child(), "r|child|fold-2").el;
-    expect(redrawn.hasAttribute(CHILD_OPEN_ATTR)).toBe(true);
-  });
-
-  it("draws the short summary open when the child has no long one", () => {
+  it("draws the short summary alone when the child has no long one", () => {
     const u = child();
     u.summary!.longSummary = undefined;
-    const { el } = draw(u, "r|child|fold-3");
-    el.querySelector<HTMLElement>(".feed-child-summary")?.click();
-    expect(el.querySelector(".feed-child-summary")?.textContent).toBe("Fix the flaky test");
+    const { el } = draw(u);
+    expect([el.querySelector(`.${CHILD_LONG_SUMMARY_CLASS}`), el.hasAttribute("data-has-long")]).toEqual([null, false]);
   });
 
   it("draws the head alone for a child with no summary", () => {
     const { el } = draw(child({ summary: undefined }));
     expect([el.classList.contains(CHILD_CLASS), el.querySelector(".feed-child-summary")]).toEqual([true, null]);
+  });
+});
+
+describe("drawFeedChild: which summary the fold shows", () => {
+  /** Which summaries show on a child's head inside a bubble folded or open. */
+  function shown(expanded: boolean, u: FeedChild = child()): string[] {
+    const fold = document.createElement("div");
+    fold.className = "tool-card bubble-fold";
+    fold.setAttribute("data-expanded", expanded ? "true" : "false");
+    const head = document.createElement("div");
+    head.className = "bubble-head";
+    head.append(draw(u).el);
+    fold.append(head);
+    return inDocument(fold, () =>
+      [...fold.querySelectorAll<HTMLElement>(".feed-child-summary")]
+        .filter((summary) => cascadedValue(summary, "display") !== "none")
+        .map((summary) => (summary.classList.contains(CHILD_SHORT_SUMMARY_CLASS) ? "short" : "long")),
+    );
+  }
+
+  it("shows the short summary alone while folded", () => {
+    expect(shown(false)).toEqual(["short"]);
+  });
+
+  it("shows the long summary alone while open", () => {
+    expect(shown(true)).toEqual(["long"]);
+  });
+
+  it("shows the short summary while open when the child has no long one", () => {
+    const u = child();
+    u.summary!.longSummary = undefined;
+    expect(shown(true, u)).toEqual(["short"]);
   });
 });

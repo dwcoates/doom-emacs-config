@@ -53,6 +53,7 @@ import {
   harness,
   toolCallRow,
   type CountingTicker,
+  childRow,
   mergeRow,
   mergeTabRow,
   page,
@@ -196,6 +197,10 @@ describe("isBubbleRow", () => {
 
   it("recognizes a merge", () => {
     expect(isBubbleRow(mergeRow("m"))).toBe(true);
+  });
+
+  it("recognizes a child's bubble", () => {
+    expect(isBubbleRow(childRow("c"))).toBe(true);
   });
 
   it("does not mistake an ordinary activity for a bubble", () => {
