@@ -1,9 +1,10 @@
-// agent-repl's Wi-Fi helper (owner ruling, 2026-11-14): the daemon's
-// persistent-wifi failover joins only networks macOS knows that are visible
-// now, then the hotspot, and macOS names Wi-Fi networks only to an app the
-// owner allowed Location Services. This app is that app: it reads the
-// joined network and the visible ones through CoreWLAN and writes them as
-// one JSON document; joining stays the daemon's (`networksetup`).
+// agent-repl's Wi-Fi helper (owner rulings, 2026-11-14 and 2026-11-26):
+// macOS names Wi-Fi networks only to an app the owner allowed Location
+// Services, and persistent wifi's hotspot join needs them named. This app is
+// that app: it reads the joined network and the visible ones through
+// CoreWLAN, and joins the phone hotspot by asking the phone through sharingd
+// to start it (hotspot.swift, sharing.swift), writing each answer as one JSON
+// document.
 //
 // IT RUNS AS ITS OWN APP, launched with `open`, so macOS attributes the
 // Location Services permission to this bundle and not to the daemon that
@@ -12,6 +13,9 @@
 //
 // Verbs:
 //   scan --out FILE        the joined network and every visible one
+//   hotspot --name NAME --out FILE
+//                          ask the phone hotspot named NAME to start, and
+//                          join it (hotspot.swift's joinHotspot)
 //   authorize --out FILE   ask for Location Services (the one prompt), and
 //                          write the answer once the owner gave it
 //
@@ -41,6 +45,8 @@ struct Answer: Encodable {
     let current: String?
     let visible: [Visible]
     let error: String?
+    // hotspot is the hotspot verb's join; nil for every other verb.
+    var hotspot: HotspotAnswer? = nil
     // standing_ms is how long CoreLocation took to tell the standing, from
     // the manager's creation; nil when it was never heard. It measures
     // standingBound under the host's real load.
@@ -86,18 +92,40 @@ func scan(verb: String, authorization: String) -> Answer {
     return Answer(verb: verb, authorization: authorization, interface: iface.interfaceName, current: iface.ssid(), visible: visible, error: scanError)
 }
 
+// hotspot is the hotspot verb's answer: the join of the hotspot named NAME.
+// Its password never leaves this process: the answer names the network only.
+func hotspot(verb: String, name: String, authorization: String) -> Answer {
+    guard let iface = CWWiFiClient.shared().interface() else {
+        return Answer(verb: verb, authorization: authorization, interface: nil, current: nil, visible: [], error: "no Wi-Fi interface")
+    }
+    let joined: HotspotAnswer
+    switch SharingPhones.connect() {
+    case .failure(let why):
+        joined = HotspotAnswer(stage: HotspotStage.browseFailed.rawValue, error: why.detail)
+    case .success(let phones):
+        joined = joinHotspot(named: name, phones: phones, radio: CoreWLANRadio(iface: iface), elapsed: {
+            let start = DispatchTime.now()
+            return { Int((DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000) }
+        })
+    }
+    return Answer(verb: verb, authorization: authorization, interface: iface.interfaceName, current: iface.ssid(),
+                  visible: [], error: nil, hotspot: joined)
+}
+
 // Listener hears the helper's standing (standing.swift) and does VERB's step:
 // it answers the first standing a scan hears, and for authorize asks first
 // when the owner never answered, then answers the owner's answer.
 final class Listener: NSObject, CLLocationManagerDelegate {
     let manager = CLLocationManager()
     let verb: String
+    let name: String?
     let out: String
     var requested = false
     var heard = false
     let created = DispatchTime.now()
-    init(verb: String, out: String) {
+    init(verb: String, name: String?, out: String) {
         self.verb = verb
+        self.name = name
         self.out = out
         super.init()
         manager.delegate = self
@@ -115,7 +143,12 @@ final class Listener: NSObject, CLLocationManagerDelegate {
         case .wait:
             break
         case .answer:
-            write(scan(verb: verb, authorization: authorizationName(status)), to: out)
+            let authorization = authorizationName(status)
+            if verb == "hotspot", let name {
+                write(hotspot(verb: verb, name: name, authorization: authorization), to: out)
+            } else {
+                write(scan(verb: verb, authorization: authorization), to: out)
+            }
             exit(0)
         }
     }
@@ -154,12 +187,12 @@ func fail(verb: String, out: String, _ error: String, code: Int32) -> Never {
 }
 
 let args = CommandLine.arguments
-guard args.count == 4, args[2] == "--out", ["scan", "authorize"].contains(args[1]) else {
-    FileHandle.standardError.write("usage: agent-repl-wifi scan|authorize --out FILE\n".data(using: .utf8)!)
+guard let parsed = parseArgs(Array(args.dropFirst())) else {
+    FileHandle.standardError.write("usage: agent-repl-wifi scan|authorize --out FILE | hotspot --name NAME --out FILE\n".data(using: .utf8)!)
     exit(2)
 }
-let verb = args[1]
-let out = args[3]
+let verb = parsed.verb
+let out = parsed.out
 // THE HELPER RUNS AS ITS APP (`open`), so it always has its bundle's identity,
 // which is what locationd serves one client of.
 guard let bundle = Bundle.main.bundleIdentifier else {
@@ -189,7 +222,7 @@ do {
 } catch {
     fail(verb: verb, out: out, "its Location Services seat could not be taken: \(error)", code: 3)
 }
-let listener = Listener(verb: verb, out: out)
+let listener = Listener(verb: verb, name: parsed.name, out: out)
 DispatchQueue.main.asyncAfter(deadline: .now() + standingBound) {
     if !listener.heard {
         fail(verb: verb, out: out, "Location Services did not tell the standing within \(standingBound)s", code: 4)
