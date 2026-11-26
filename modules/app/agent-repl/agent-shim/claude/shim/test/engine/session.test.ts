@@ -16265,6 +16265,29 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     });
   }
 
+  /** The send's own detachment, naming the agent it resumed. */
+  function sendAnnouncement(): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "2a" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "detachedWork",
+              value: create(conversationv1.AgentDetachedWorkSchema, {
+                work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" }),
+                kind: create(conversationv1.DetachedWorkKindSchema, {
+                  kind: { case: "subagent", value: create(conversationv1.DetachedWorkKindSubagentSchema, { agentId: SPAWN }) },
+                }),
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
   /** The failure the closing of `activity:toolu_send` settles with, or undefined. */
   function sendClosing(h: Harness): conversationv1.AgentSubagentFailure | undefined {
     const closing = h.persistence.buffered.find((entry) => entry.upsertKey === "activity:toolu_send");
@@ -16294,7 +16317,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     // Arrange.
     const h = restoredHarness();
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [resumedRunBeat()],
+      entries: [resumedRunBeat(), sendAnnouncement()],
       boundary: { case: "more", value: create(conversationv1.HistoryMoreSchema, {}) },
     });
     h.persistence.olderPages = [resumedBook()];

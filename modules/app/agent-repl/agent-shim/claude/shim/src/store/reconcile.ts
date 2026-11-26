@@ -449,9 +449,9 @@ export function findUnit(
  * Whether the pages read so far hold the unit's OWN row beyond doubt, so a
  * reader looking for it may stop paging.
  *
- * A row that is a subagent arm and proves nothing about whose it is (a running
- * beat, with no announcement of the handle in the pages) may be the run a SEND
- * resumed, whose own call lies further back: the reader keeps paging for it.
+ * A subagent arm the handle's own announcement shows to be the run a SEND
+ * resumed is not the unit's: the send's own row lies further back, and the
+ * reader keeps paging for it.
  */
 export function holdsUnitRow(
   entries: readonly conversationv1.HistoryEntryAt[],
@@ -483,7 +483,7 @@ function findUnitEntry(
 interface UnitRows {
   /** The unit's own row, when the pages hold one that is not a resumed run's. */
   readonly own: UnitEntry | undefined;
-  /** Whether `own` is the unit's beyond doubt, so no older page can change it. */
+  /** Whether a reader may stop paging: nothing in the pages read says the unit's own row lies further back. */
   readonly settled: boolean;
 }
 
@@ -502,12 +502,12 @@ interface UnitRows {
  * Only a subagent arm can be a run's row, so:
  *
  * - a row that is NOT a subagent arm is the unit's own, beyond doubt;
- * - a subagent arm that names another agent than the unit (its start or
- *   settle's created agent, or the handle's own announcement in the book) is a
- *   run's row, and never the unit's;
- * - a subagent arm that names the unit itself is the spawn's own, beyond doubt;
- * - a subagent arm that names nothing is the unit's as far as these pages
- *   show, and an older page may still hold the send it shares its id with.
+ * - a subagent arm whose handle's own announcement in the book names another
+ *   agent than the unit is a run's row, and never the unit's: the reader pages
+ *   on for the send it shares its id with;
+ * - any other subagent arm is the unit's own. Its own created agent proves
+ *   nothing either way (a recorded spawn may state an agent the minting rule
+ *   would not), and paging on past every live spawn's row read the whole book.
  */
 function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conversationv1.AgentActivityId): UnitRows {
   let call: UnitEntry | undefined;
@@ -526,13 +526,11 @@ function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conve
     else call ??= found;
   }
   if (call !== undefined) return { own: call, settled: true };
-  if (subagent === undefined || subagent.item.case !== "subagent") return { own: undefined, settled: false };
-  const spawned = subagentId(unit.value).value;
+  if (subagent === undefined) return { own: undefined, settled: false };
   const kind = announcedKindOf(entries, create(conversationv1.DetachedWorkIdSchema, { value: unit.value }));
   const announced = kind?.case === "subagent" ? statedAgent(kind.value.agentId) : undefined;
-  const named = [statedCreatedAgent(subagent.item.value), announced].filter((agent) => agent !== undefined);
-  if (named.some((agent) => agent !== spawned)) return { own: undefined, settled: false };
-  return { own: subagent, settled: named.length > 0 };
+  if (announced !== undefined && announced !== subagentId(unit.value).value) return { own: undefined, settled: false };
+  return { own: subagent, settled: true };
 }
 
 /** The created agent a recorded subagent arm states, when its arm states one. */

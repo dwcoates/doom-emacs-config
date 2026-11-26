@@ -1133,9 +1133,10 @@ describe("the unit's own row beside the run a send resumed", () => {
     readonly settled: boolean;
   }[] = [
     { name: "a run's beat served before the send", book: [beat(), sendRow()], own: "sendMessage", settled: true },
-    { name: "a run's beat alone", book: [beat()], own: "subagent", settled: false },
-    { name: "a run's settle naming the agent it resumed", book: [settledNaming("toolu_spawn")], own: undefined, settled: false },
-    { name: "a beat whose announcement names another agent", book: [beat(), announcing("toolu_spawn")], own: undefined, settled: false },
+    { name: "a beat alone, which nothing shows to be a run's", book: [beat()], own: "subagent", settled: true },
+    { name: "a settle stating an agent the minting rule would not", book: [settledNaming("toolu_spawn")], own: "subagent", settled: true },
+    { name: "a run's beat whose announcement names the agent it resumed", book: [beat(), announcing("toolu_spawn")], own: undefined, settled: false },
+    { name: "a run's settle whose announcement names the agent it resumed", book: [settledNaming("toolu_spawn"), announcing("toolu_spawn")], own: undefined, settled: false },
     { name: "a spawn's beat whose announcement names the unit", book: [beat(), announcing("toolu_send")], own: "subagent", settled: true },
     { name: "a spawn's start naming the unit", book: [startNaming("toolu_send")], own: "subagent", settled: true },
     { name: "a shell's row", book: [bashRow()], own: "bash", settled: true },
@@ -1180,7 +1181,7 @@ describe("the unit's own row beside the run a send resumed", () => {
 
     // Act.
     const announced = announceLiveWork(
-      [beat(), sendRow()],
+      [beat(), announcing("toolu_spawn"), sendRow()],
       [create(conversationv1.DetachedWorkIdSchema, { value: SEND.value })],
       BOOK,
       (handle) => undescribed.push(handle.value),
