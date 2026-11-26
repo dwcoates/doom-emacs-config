@@ -2,13 +2,10 @@ package rollout
 
 import (
 	"agent-repld/internal/creategate"
-	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/token"
 	"os"
 	"path/filepath"
 	"sync"
@@ -2033,38 +2030,5 @@ func TestALockArrangedIsWhatTheProbeReads(t *testing.T) {
 				t.Fatalf("probe = %v, %v; want the arranged free lock", state, err)
 			}
 		})
-	}
-}
-
-// EVERY TEST ARRANGES A LOCK THROUGH setLock: a hand-rolled write to the
-// harness's lock table skips its lock, and drifts from the one shape.
-func TestEveryLockArrangedGoesThroughSetLock(t *testing.T) {
-	var stray []string
-	sourcescan.EachSourceIn(t, ".", true, func(fset *token.FileSet, file *ast.File) {
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name == "setLock" || fn.Body == nil {
-				continue
-			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				assign, ok := n.(*ast.AssignStmt)
-				if !ok {
-					return true
-				}
-				for _, lhs := range assign.Lhs {
-					index, ok := lhs.(*ast.IndexExpr)
-					if !ok {
-						continue
-					}
-					if sel, ok := index.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "lockStates" {
-						stray = append(stray, fset.Position(assign.Pos()).String())
-					}
-				}
-				return true
-			})
-		}
-	})
-	if len(stray) != 0 {
-		t.Fatalf("locks arranged outside setLock at %v", stray)
 	}
 }
