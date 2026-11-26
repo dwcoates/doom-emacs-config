@@ -268,23 +268,6 @@
   - Never raise that same proposal again.
   - A different memory change may still be proposed on its own merits.
 
-## Subagents
-
-### Subagents default to opus at medium reasoning effort, and sonnet is chosen where the work fits it
-
-- Every subagent I dispatch runs on the `opus` model at `medium` reasoning effort by default.
-  - The default is expressed by dispatching through the `opus-medium` subagent type, which pins both the model and the effort in one place.
-  - Use `subagent_type: opus-medium` for any dispatch that does not require a different specialized agent type or the sonnet tier.
-  - The default is never inherited implicitly from the session's own model or effort, since inheritance silently changes the subagent's tier whenever the session's tier changes.
-- The `sonnet` tier is an allowed choice at my own judgment, dispatched through the `sonnet-medium` subagent type.
-  - It fits docs, ledgers, shell and harness edits, tests from a settled design, log-shape fixes, read-only investigations, and single-site fixes with a stated cause.
-  - `opus` stays the tier for multi-file production logic and for design or diagnosis whose answer is not yet settled.
-- Every dispatch names its model explicitly.
-  - When a different agent type is genuinely required, pass `model` explicitly on that dispatch rather than leaving the model unset.
-  - A model or effort the user names for a dispatch overrides this section.
-- Effort stays at `medium` for every tier.
-  - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
-
 ## One-shot workspaces
 
 ### A workspace told to one-shot itself marks itself one-shot

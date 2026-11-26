@@ -119,19 +119,6 @@ describe("this repository's committed metaprompt", () => {
     return home;
   }
 
-  it("defaults subagent dispatch to opus at medium effort and allows the sonnet tier", () => {
-    // Arrange
-    const home = homeOnThisRepository();
-    // Act
-    const text = readMetaprompt(home);
-    // Assert — the directive only governs a session if it survives into the
-    // system-prompt append, so the guard is on the delivered text.
-    expect(text).toContain("Subagents default to opus at medium reasoning effort");
-    expect(text).toContain("subagent_type: opus-medium");
-    expect(text).toContain("dispatched through the `sonnet-medium` subagent type");
-    expect(text).not.toContain("weaker tier than opus is a defect");
-  });
-
   it("names bypass queue mode as the mode a queue-bypass session runs in", () => {
     // Arrange
     const home = homeOnThisRepository();
