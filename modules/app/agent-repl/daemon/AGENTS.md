@@ -1289,7 +1289,9 @@ landing however many commits it carries) run `deploy.Deployer.Deploy`:
    build: store/sidecar by their build report (`agentrepl/logging/buildreport`)
    and restart them in the recorded safe order (`Restarter`); the launcher app
    by its build report (`launcher.build.json`), judged by the same
-   `serviceStaleness`, restarted with `Restarter.RestartLauncher` (ensures the
+   `serviceStaleness`, restarted with `Restarter.RestartLauncher` (first retires the
+   old `com.agentrepl.notifier` launch agent, booting it out and deleting its
+   plist when present, and logging each; ensures the
    launcher's socket holder, `Restarter.LauncherHolder`; `lsregister -f` on the
    installed bundle; then a start or kickstart of `app.zettel.launcher`) when
    that build is not the installed one or the launcher is not running; Emacs streams by

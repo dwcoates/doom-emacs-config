@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -291,13 +292,30 @@ type restartRecorder struct {
 	restarted bool
 	started   bool
 	err       error
+	// retiredHeld is whether the manager holds the retired notifier's label,
+	// and retiredStopErr fails its bootout; retiredStopped records one.
+	retiredHeld      bool
+	retiredStopErr   error
+	retiredStopped   bool
+	retiredStatusErr error
 }
 
 func (k *restartRecorder) Status(_ context.Context, label string) (bool, int, error) {
+	if label == RetiredNotifierLabel {
+		return k.retiredHeld, 91, k.retiredStatusErr
+	}
 	if label != LauncherLabel {
 		panic("restartRecorder: status of " + label)
 	}
 	return k.loaded, 0, nil
+}
+
+func (k *restartRecorder) Stop(_ context.Context, label string) error {
+	if label != RetiredNotifierLabel {
+		panic("restartRecorder: stop of " + label)
+	}
+	k.retiredStopped = true
+	return k.retiredStopErr
 }
 
 func (k *restartRecorder) Definition(label string) string {
@@ -392,6 +410,82 @@ func TestTheLauncherInstallRemovesAStrayAppFromTheCacheBin(t *testing.T) {
 			}
 			if got := readFile(t, filepath.Join(h.live.LauncherApp(), LauncherExecutable)); got != "launcher-2" {
 				t.Fatalf("installed launcher = %q, want the fresh build", got)
+			}
+		})
+	}
+}
+
+func TestRestartLauncherRetiresTheOldNotifierAgent(t *testing.T) {
+	cases := []struct {
+		name            string
+		held            bool
+		plistPresent    bool
+		stopErr         error
+		statusErr       error
+		wantStopped     bool
+		wantPlistGone   bool
+		wantRestart     bool
+		wantErr         string
+		wantInfo        []string
+		wantErrorRecord string
+	}{
+		{name: "a machine holding the old agent and its plist boots it out and deletes the plist", held: true, plistPresent: true,
+			wantStopped: true, wantPlistGone: true, wantRestart: true,
+			wantInfo: []string{"booted out the retired notifier", "deleted the retired notifier's definition"}},
+		{name: "a machine whose plist is present but not loaded deletes the plist only", plistPresent: true,
+			wantPlistGone: true, wantRestart: true, wantInfo: []string{"deleted the retired notifier's definition"}},
+		{name: "a machine that never had the old agent retires nothing", wantRestart: true},
+		{name: "an old agent that left between the look and the bootout is retired", held: true, plistPresent: true,
+			stopErr: fmt.Errorf("%w: exited 113", ErrServiceNotLoaded), wantStopped: true, wantPlistGone: true, wantRestart: true},
+		{name: "a bootout that fails is logged and restarts nothing, leaving the plist", held: true, plistPresent: true,
+			stopErr: errors.New("bootout refused"), wantStopped: true, wantErr: "bootout refused",
+			wantErrorRecord: "booting out the retired service failed"},
+		{name: "a state read that fails is logged and restarts nothing", statusErr: errors.New("launchctl print died"),
+			wantErr: "launchctl print died", wantErrorRecord: "could not read the retired service's service-manager state"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, LauncherLabel+".plist"), "<plist/>")
+			retiredPlist := filepath.Join(dir, RetiredNotifierLabel+".plist")
+			if tc.plistPresent {
+				writeFile(t, retiredPlist, "<plist/>")
+			}
+			services := &restartRecorder{loaded: true, dir: dir, retiredHeld: tc.held, retiredStopErr: tc.stopErr, retiredStatusErr: tc.statusErr}
+			r := &Restarter{Services: services, Log: log, LauncherApp: "/Apps/Zettel.app",
+				RegisterApp: func(context.Context, string) error { return nil }}
+
+			// Act
+			err := r.RestartLauncher(context.Background())
+
+			// Assert
+			if (tc.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("RestartLauncher = %v, want %q", err, tc.wantErr)
+			}
+			if services.retiredStopped != tc.wantStopped {
+				t.Fatalf("retired notifier booted out = %v, want %v", services.retiredStopped, tc.wantStopped)
+			}
+			if _, statErr := os.Stat(retiredPlist); errors.Is(statErr, os.ErrNotExist) != (tc.wantPlistGone || !tc.plistPresent) {
+				t.Fatalf("retired plist stat = %v, want gone: %v", statErr, tc.wantPlistGone || !tc.plistPresent)
+			}
+			if services.restarted != tc.wantRestart {
+				t.Fatalf("launcher restarted = %v, want %v", services.restarted, tc.wantRestart)
+			}
+			for _, msg := range tc.wantInfo {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Message: msg}); !ok {
+					t.Fatalf("no info record %q", msg)
+				}
+			}
+			if tc.wantErrorRecord != "" {
+				rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Message: tc.wantErrorRecord})
+				if !ok {
+					t.Fatalf("no error record %q", tc.wantErrorRecord)
+				}
+				if rec.Context["retired_label"] != RetiredNotifierLabel {
+					t.Fatalf("error record context = %v, want retired_label %s", rec.Context, RetiredNotifierLabel)
+				}
 			}
 		})
 	}

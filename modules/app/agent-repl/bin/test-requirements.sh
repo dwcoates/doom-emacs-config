@@ -1717,6 +1717,29 @@ exit 1'
   else fail "service from a linked worktree" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
+test_install_retires_the_services_an_entry_replaced() {
+  new_case
+  local old='{"id": "svc", "kind": "service", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "label": "com.example.svc", "retires": ["com.example.old"], "args": [], "log": {"stdout": "svc.out.log", "stderr": "svc.err.log"}, "build_target": "svc", "binary": "svc"}'
+  manifest "[$old]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/svc" && chmod +x "$HOME/.cache/agent-repl/bin/svc"'
+  local plist="$CASE/home/Library/LaunchAgents/com.example.old.plist"
+  mkdir -p "$CASE/home/Library/LaunchAgents"
+  : >"$plist"
+  : >"$CASE/stubs/.loaded-com.example.old"
+  run install
+  if [ "$RC" -eq 0 ] && ran "launchctl bootout gui/$(id -u)/com.example.old" && [ ! -e "$plist" ] \
+     && has "booted out the retired service com.example.old" && has "deleted the retired service's definition $plist"; then
+    pass "install boots out and deletes the definition of a service its entry retires"
+  else fail "retired service" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+  # A machine that never had it retires nothing.
+  new_case
+  manifest "[$old]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/svc" && chmod +x "$HOME/.cache/agent-repl/bin/svc"'
+  run install
+  if [ "$RC" -eq 0 ] && ! ran "bootout" && ! has "retired service"; then pass "install retires nothing on a machine that never had the replaced service"
+  else fail "absent retired service" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
 test_uninstall_removes_the_service() {
   service_case
   run install

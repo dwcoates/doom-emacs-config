@@ -30,6 +30,11 @@ const (
 	TestsLabel   = "com.agentrepl.tests"
 	// LauncherLabel is the launcher's launchd agent.
 	LauncherLabel = "app.zettel.launcher"
+	// RetiredNotifierLabel is the launch agent the launcher replaced. Both
+	// ran the same Zettel.app --resident, so a machine still holding the old
+	// one saw it lose the run lock and exit, and launchd (KeepAlive) start it
+	// again every ThrottleInterval, forever.
+	RetiredNotifierLabel = "com.agentrepl.notifier"
 )
 
 // Standalone is a service no other service's restart moves, and that moves
@@ -332,6 +337,9 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 	if r.RegisterApp == nil || r.LauncherApp == "" {
 		panic("deploy: RestartLauncher on a restarter with no launcher to register")
 	}
+	if err := r.retireService(ctx, RetiredNotifierLabel, "the retired notifier", fields); err != nil {
+		return err
+	}
 	if err := r.ensureHolderOf(ctx, "the launcher", r.LauncherHolder, fields); err != nil {
 		return err
 	}
@@ -355,6 +363,37 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 		return fmt.Errorf("deploy: restart %s: %w", LauncherLabel, err)
 	}
 	r.Log.Info(opServices, "registered and restarted the launcher", fields)
+	return nil
+}
+
+// retireService boots a service this build no longer ships out of the service
+// manager and deletes its installed definition, so every machine that
+// installed it heals on its next deploy. A service the manager does not hold
+// and a definition that is absent are the retired state already, and log
+// nothing. A bootout or removal that fails is logged and is the error: the
+// retired service would keep running beside its replacement.
+func (r *Restarter) retireService(ctx context.Context, label, what string, fields dlog.Context) error {
+	fields = dlog.Merge(fields, dlog.Context{"retired_label": label})
+	definition := r.Services.Definition(label)
+	held, pid, err := r.Services.Status(ctx, label)
+	if err != nil {
+		r.failed(logsite.Msg("could not read the retired service's service-manager state"), fields, err)
+		return fmt.Errorf("deploy: read %s: %w", label, err)
+	}
+	if held {
+		if err := r.Services.Stop(ctx, label); err != nil && !errors.Is(err, ErrServiceNotLoaded) {
+			r.failed(logsite.Msg("booting out the retired service failed"), dlog.Merge(fields, dlog.Context{"pid": pid}), err)
+			return fmt.Errorf("deploy: retire %s: %w", label, err)
+		}
+		r.Log.With(fields).Info(opServices, "booted out {what}", dlog.Context{"what": what, "pid": pid})
+	}
+	if err := os.Remove(definition); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		r.failed(logsite.Msg("deleting the retired service's definition failed"), dlog.Merge(fields, dlog.Context{"definition": definition}), err)
+		return fmt.Errorf("deploy: delete %s: %w", definition, err)
+	}
+	r.Log.With(fields).Info(opServices, "deleted {what}'s definition", dlog.Context{"what": what, "definition": definition})
 	return nil
 }
 

@@ -122,7 +122,8 @@ passed; every other flag keeps its default.
   from which it takes the listening socket `launcher.sock`); the contract is
   `launcher/Sources/ZettelLauncher/Options.swift`. The state root
   (`daemon.addr`) keeps the daemon's own default. A macOS deploy installs and
-  restarts it (`daemon/internal/deploy`, `Restarter.RestartLauncher`).
+  restarts it (`daemon/internal/deploy`, `Restarter.RestartLauncher`), and the install and every deploy retire the
+  old `com.agentrepl.notifier` launch agent (the entry's `retires` list).
 
 `AGENT_REPL_STATE_DIR` is the sidecar's `--state-dir` default, and the same
 variable the daemon resolves and exports into every shim it spawns; the two

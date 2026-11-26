@@ -41,6 +41,9 @@
         "darwin"
       ],
       "label": "app.zettel.launcher",
+      "retires": [
+        "com.agentrepl.notifier"
+      ],
       "args": [
         "--resident",
         "--log",
