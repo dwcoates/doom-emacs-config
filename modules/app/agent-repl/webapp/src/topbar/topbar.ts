@@ -3,7 +3,8 @@
  *
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
  * status run (the queue-bypass chip on a personal account, the remote-control
- * chip, then the persistent-wifi chip) at the left edge, then the account cell
+ * chip, the persistent-wifi chip, then the production-checks chip in a
+ * repository that checks its production) at the left edge, then the account cell
  * (its connectivity glyph, then its label). The model selector, the effort
  * selector, the permission-mode picker and the context chip sit at the right
  * edge.
@@ -55,6 +56,7 @@ import { drawTopbarEffortSelector } from "./effort.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
+import { drawTopbarProductionChecks } from "./production-checks.js";
 import { drawTopbarRemoteControl } from "./remote-control.js";
 import { drawTopbarQueueBypass } from "./queue-bypass.js";
 import { bindAccountReveal } from "./account.js";
@@ -233,6 +235,9 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     ...(u.queueBypass !== undefined ? [drawTopbarQueueBypass(u.queueBypass, tc)] : []),
     drawTopbarRemoteControl(requireMessage(u.remoteControl, "TopbarView.remoteControl"), tc),
     drawTopbarPersistentWifi(requireMessage(u.persistentWifi, "TopbarView.persistentWifi"), tc),
+    // THE PRODUCTION-CHECKS CHIP CLOSES THE RUN, right of the wifi chip, in
+    // a repository that checks its production only.
+    ...(u.productionChecks !== undefined ? [drawTopbarProductionChecks(u.productionChecks, tc)] : []),
   ]);
   left.append(status, accountCell);
 
