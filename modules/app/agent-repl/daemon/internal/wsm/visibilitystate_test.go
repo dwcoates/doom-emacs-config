@@ -301,14 +301,18 @@ func TestACorruptStoredVisibilityIsADecodeError(t *testing.T) {
 // seedOver runs the migration's seed over S's workspaces as they stand, with
 // every visibility reset first, and answers each one's seeded visibility.
 // The seed runs at layout 192, whose file names the backlog `hidden` (layout
-// 205 retired that column for `backlogged`), so S is given that column again,
-// filled from `backlogged`, for the seed to read.
+// 205 retired that column for `backlogged`) and still holds a merge
+// workspace's marks (layout 222 retired merge_of and merge_revealed), so S is
+// given those columns again, `hidden` filled from `backlogged`, for the seed
+// to read.
 func seedOver(t *testing.T, s *store, ids ...WorkspaceID) map[WorkspaceID]Visibility {
 	t.Helper()
 	ctx := context.Background()
 	for _, stmt := range []string{
 		`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE workspaces SET hidden = backlogged`,
+		`ALTER TABLE workspaces ADD COLUMN merge_of TEXT`,
+		`ALTER TABLE workspaces ADD COLUMN merge_revealed INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE workspaces SET visibility = 'not_visible'`,
 	} {
 		if _, err := s.db().Exec(stmt); err != nil {

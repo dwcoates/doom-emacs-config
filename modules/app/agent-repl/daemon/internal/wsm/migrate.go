@@ -420,7 +420,10 @@ var migrations = []migration{
 	{To: 219, Name: "closure_how", Kind: MigrationAdditive, DDL: closureHowDDL},
 	// IT IS ADDITIVE: one new table the previous build never names.
 	{To: 220, Name: "log_site_marks", Kind: MigrationAdditive, DDL: logSiteMarksDDL},
-	{To: 221, Name: "retired_async_merges", Kind: MigrationContract, DDL: retiredAsyncMergesDDL, Rewrite: retireAsyncMergeRows},
+	// IT IS ADDITIVE: four defaulted columns the previous build never names,
+	// and the stored feed rows' retired shapes dropped (retiredasyncmerges.go).
+	{To: 221, Name: "landing_effects", Kind: MigrationAdditive, DDL: landingEffectsDDL, Rewrite: retireAsyncMergeRows},
+	{To: 222, Name: "retired_async_merges", Kind: MigrationContract, DDL: retiredAsyncMergesDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

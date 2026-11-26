@@ -112,7 +112,7 @@ DELETE FROM off_queue_merges
 // MergeLeftAdopted is the cause an adopted record carried: a merge workspace
 // found open with no request standing, its request's values lost. Only
 // layout 129's adoption step (adoptOffQueueMergesDML) writes it, and layout
-// 221 drops every such record (retiredAsyncMergesDDL).
+// 222 drops every such record (retiredAsyncMergesDDL).
 const MergeLeftAdopted = "adopted"
 
 // OffQueueMerge is one merge's request standing off its queue.

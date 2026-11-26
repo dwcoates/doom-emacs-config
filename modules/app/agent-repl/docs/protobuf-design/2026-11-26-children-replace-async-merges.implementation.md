@@ -203,7 +203,7 @@ log of the branch first.
 
 - Every daemon package and its tests compile; the changed tests pass.
 - Retired beyond the plan: the detached landing record (`wsm.Landing`,
-  `RetireLanded`, landedbranch's recorded head; layout 221 drops
+  `RetireLanded`, landedbranch's recorded head; layout 222 drops
   `landed_head` and `landed_at`), the pick tab and span, the
   `merge_ended` stand-down, dead async refusal arms.
 - B2 is in `internal/workspacesubs`: `workspace-child-landed.md` is the
@@ -231,3 +231,12 @@ log of the branch first.
   (`FeedChildTarget.pull_request`) and the merged version
   (`FeedChildStandingMerged.version`).
 - Next: phases C to E, then the open cleanups above.
+
+### Note at the merge gate's first repair
+
+- Layout 221 was a contract step that renamed and added columns, which a
+  contract step may not do: the previous build still reads the old names
+  while it serves beside the new one. It is now two steps: 221, additive,
+  adds the one-shot's landing columns beside the old ones and edits the
+  stored feed rows; 222, the contract, drops everything the async merge
+  left, the old landing columns included.

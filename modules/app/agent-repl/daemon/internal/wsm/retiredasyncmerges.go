@@ -14,44 +14,52 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// LAYOUT 221 RETIRES THE ASYNC MERGE (owner request, 2026-11-26;
+// LAYOUTS 221 AND 222 RETIRE THE ASYNC MERGE (owner request, 2026-11-26;
 // docs/protobuf-design/2026-11-26-children-replace-async-merges.md). A
 // workspace lands work it already has as a one-shot child cut from that
 // work's branch, so nothing is merged in a hidden merge workspace any more.
-// The step:
+// The retirement is an additive step and a contract step, as every change that
+// would break is (MigrationKind).
 //
-//   - drops every async request, and every queue row and off-queue record a
-//     merge workspace's request held: none can run;
-//   - drops the merge workspace's marks (workspaces.merge_of, its request,
-//     its fork head and its reveal), its removal record, the owed handbacks
-//     and the turn mirrors, which nothing reads, and the requester's record
-//     of its detached landing (landed_head, landed_at), which only a rebased
-//     landing ever needed;
-//   - carries the async merge's landing effects onto the one-shot's own
-//     (LandingEffects): the close-after, the cleanup directory and the
-//     compaction of the requester, renamed for what they now are, plus the
-//     profile gate. A merge workspace's effects are cleared first, since its
-//     merge never runs again;
-//   - drops the queue's and the off-queue record's detached-request columns,
-//     and the adopted mark, which only a merge workspace ever carried;
-//   - drops a merge workspace's deploy still being checked, and the deploying
+// Layout 221, ADDITIVE, adds the one-shot's own landing effects
+// (LandingEffects) beside the async merge's: the close-after, the cleanup
+// directory, the compaction of the requester and the profile gate. The
+// previous build never names them, and only a merge workspace ever carried the
+// async merge's, so nothing is carried across. Its row edit drops the stored
+// feed rows' retired shapes (retireAsyncMergeRows).
+//
+// Layout 222, A CONTRACT STEP, removes what the async merge left:
+//
+//   - every async request, and every queue row and off-queue record a merge
+//     workspace's request held: none can run;
+//   - the merge workspace's marks (workspaces.merge_of, its request, its fork
+//     head and its reveal), its removal record, the owed handbacks and the
+//     turn mirrors, which nothing reads, and the requester's record of its
+//     detached landing (landed_head, landed_at), which only a rebased landing
+//     ever needed;
+//   - the async merge's landing effects, which layout 221's replace;
+//   - the queue's and the off-queue record's detached-request columns, and
+//     the adopted mark, which only a merge workspace ever carried;
+//   - a merge workspace's deploy still being checked, and the deploying
 //     merge's credit and async mark: every merge is its own workspace's;
-//   - drops every ledger interval of the retired pick step, which no bubble
-//     or roster stage draws any more.
+//   - every ledger interval of the retired pick step, which no bubble or
+//     roster stage draws any more.
 //
 // A MERGE WORKSPACE STILL OPEN STAYS OPEN, as the visible child of the
 // workspace it was forked for: children are never hidden, and its work is
 // the user's to land or close.
-//
-// IT IS A CONTRACT STEP: it only removes shapes no build after it writes, and
-// the build before it still reads the columns it drops.
+const landingEffectsDDL = `
+ALTER TABLE workspaces ADD COLUMN landing_close_after TEXT;
+ALTER TABLE workspaces ADD COLUMN landing_cleanup_dir TEXT;
+ALTER TABLE workspaces ADD COLUMN landing_compact_requester INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN landing_profile_gate INTEGER NOT NULL DEFAULT 0;
+`
+
 const retiredAsyncMergesDDL = `
 DELETE FROM merge_queue WHERE source_detach_id IS NOT NULL;
 DELETE FROM merge_queue WHERE workspace_id IN (SELECT id FROM workspaces WHERE merge_of IS NOT NULL);
 DELETE FROM off_queue_merges WHERE source_detach_id IS NOT NULL OR adopted = 1;
 DELETE FROM off_queue_merges WHERE workspace_id IN (SELECT id FROM workspaces WHERE merge_of IS NOT NULL);
-UPDATE workspaces SET merge_compact_after = 0, merge_close_on_landing = NULL, merge_cleanup_worktree = 0, merge_cleanup_dir = NULL
- WHERE merge_of IS NOT NULL;
 DROP INDEX workspaces_by_merge_of;
 ALTER TABLE workspaces DROP COLUMN merge_of;
 ALTER TABLE workspaces DROP COLUMN merge_request_id;
@@ -60,10 +68,9 @@ ALTER TABLE workspaces DROP COLUMN merge_revealed;
 ALTER TABLE workspaces DROP COLUMN merge_cleanup_worktree;
 ALTER TABLE workspaces DROP COLUMN landed_head;
 ALTER TABLE workspaces DROP COLUMN landed_at;
-ALTER TABLE workspaces RENAME COLUMN merge_compact_after TO landing_compact_requester;
-ALTER TABLE workspaces RENAME COLUMN merge_close_on_landing TO landing_close_after;
-ALTER TABLE workspaces RENAME COLUMN merge_cleanup_dir TO landing_cleanup_dir;
-ALTER TABLE workspaces ADD COLUMN landing_profile_gate INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workspaces DROP COLUMN merge_compact_after;
+ALTER TABLE workspaces DROP COLUMN merge_close_on_landing;
+ALTER TABLE workspaces DROP COLUMN merge_cleanup_dir;
 ALTER TABLE turns DROP COLUMN mirror;
 DROP TABLE async_merge_requests;
 DROP TABLE owed_handbacks;

@@ -1,7 +1,7 @@
 package wsm
 
 // This file held the durable half of a detached merge's LANDING ON ITS
-// REQUESTER. Layout 221 retires it with the async merge
+// REQUESTER. Layout 222 retires it with the async merge
 // (retiredasyncmerges.go); its DDL stays for the layouts that replay it.
 
 // landedDDL adds:

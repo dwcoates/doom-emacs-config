@@ -537,12 +537,9 @@ func TestTheMigrationAdoptsOpenMergeWorkspacesNothingReferences(t *testing.T) {
 				execRaw(t, path, tt.arrange)
 			}
 
-			// Act
-			handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer handle.Close()
+			// Act: layout 129 alone, which adopts; layout 222 retired the
+			// adopted mark with the async merge.
+			execRaw(t, path, migrationTo(t, 129).DDL)
 			adopted := rawScalar[int](t, path, `SELECT count(*) FROM off_queue_merges WHERE workspace_id = ? AND adopted = 1 AND cause = 'adopted' AND source_branch = (SELECT branch FROM workspaces WHERE id = ?)`,
 				string(fixtureWorkspaceID), string(fixtureWorkspaceID))
 

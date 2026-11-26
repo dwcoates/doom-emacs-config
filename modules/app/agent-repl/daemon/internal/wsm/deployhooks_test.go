@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -83,7 +84,13 @@ func TestDecodeHooksRefusesWhatIsNoHook(t *testing.T) {
 
 func TestTheMigrationRewritesStoredActionsAsPromptHooks(t *testing.T) {
 	// Arrange -- a creation job and a queued request a layout-66 build wrote,
-	// each with before/after prompt texts.
+	// each with before/after prompt texts, carried to layout 68 alone: layout
+	// 222 retired the queue's hook columns with the async merge.
+	step := slices.IndexFunc(migrations, func(m migration) bool { return m.Name == "deploy_hooks" })
+	if step < 0 {
+		t.Fatal("no migration step is named deploy_hooks")
+	}
+	withSteps(t, slices.Clone(migrations[:step+1])...)
 	path := fixtureAt(t, 66)
 	execRaw(t, path, `INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin,
 	   actions_before, actions_after, base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
