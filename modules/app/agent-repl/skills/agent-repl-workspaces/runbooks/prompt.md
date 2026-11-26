@@ -4,7 +4,7 @@
   `workspace prompt`, never `SendMessage`.** `SendMessage` stays the way to
   talk to this workspace's own subagents. `workspace prompt` goes through
   agent-repld, which holds the prompt behind the recipient's running work,
-  refuses it while the recipient is parked at a cold gate, and draws the send
+  passes a cold gate the recipient is parked at, and draws the send
   in both workspaces' feeds; a `SendMessage` to another session goes around
   all of it.
 - `ListAgents` never lists workspaces: an open workspace that is idle or
@@ -25,10 +25,18 @@
 - A refused `workspace prompt` exits 6, prints the daemon's answer on
   stdout, and prints one plain sentence on stderr saying why WS cannot take
   the prompt. Read that sentence to tell the user what became of the send.
-- **A workspace parked at a cold gate refuses every prompt an agent sends
-  it, `-as-user` or not** (`cold_gate`). Nothing is held for later: once the
-  gate is passed (by the user, or by `workspace pass-gate`; `workspace status`
-  names the gate), send the prompt again. `-as-user` lifts only the fan-out cap in the next point, never the cold gate.
+- **A prompt an agent sends to a workspace parked at a cold gate passes the
+  gate for it.** The daemon passes the gate at once with the compaction
+  `workspace pass-gate` makes (Haiku, the whole context; prompts the user left
+  held at the gate stay held for the user). The prompt waits at the gate and
+  is delivered when that compaction brings the session up. Prompts arriving
+  together start one compaction. A prompt passes the gate at most once: if the
+  compaction fails, the gate stands again, this workspace gets a notice that
+  the pass failed, and the prompt stays waiting at the gate for the user's
+  answer on the gate card (it is not dropped; do not resend it). A prompt the
+  user types is still refused by a cold gate, and daemon notices wait at a
+  gate without passing it. `-as-user` changes none of this; it lifts only the
+  fan-out cap in the next point.
 - **CRITICAL: NEVER broadcast to the fleet.** Every workspace a prompt
   reaches wakes and resends its whole context. A notice every workspace
   needs goes in the harness (`/agent-repl-update-harness`), never in a

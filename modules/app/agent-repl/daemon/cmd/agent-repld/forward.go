@@ -258,6 +258,36 @@ func (f *verbsForwarder) answerDeployCheckColdGate(ctx context.Context, ws ids.W
 	return verbs.AnswerDeployCheckColdGate(ctx, ws)
 }
 
+// gatePasser is the prompt queue's pass of a cold gate for the agents'
+// prompts waiting at it (promptqueue.GatePasser), read out of the verbs,
+// which are built after the queue. A pass asked for before they are bound is
+// a wiring defect: the pass answers it as an error, and the notice records it.
+type gatePasser struct {
+	f   *verbsForwarder
+	log dlog.Logger
+}
+
+// PassColdGateForPrompts implements promptqueue.GatePasser.
+func (g gatePasser) PassColdGateForPrompts(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	verbs, err := g.f.bound("a cold gate was passed for an agent's prompt")
+	if err != nil {
+		return false, err
+	}
+	return verbs.PassColdGateForPrompts(ctx, ws)
+}
+
+// TellColdGatePassFailed implements promptqueue.GatePasser.
+func (g gatePasser) TellColdGatePassFailed(ctx context.Context, sender, ws ids.WorkspaceID, cause error) {
+	verbs, err := g.f.bound("a sender was told its prompt's cold gate pass failed")
+	if err != nil {
+		g.log.Error("daemon.promptqueue.gate_pass", "the sender of a prompt whose cold gate pass failed could not be told", dlog.Context{
+			"sender": string(sender), "workspace": string(ws), "pass_cause": cause.Error(), "cause": err.Error(),
+		})
+		return
+	}
+	verbs.TellColdGatePassFailed(ctx, sender, ws, cause)
+}
+
 // compactRequeuedMergeColdGate answers the gate standing on a workspace whose
 // merge was requeued by a compaction, for the merge queue, once the answer's
 // re-open has settled. A failure is the queue's to record; one asked before the verbs are bound is answered as an

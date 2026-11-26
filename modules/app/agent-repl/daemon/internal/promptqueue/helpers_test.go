@@ -1908,6 +1908,9 @@ type harness struct {
 	// parked at its cold gate, or a session between its start and its watch.
 	noWatcher bool
 
+	// gatePass is the cold gate's pass the queue asks for (Deps.GatePass).
+	gatePass *fakeGatePass
+
 	// gateCounts records every count of prompts held at a cold gate the queue
 	// reported (Deps.ColdGateHeld), in order.
 	gateMu     sync.Mutex
@@ -1948,6 +1951,7 @@ func newHarness(t *testing.T) *harness {
 		banners:     &fakeTurnBanners{},
 		commits:     &fakeRecounter{},
 		clocks:      &fakeCacheClocks{},
+		gatePass:    &fakeGatePass{},
 		log:         dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
@@ -2005,6 +2009,7 @@ func newHarness(t *testing.T) *harness {
 			defer h.gateMu.Unlock()
 			h.gateCounts = append(h.gateCounts, held)
 		},
+		GatePass:      h.gatePass,
 		DrainRefusals: h.drain,
 		PublishHost: func(ids.WorkspaceID) {
 			h.hostMu.Lock()
@@ -2281,4 +2286,52 @@ func (r *bounceEndRecorder) reported() []bounceEnd {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]bounceEnd(nil), r.ends...)
+}
+
+// fakeGatePass is the cold gate's pass (Deps.GatePass). Every pass is
+// counted; its outcome is run's, which answers that no gate stood when the
+// test scripts none. A test that must act while a pass runs scripts run to
+// block on a channel it closes.
+type fakeGatePass struct {
+	mu     sync.Mutex
+	passes []ids.WorkspaceID
+	told   []toldPassFailed
+	run    func(ws ids.WorkspaceID) (bool, error)
+}
+
+// toldPassFailed is one TellColdGatePassFailed call.
+type toldPassFailed struct {
+	sender, ws ids.WorkspaceID
+	cause      string
+}
+
+func (f *fakeGatePass) PassColdGateForPrompts(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	f.passes = append(f.passes, ws)
+	run := f.run
+	f.mu.Unlock()
+	if run == nil {
+		return false, nil
+	}
+	return run(ws)
+}
+
+func (f *fakeGatePass) TellColdGatePassFailed(_ context.Context, sender, ws ids.WorkspaceID, cause error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.told = append(f.told, toldPassFailed{sender: sender, ws: ws, cause: cause.Error()})
+}
+
+// passed answers the workspaces a pass was asked for, in order.
+func (f *fakeGatePass) passed() []ids.WorkspaceID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), f.passes...)
+}
+
+// toldFailed answers the senders told a pass failed, in order.
+func (f *fakeGatePass) toldFailed() []toldPassFailed {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]toldPassFailed(nil), f.told...)
 }

@@ -1333,6 +1333,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ColdGate: func(ws ids.WorkspaceID) (string, promptqueue.GateState) {
 			return promptqueue.GateStateOf(fleet.ColdGateStage(ws))
 		},
+		// AN AGENT'S PROMPT AT A COLD GATE PASSES IT, through the verbs'
+		// one compaction (pass-gate's), built after the queue.
+		GatePass: gatePasser{f: verbsRef, log: log},
 		// The standing gate offers its compact-and-resume answer exactly
 		// while prompts are held at it.
 		ColdGateHeld:  fleet.SetColdGateHeld,

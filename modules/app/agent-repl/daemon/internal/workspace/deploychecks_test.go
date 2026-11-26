@@ -645,7 +645,18 @@ func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 // and the ruling of 2026-11-21: the verb answers how the answer's re-open
 // settled, so the queue spends its one answer only on an attempt that ended
 // in failure.
+//
+// Every caller that awaits a compaction of a cold gate shares that one shape
+// (compactColdGateUntilSettled): the requeued merge's answer and the prompt
+// queue's pass for an agent's prompt (owner ruling, 2026-11-25).
 func TestCompactRequeuedMergeColdGate(t *testing.T) {
+	callers := []struct {
+		name string
+		call func(Verbs, context.Context, ids.WorkspaceID) (bool, error)
+	}{
+		{name: "CompactRequeuedMergeColdGate", call: Verbs.CompactRequeuedMergeColdGate},
+		{name: "PassColdGateForPrompts", call: Verbs.PassColdGateForPrompts},
+	}
 	tests := []struct {
 		name        string
 		gate        bool
@@ -660,43 +671,45 @@ func TestCompactRequeuedMergeColdGate(t *testing.T) {
 		{name: "a re-open that fails answers its failure", gate: true, resumeErr: errors.New("the shim never bound its socket"), wantErr: true},
 		{name: "a re-open the daemon's stand-down cut is no failure", gate: true, resumeErr: context.Canceled, standDown: true},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			f.workspace("w1", t.TempDir())
-			if tt.gate {
-				served, _ := coldCompactMenu()
-				f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
-			}
-			f.fleet.resumeErr = tt.resumeErr
-			if tt.standDown {
-				ended, cancel := context.WithCancel(context.Background())
-				cancel()
-				f.fleet.resumeRunCtx = ended
-			}
+	for _, caller := range callers {
+		for _, tt := range tests {
+			t.Run(caller.name+"/"+tt.name, func(t *testing.T) {
+				// Arrange
+				f := newFixture(t)
+				f.workspace("w1", t.TempDir())
+				if tt.gate {
+					served, _ := coldCompactMenu()
+					f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
+				}
+				f.fleet.resumeErr = tt.resumeErr
+				if tt.standDown {
+					ended, cancel := context.WithCancel(context.Background())
+					cancel()
+					f.fleet.resumeRunCtx = ended
+				}
 
-			// Act
-			up, err := f.verbs.CompactRequeuedMergeColdGate(context.Background(), "w1")
+				// Act
+				up, err := caller.call(f.verbs, context.Background(), "w1")
 
-			// Assert
-			if up != tt.wantUp || (err != nil) != tt.wantErr || len(f.fleet.resumes) != tt.wantResumes {
-				t.Fatalf("CompactRequeuedMergeColdGate = %v, %v, %d resumes; want up %v, error %v, %d resumes", up, err, len(f.fleet.resumes), tt.wantUp, tt.wantErr, tt.wantResumes)
-			}
-			if tt.wantErr && (!errors.Is(err, tt.resumeErr) || !slices.Equal(f.cards.reraised, []string{"vendor-1"})) {
-				t.Fatalf("CompactRequeuedMergeColdGate = %v, gates stood again %v; want the re-open's cause %v and the gate standing for the user", err, f.cards.reraised, tt.resumeErr)
-			}
-			if tt.wantResumes == 0 {
-				return
-			}
-			compact := f.fleet.resumes[0].Remediation.GetCompact()
-			if compact.GetModel().GetName() != headless.ModelHaiku || compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL {
-				t.Fatalf("compact remediation = %v, want Haiku over the whole conversation", compact)
-			}
-			if len(f.queue.gateFates) != 1 || f.queue.gateFates[0] != promptqueue.GateKeep {
-				t.Fatalf("gate fates = %v, want the held prompts kept", f.queue.gateFates)
-			}
-		})
+				// Assert
+				if up != tt.wantUp || (err != nil) != tt.wantErr || len(f.fleet.resumes) != tt.wantResumes {
+					t.Fatalf("CompactRequeuedMergeColdGate = %v, %v, %d resumes; want up %v, error %v, %d resumes", up, err, len(f.fleet.resumes), tt.wantUp, tt.wantErr, tt.wantResumes)
+				}
+				if tt.wantErr && (!errors.Is(err, tt.resumeErr) || !slices.Equal(f.cards.reraised, []string{"vendor-1"})) {
+					t.Fatalf("CompactRequeuedMergeColdGate = %v, gates stood again %v; want the re-open's cause %v and the gate standing for the user", err, f.cards.reraised, tt.resumeErr)
+				}
+				if tt.wantResumes == 0 {
+					return
+				}
+				compact := f.fleet.resumes[0].Remediation.GetCompact()
+				if compact.GetModel().GetName() != headless.ModelHaiku || compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL {
+					t.Fatalf("compact remediation = %v, want Haiku over the whole conversation", compact)
+				}
+				if len(f.queue.gateFates) != 1 || f.queue.gateFates[0] != promptqueue.GateKeep {
+					t.Fatalf("gate fates = %v, want the held prompts kept", f.queue.gateFates)
+				}
+			})
+		}
 	}
 }
 

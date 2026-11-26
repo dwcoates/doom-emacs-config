@@ -315,12 +315,66 @@ func (v *verbs) answerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 // PassColdGate implements Verbs: another workspace's agent passes the cold
 // gate standing on WS. AN AGENT PASSES A GATE ONLY BY A HAIKU COMPACTION OF ALL
 // THE CONTEXT (owner ruling, 2026-11-18): the answer is `compact` by the
-// default summarizer, so paying and clearing stay the user's, and the
+// default summarizer (answerColdGateByCompaction, the one compaction every
+// automatic pass makes), so paying and clearing stay the user's, and the
 // prompts held at the gate stay held for the user to send.
 func (v *verbs) PassColdGate(ctx context.Context, ws ids.WorkspaceID) error {
-	return v.AnswerColdGate(ctx, ws, &agentreplv1.AnswerColdGateRequest{
-		Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: defaultSummarizerAnswer()},
-	})
+	answered, err := v.answerColdGateByCompaction(ctx, "PassColdGate", ws, false,
+		logsite.Msg("another workspace's agent passes the cold gate by a compaction"), nil)
+	if err != nil {
+		return err
+	}
+	if !answered {
+		_, log, err := v.owned(ctx, "PassColdGate", ws)
+		if err != nil {
+			return err
+		}
+		return refuse(log, "PassColdGate", ArmNoColdGate,
+			fmt.Sprintf("no cold gate is standing on workspace %q", ws), false)
+	}
+	return nil
+}
+
+// PassColdGateForPrompts implements Verbs: the prompt queue passes the cold
+// gate standing on WS for the prompts other workspaces' agents sent it,
+// which wait at the gate (promptqueue gatepass.go). It is `workspace
+// pass-gate` made by the daemon on the senders' behalf (owner ruling,
+// 2026-11-25), through the same compaction, and answers once the re-open
+// has settled, as compactColdGateUntilSettled says.
+func (v *verbs) PassColdGateForPrompts(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	return v.compactColdGateUntilSettled(ctx, "PassColdGateForPrompts", ws,
+		logsite.Msg("an agent's prompt waits at the cold gate; it is passed by a compaction at once"))
+}
+
+// BriefColdGatePassFailed is the notice a workspace's agent is told when the
+// pass of a cold gate its prompt started failed.
+const BriefColdGatePassFailed = "workspace-cold-gate-pass-failed"
+
+// TellColdGatePassFailed implements Verbs: SENDER's agent is told that the
+// pass of WS's cold gate its prompt started failed with CAUSE, and that its
+// prompt waits at the gate for the user's answer. A notice that cannot be
+// composed or queued is recorded at ERROR where it failed.
+func (v *verbs) TellColdGatePassFailed(ctx context.Context, sender, ws ids.WorkspaceID, cause error) {
+	_, log, err := v.owned(ctx, "TellColdGatePassFailed", sender)
+	if err != nil {
+		return
+	}
+	name := string(ws)
+	if record, err := v.deps.DB.Workspace(ctx, ws); err == nil {
+		name = record.Name
+	} else {
+		log.Error(opColdGate, "could not read the workspace whose cold gate pass failed; its sender is told its id", dlog.Context{"gated": string(ws), "cause": err.Error()})
+	}
+	notice, err := v.composeBrief(ctx, log, opColdGate, BriefColdGatePassFailed, map[string]string{"workspace": name, "why": cause.Error()})
+	if err != nil {
+		return
+	}
+	turn, _, err := v.queueDeferredBrief(ctx, log, opColdGate, sender, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		"the sender's", "the failed cold gate pass's notice")
+	if err != nil {
+		return
+	}
+	log.Info(opColdGate, "told the sender its prompt's pass of the cold gate failed", dlog.Context{"gated": string(ws), "turn": string(turn)})
 }
 
 // reraiseRefusedColdGate stands a spent gate again when its answer is

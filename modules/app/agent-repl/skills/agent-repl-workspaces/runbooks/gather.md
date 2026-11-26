@@ -15,7 +15,7 @@
   targets, and every refused target with its typed cause: an unknown or
   closed name, a name several open workspaces share, this workspace itself, a
   question or permission waiting on the user, a merge in progress, or the
-  submission's own `workspace prompt` refusal (a cold gate, the fan-out cap).
+  submission's own `workspace prompt` refusal (the fan-out cap).
   stderr says one sentence per refused target. A refused target is not part
   of the gather. When every target is refused, nothing is made and the
   command exits 6.
