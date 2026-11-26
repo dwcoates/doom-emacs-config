@@ -467,7 +467,7 @@ func TestAnOpenRaceFindingIsPutToTheMediatorWhateverTheWindowHolds(t *testing.T)
 			races = told
 		}
 	}
-	if !strings.Contains(races, "`daemon/TestRacy`") || !strings.Contains(races, "merge-a") || !strings.Contains(races, "lost the race") || !strings.Contains(races, "/archive/a") {
+	if !strings.Contains(races, "suite `daemon`, test `TestRacy`") || !strings.Contains(races, "merge-a") || !strings.Contains(races, "lost the race") || !strings.Contains(races, "/archive/a") {
 		t.Fatalf("race_findings = %q, want the open race with its merge, failure and artifacts", races)
 	}
 }
@@ -560,7 +560,10 @@ func TestRenderRaceFindings(t *testing.T) {
 		{name: "none", want: []string{"None:"}},
 		{name: "an open race names its merges, failure and artifacts",
 			findings: []wsm.RaceFinding{{Ref: racyRef, LastSeen: at, Recurrences: 2, Merges: []string{"a", "b"}, Failure: "lost", Artifacts: "/x"}},
-			want:     []string{"Open, each yours to dispatch:", "`daemon/TestRacy`: failed in 2 merge gate(s), last at 2026-11-25T12:00:00Z, in a, b", "Artifacts: `/x`.", "  > lost"}},
+			want:     []string{"Open, each yours to dispatch:", "- suite `daemon`, test `TestRacy`: failed in 2 merge gate(s), last at 2026-11-25T12:00:00Z, in a, b", "Artifacts: `/x`.", "  > lost"}},
+		{name: "a test name holding a slash renders apart from its suite",
+			findings: []wsm.RaceFinding{{Ref: wsm.RaceFindingRef{Suite: "daemon", Test: "integration.TestFoo/case"}, LastSeen: at, Recurrences: 1, Failure: "lost"}},
+			want:     []string{"- suite `daemon`, test `integration.TestFoo/case`: failed in 1 merge gate(s)"}, wantNot: []string{"daemon/integration"}},
 		{name: "a reopened race says its fixes did not end it",
 			findings: []wsm.RaceFinding{{Ref: racyRef, LastSeen: at, Recurrences: 3, Fixes: 1, Failure: "lost"}},
 			want:     []string{"it came back after 1 deployed fix(es)"}},
@@ -569,7 +572,7 @@ func TestRenderRaceFindings(t *testing.T) {
 			want:     []string{"> ...", "THE END"}, wantNot: []string{strings.Repeat("x", raceFailureBytes)}},
 		{name: "a race taken on is at work",
 			findings: []wsm.RaceFinding{{Ref: racyRef, TakenOnAt: &at, Recurrences: 1}},
-			want:     []string{"At work, taken on by your earlier dispatch; never dispatch one again:", "`daemon/TestRacy`: taken on at 2026-11-25T12:00:00Z"}, wantNot: []string{"Open,"}},
+			want:     []string{"At work, taken on by your earlier dispatch; never dispatch one again:", "- suite `daemon`, test `TestRacy`: taken on at 2026-11-25T12:00:00Z"}, wantNot: []string{"Open,"}},
 		{name: "a fixed race is not listed",
 			findings: []wsm.RaceFinding{{Ref: racyRef, TakenOnAt: &at, FixedAt: &at, Recurrences: 1}},
 			want:     []string{"None:"}},

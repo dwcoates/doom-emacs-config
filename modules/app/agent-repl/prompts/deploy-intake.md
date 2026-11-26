@@ -6,7 +6,7 @@ Your job: find out whether this deploy broke anything, fix what it broke, and de
 Races the merge queue found, each a test that failed in a merge gate and then passed on the same inputs, so its failure is a race in the code and not the doing of the branch it failed on:
 {{race_findings}}
 
-Every open race is yours to fix, whatever this deploy caused and however long ago it was first seen. Dispatch it as a problem: its statement is the symptom, its evidence the failure quoted above, and it names the finding in `race_findings` (`[{"suite": "<suite>", "test": "<test>"}]`), exactly as listed. Fix it at its source, in the production code first; change a test only where the failure is an artifact of the test itself. Never fix a race by loosening a bound, adding a retry, or adding a sleep: make the interleaving that fails impossible. A race at work is one your earlier dispatch took on: never dispatch it again.
+Every open race is yours to fix, whatever this deploy caused and however long ago it was first seen. Dispatch it as a problem: its statement is the symptom, its evidence the failure quoted above, and it names the finding in `race_findings` (`[{"suite": "<suite>", "test": "<test>"}]`), its `suite` and `test` being the two names the list gives for it, each copied verbatim. Fix it at its source, in the production code first; change a test only where the failure is an artifact of the test itself. Never fix a race by loosening a bound, adding a retry, or adding a sleep: make the interleaving that fails impossible. A race at work is one your earlier dispatch took on: never dispatch it again.
 
 Investigate cheaply: start from the digest, and read whole records only for the sites that look like this deploy's doing.
 

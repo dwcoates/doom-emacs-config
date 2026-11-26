@@ -493,7 +493,10 @@ func anyOpenRace(findings []wsm.RaceFinding) bool {
 // RenderRaceFindings is the brief's account of the repository's race
 // findings: each open one with the merges it failed in, its latest failure
 // and its artifacts, then each a dispatch took on and is still at work on.
-// A finding whose fix deployed is not listed until it recurs.
+// A finding whose fix deployed is not listed until it recurs. Each names its
+// suite and its test apart, because a test name may itself hold a slash (a Go
+// subtest), so `suite/test` cannot be split back into the two names a
+// dispatch must give.
 func RenderRaceFindings(findings []wsm.RaceFinding) string {
 	var open, atWork []string
 	for _, f := range findings {
@@ -504,7 +507,7 @@ func RenderRaceFindings(findings []wsm.RaceFinding) string {
 				failure = "..." + failure[len(failure)-raceFailureBytes:]
 			}
 			var b strings.Builder
-			b.WriteString(fmt.Sprintf("- `%s`: failed in %d merge gate(s), last at %s, in %s", f.Ref, f.Recurrences, f.LastSeen.UTC().Format(time.RFC3339), strings.Join(f.Merges, ", ")))
+			b.WriteString(fmt.Sprintf("- %s: failed in %d merge gate(s), last at %s, in %s", renderRaceRef(f.Ref), f.Recurrences, f.LastSeen.UTC().Format(time.RFC3339), strings.Join(f.Merges, ", ")))
 			if f.Fixes > 0 {
 				b.WriteString(fmt.Sprintf("; it came back after %d deployed fix(es)", f.Fixes))
 			}
@@ -514,7 +517,7 @@ func RenderRaceFindings(findings []wsm.RaceFinding) string {
 			}
 			open = append(open, b.String())
 		case f.FixedAt == nil:
-			atWork = append(atWork, fmt.Sprintf("- `%s`: taken on at %s, failed in %d merge gate(s)", f.Ref, f.TakenOnAt.UTC().Format(time.RFC3339), f.Recurrences))
+			atWork = append(atWork, fmt.Sprintf("- %s: taken on at %s, failed in %d merge gate(s)", renderRaceRef(f.Ref), f.TakenOnAt.UTC().Format(time.RFC3339), f.Recurrences))
 		}
 	}
 	if len(open) == 0 && len(atWork) == 0 {
@@ -531,6 +534,12 @@ func RenderRaceFindings(findings []wsm.RaceFinding) string {
 		b.WriteString("At work, taken on by your earlier dispatch; never dispatch one again:\n" + strings.Join(atWork, "\n"))
 	}
 	return b.String()
+}
+
+// renderRaceRef names a race finding's suite and test apart, each verbatim, as
+// a dispatch's race_findings entry gives them.
+func renderRaceRef(ref wsm.RaceFindingRef) string {
+	return fmt.Sprintf("suite `%s`, test `%s`", ref.Suite, ref.Test)
 }
 
 // RenderOccasion is the brief's first sentence: what the check owed at OWED
