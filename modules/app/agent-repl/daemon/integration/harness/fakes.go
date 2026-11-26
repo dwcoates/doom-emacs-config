@@ -564,14 +564,24 @@ printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSI
 	// StopAsks): pkill answers 1, nothing matched, so no test ever signals a
 	// process of the host's.
 	"pkill": "#!/bin/sh\nexit 1\n",
-	// The Wi-Fi helper's launch (persistentwifi's scan): it answers, in the
-	// file --out names, joined to FakeHostNetwork with it alone in sight.
+	// The Wi-Fi helper's launch: it answers, in the file --out names. A scan
+	// is joined to FakeHostNetwork with it alone in sight; a hotspot join
+	// (the hotspot verb) joins the network --name names, which changes
+	// nothing the other fakes report.
 	"open": `#!/bin/sh
+verb="" name=""
 while [ $# -gt 0 ]; do
-  if [ "$1" = --out ]; then
-    printf '{"authorization":"authorized","current":"%s","visible":[{"ssid":"%s","rssi":-40}]}' "` + FakeHostNetwork + `" "` + FakeHostNetwork + `" > "$2"
-    exit 0
-  fi
+  case "$1" in
+    --args) verb="$2"; shift ;;
+    --name) name="$2"; shift ;;
+    --out)
+      if [ "$verb" = hotspot ]; then
+        printf '{"verb":"hotspot","authorization":"authorized","current":"%s","visible":[],"hotspot":{"stage":"joined","network":"%s","browse_ms":1,"enable_ms":1,"scan_ms":1,"join_ms":1}}' "` + FakeHostNetwork + `" "$name" > "$2"
+      else
+        printf '{"authorization":"authorized","current":"%s","visible":[{"ssid":"%s","rssi":-40}]}' "` + FakeHostNetwork + `" "` + FakeHostNetwork + `" > "$2"
+      fi
+      exit 0 ;;
+  esac
   shift
 done
 exit 1
