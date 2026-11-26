@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -2630,5 +2631,27 @@ func TestCloseRosterChangersRunsItsStepsInOrder(t *testing.T) {
 				t.Fatalf("teardown steps %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestABootEndingAtTheGraphStepJoinsTheSharedAcceptPumps pins that run closes
+// the shared accept, which joins its pumps, before it returns and so before the
+// run log closes: a pump of the holder's handed-back connections that outlived
+// run recorded its end into a closed log (daemon.dlog.sink_failure on stderr).
+func TestABootEndingAtTheGraphStepJoinsTheSharedAcceptPumps(t *testing.T) {
+	// Arrange
+	root := shortRoot(t)
+
+	// Act
+	runErr := runIn(t, root)
+	stacks := make([]byte, 1<<20)
+	stacks = stacks[:runtime.Stack(stacks, true)]
+
+	// Assert
+	if !errors.Is(runErr, errServed) {
+		t.Fatalf("run = %v, want the graph hook's errServed", runErr)
+	}
+	if strings.Contains(string(stacks), "SharedAccept).pump") {
+		t.Fatalf("a SharedAccept pump outlived run:\n%s", stacks)
 	}
 }

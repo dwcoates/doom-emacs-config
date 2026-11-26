@@ -272,3 +272,27 @@ func (f *fakeReturned) Next() (net.Conn, error) {
 func (f *fakeReturned) Stop() error { f.once.Do(func() { close(f.stop) }); return nil }
 
 func (f *fakeReturned) Close() error { return f.Stop() }
+
+func TestCloseJoinsThePumpReturnedBeforeItReturns(t *testing.T) {
+	// Arrange
+	private, shared := sharedPair(t)
+	log := dlog.NewTestLogger()
+	l := NewSharedAccept(private)
+	if err := l.AddShared(shared, newFakeReturned(), log); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	closeErr := l.Close()
+	// Everything the pump records is in the log by now, so the run log can
+	// close right after Close without refusing a late write.
+	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.returned"})
+
+	// Assert
+	if closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	if len(records) != 1 {
+		t.Fatalf("daemon.server.returned records when Close returned = %d, want 1: Close must join the pump", len(records))
+	}
+}
