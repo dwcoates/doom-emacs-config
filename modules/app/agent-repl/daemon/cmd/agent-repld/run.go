@@ -415,6 +415,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 
 	accept := server.NewSharedAccept(claim.Listener())
+	// THE ACCEPT'S PUMPS ARE JOINED BEFORE THE LOG CLOSES. The pump of the
+	// holder's handed-back connections records its end ("daemon.server.returned")
+	// when its stream ends; a boot that returns before Serve (the graph step
+	// failing) never closed the accept, so that record was written after
+	// `defer surfaces.Close()` and the log refused it (daemon.dlog.sink_failure).
+	// Deferred here, it runs before claim_close and before the log's close.
+	defer teardown.step("accept_close", func() { accept.Close() })
 	shared := &sharedTake{holder: holder, accept: accept, claim: claim, log: log,
 		ensure: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: installHolder, Log: log}).Ensure}
 	if err := shared.acquire(); err != nil {
