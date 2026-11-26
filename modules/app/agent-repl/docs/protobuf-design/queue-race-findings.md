@@ -27,8 +27,17 @@ dispatches their fixes as it dispatches a deploy-caused problem.
 - Why: "no change to the code it covers" must be decided by the daemon, not by an agent. The reuse key is already the digest of every input the sandbox lets the unit read, so equal digests prove the tests ran the same code. A git diff of the branch cannot say what a test covers, and a hand-kept mapping would drift.
 - Consequences:
   - The gate learns per-test outcomes from the runner's events, written to a file (`--events-file`), since the test service relays only lines. The archive text stays what the repair reads.
-  - A batch unit's digest covers all of its members, so a targeted rerun that forms a different batch carries a different digest and finds no race. Detection misses rather than misfires there; the next gate, with the same batches, still finds it.
+  - A batch unit's digest covers all of its members, so a targeted rerun that forms a different batch carries a different digest. The race is decided by each test's own digest instead (`testrun.v1.TestRunTestResult.inputs_digest`, below).
   - Infrastructure units carry no digest and never yield a finding.
+
+### testrun.v1.TestRunTestResult.inputs_digest
+
+- What: each test result carries the digest of the inputs that test itself reads: its file's own reuse key in a vitest or ERT batch, its unit's key in any other confined unit. Unset for a test of an unconfined unit, and for a batch's test whose file the run cannot name.
+- Why: a remediation reruns a gate's failed test alone, as its brief tells it to, and the runner then batches that one file by itself. The batch's digest hashes every member it ran, so the rerun's never matched the gate's, and no race was ever found from a targeted rerun (2026-11-25, merge `prod-mediator-children`: the gate's `shim/engine.2` batch ran 28 files under one digest, the rerun one). A file's own key is the same whichever batch runs it.
+- Consequences:
+  - The daemon keys each test by the test's digest alone; the unit's digest decides nothing about races.
+  - A vitest result names its file. An ERT result is the file whose `TESTRUN-ITEM` line follows it, since the driver runs a batch's files one at a time and ends each with that line; a result after the last such line (a file that crashed) names no file and carries no digest.
+  - A run from a script older than the field carries no per-test digest, so its results prove nothing.
 
 ### agentrepl.v1.DeployProblem.race_findings and QueueRaceFindingRef
 
@@ -52,3 +61,4 @@ dispatches their fixes as it dispatches a deploy-caused problem.
 ## Corrections
 
 - The first landing said the gate learns its per-test results from `--events-file`, an argument to `bin/test-all.sh`. That was wrong: a gate running a branch whose script predates the argument would fail on an unknown argument. The file now rides the environment (`AGENT_REPL_TEST_EVENTS_FILE`), which an older script ignores. The root cause was reasoning only about branches rebased onto the main branch, and forgetting merges into a parent's branch that may hold an older script.
+- The first landing keyed a test by its unit's digest, which for a batch covers every member the batch ran, so a targeted rerun never matched a gate's pooled run, and the race a remediation proved went unrecorded. The root cause was taking a unit's key for its tests' inputs without checking how batches key their members (each file on its own, `reuse.decideBatch`). Each test now carries its own digest.

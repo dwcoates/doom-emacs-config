@@ -114,12 +114,12 @@ message TestRunUnitEnded {
   // a unit that ran no test (a build) or never started.
   repeated TestRunTestResult tests = 8;
   // The digest of the unit's declared inputs, the reuse key the run confined
-  // the unit to: every file and environment value its tests may read. Two
-  // results of one test under one digest ran the same code, so a test that
-  // failed under a digest and passed under it again failed for no change of
-  // its inputs: the daemon records it as a queue race finding. UNSET for a
+  // the unit to: every file and environment value its tests may read. A
+  // batch's digest covers every member it ran, so it differs between runs
+  // that batch a file differently; a test's own digest
+  // (TestRunTestResult.inputs_digest) is what decides a race. UNSET for a
   // unit the run did not confine to its inputs (an unconfined suite, a
-  // suite's shared infrastructure), whose results prove nothing of the kind.
+  // suite's shared infrastructure).
   optional string inputs_digest = 9;
 }
 
@@ -158,6 +158,16 @@ message TestRunTestResult {
     // The test was skipped.
     TestRunTestSkipped skipped = 5;
   }
+  // The digest of the inputs this test itself reads: its file's own reuse key
+  // in a batch of files (a vitest or ERT batch), its unit's
+  // (TestRunUnitEnded.inputs_digest) in any other confined unit. It is the
+  // same whichever batch runs the file, so a targeted rerun of one test and a
+  // gate's pooled run of it agree. Two results of one test under one digest
+  // ran the same code, so a test that failed under a digest and passed under
+  // it again failed for no change of its inputs: the daemon records it as a
+  // queue race finding. UNSET for a test of an unconfined unit, and for a
+  // batch's test whose file the run cannot name.
+  optional string inputs_digest = 6;
 }
 
 // The test passed.

@@ -513,12 +513,12 @@ type TestRunUnitEnded struct {
 	// a unit that ran no test (a build) or never started.
 	Tests []*TestRunTestResult `protobuf:"bytes,8,rep,name=tests,proto3" json:"tests,omitempty"`
 	// The digest of the unit's declared inputs, the reuse key the run confined
-	// the unit to: every file and environment value its tests may read. Two
-	// results of one test under one digest ran the same code, so a test that
-	// failed under a digest and passed under it again failed for no change of
-	// its inputs: the daemon records it as a queue race finding. UNSET for a
+	// the unit to: every file and environment value its tests may read. A
+	// batch's digest covers every member it ran, so it differs between runs
+	// that batch a file differently; a test's own digest
+	// (TestRunTestResult.inputs_digest) is what decides a race. UNSET for a
 	// unit the run did not confine to its inputs (an unconfined suite, a
-	// suite's shared infrastructure), whose results prove nothing of the kind.
+	// suite's shared infrastructure).
 	InputsDigest  *string `protobuf:"bytes,9,opt,name=inputs_digest,json=inputsDigest,proto3,oneof" json:"inputs_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -803,7 +803,17 @@ type TestRunTestResult struct {
 	//	*TestRunTestResult_Passed
 	//	*TestRunTestResult_Failed
 	//	*TestRunTestResult_Skipped
-	Outcome       isTestRunTestResult_Outcome `protobuf_oneof:"outcome"`
+	Outcome isTestRunTestResult_Outcome `protobuf_oneof:"outcome"`
+	// The digest of the inputs this test itself reads: its file's own reuse key
+	// in a batch of files (a vitest or ERT batch), its unit's
+	// (TestRunUnitEnded.inputs_digest) in any other confined unit. It is the
+	// same whichever batch runs the file, so a targeted rerun of one test and a
+	// gate's pooled run of it agree. Two results of one test under one digest
+	// ran the same code, so a test that failed under a digest and passed under
+	// it again failed for no change of its inputs: the daemon records it as a
+	// queue race finding. UNSET for a test of an unconfined unit, and for a
+	// batch's test whose file the run cannot name.
+	InputsDigest  *string `protobuf:"bytes,6,opt,name=inputs_digest,json=inputsDigest,proto3,oneof" json:"inputs_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -884,6 +894,13 @@ func (x *TestRunTestResult) GetSkipped() *TestRunTestSkipped {
 		}
 	}
 	return nil
+}
+
+func (x *TestRunTestResult) GetInputsDigest() string {
+	if x != nil && x.InputsDigest != nil {
+		return *x.InputsDigest
+	}
+	return ""
 }
 
 type isTestRunTestResult_Outcome interface {
@@ -1634,14 +1651,16 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\voutput_tail\x18\x02 \x01(\tR\n" +
 	"outputTail\"G\n" +
 	"\x14TestRunUnitCancelled\x12/\n" +
-	"\x14cancelled_by_unit_id\x18\x01 \x01(\tR\x11cancelledByUnitId\"\xf9\x01\n" +
+	"\x14cancelled_by_unit_id\x18\x01 \x01(\tR\x11cancelledByUnitId\"\xb5\x02\n" +
 	"\x11TestRunTestResult\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\awall_ms\x18\x02 \x01(\x03R\x06wallMs\x127\n" +
 	"\x06passed\x18\x03 \x01(\v2\x1d.testrun.v1.TestRunTestPassedH\x00R\x06passed\x127\n" +
 	"\x06failed\x18\x04 \x01(\v2\x1d.testrun.v1.TestRunTestFailedH\x00R\x06failed\x12:\n" +
-	"\askipped\x18\x05 \x01(\v2\x1e.testrun.v1.TestRunTestSkippedH\x00R\askippedB\t\n" +
-	"\aoutcome\"\x13\n" +
+	"\askipped\x18\x05 \x01(\v2\x1e.testrun.v1.TestRunTestSkippedH\x00R\askipped\x12(\n" +
+	"\rinputs_digest\x18\x06 \x01(\tH\x01R\finputsDigest\x88\x01\x01B\t\n" +
+	"\aoutcomeB\x10\n" +
+	"\x0e_inputs_digest\"\x13\n" +
 	"\x11TestRunTestPassed\"\x13\n" +
 	"\x11TestRunTestFailed\"\x14\n" +
 	"\x12TestRunTestSkipped\"\xeb\x01\n" +
