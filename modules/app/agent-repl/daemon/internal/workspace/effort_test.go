@@ -90,6 +90,41 @@ func TestApplyEffortCarriesTheShimsRefusalByArmAndDetail(t *testing.T) {
 	}
 }
 
+func TestApplyEffortAnswersARefusalFromAShimStandingDownAsStoodDown(t *testing.T) {
+	tests := []struct {
+		name          string
+		standingDown  bool
+		wantStoodDown bool
+	}{
+		{name: "a shim this daemon is standing down", standingDown: true, wantStoodDown: true},
+		{name: "a shim left serving", standingDown: false, wantStoodDown: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the vendor's query closed under the switch.
+			client := &fakeClient{stoodDown: tt.standingDown, effortResponse: effortFailure(&shimv1.SetSessionEffortFailure{
+				Detail: "Query closed before response received",
+				Cause:  &shimv1.SetSessionEffortFailure_VendorRefused{VendorRefused: &shimv1.SetSessionEffortVendorRefused{}},
+			})}
+
+			// Act.
+			_, err := applyEffort(context.Background(), client, effortLow)
+
+			// Assert.
+			var refusal *ShimRefusal
+			if !errors.As(err, &refusal) || refusal.Arm != "vendor_refused" || refusal.Detail != "Query closed before response received" {
+				t.Fatalf("err = %v, want the vendor_refused refusal kept in the chain", err)
+			}
+			if got := errors.Is(err, shimclient.ErrStandDownOrdered); got != tt.wantStoodDown {
+				t.Fatalf("errors.Is(err, ErrStandDownOrdered) = %v, want %v (err %v)", got, tt.wantStoodDown, err)
+			}
+			if got := switchFoundNoShim(err); got != tt.wantStoodDown {
+				t.Fatalf("switchFoundNoShim = %v, want %v", got, tt.wantStoodDown)
+			}
+		})
+	}
+}
+
 func TestApplyEffortRefusesASuccessStatingNoLevel(t *testing.T) {
 	// Arrange.
 	client := &fakeClient{effortResponse: &shimv1.SetSessionEffortResponse{
@@ -234,6 +269,7 @@ func TestAPutBackRecordsHowLongTheShimTook(t *testing.T) {
 	}{
 		{name: "a put-back that took", level: "info"},
 		{name: "a refused put-back", err: errors.New("socket closed"), level: "error"},
+		{name: "a put-back cut by a stand-down", err: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, goneShimCause), level: "info"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -557,6 +593,15 @@ func TestSwitchEffortSettlesEachOutcomeOffTheCallersGoroutine(t *testing.T) {
 			message: "the effort switch found no session to take it; the pick stands for the session's next start",
 			arrange: func(f *fleetFixture) {
 				f.client.effortErr = fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, goneShimCause)
+			}},
+		{name: "a refusal from a shim a bounce is standing down leaves the pick standing", level: "info",
+			message: "the effort switch found no session to take it; the pick stands for the session's next start",
+			arrange: func(f *fleetFixture) {
+				f.client.stoodDown = true
+				f.client.effortResponse = effortFailure(&shimv1.SetSessionEffortFailure{
+					Detail: "Query closed before response received",
+					Cause:  &shimv1.SetSessionEffortFailure_VendorRefused{VendorRefused: &shimv1.SetSessionEffortVendorRefused{}},
+				})
 			}},
 		{name: "a level the vendor refused is an error", level: "error", message: "the shim did not switch the effort",
 			wantErrors: 1,

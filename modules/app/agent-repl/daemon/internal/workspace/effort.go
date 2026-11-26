@@ -196,6 +196,15 @@ func (f *Fleet) reapplyEffort(ctx context.Context, log dlog.Logger, ws ids.Works
 	asked := f.now()
 	_, err := applyEffort(ctx, client, level)
 	elapsed := f.now().Sub(asked).Milliseconds()
+	if switchFoundNoShim(err) {
+		// A NEW SHIM GONE OR STOOD DOWN UNDER ITS PUT-BACK holds no session
+		// to put back: the pick stands for the shim that replaces it, whose
+		// start puts it back again.
+		log.Info(opSetEffort, "the new shim went before it was put back at the picked effort; the pick stands for its replacement", dlog.Context{
+			"effort": level.String(), "cause": err.Error(), "elapsed_ms": elapsed,
+		})
+		return
+	}
 	if err != nil {
 		log.Error(opSetEffort, "the new shim could not be put back at the picked effort", dlog.Context{
 			"effort": level.String(), "cause": err.Error(), "elapsed_ms": elapsed,
@@ -208,18 +217,33 @@ func (f *Fleet) reapplyEffort(ctx context.Context, log dlog.Logger, ws ids.Works
 // shimclientEffort is the slice of the shim client an effort change uses.
 type shimclientEffort interface {
 	SetSessionEffort(ctx context.Context, req *shimv1.SetSessionEffortRequest) (*shimv1.SetSessionEffortResponse, error)
+	StandingDown() bool
 }
 
 // applyEffort sends one SetSessionEffort and answers the level now in effect,
 // or the shim's typed refusal.
+//
+// A REFUSAL FROM A SHIM THIS DAEMON IS STANDING DOWN IS THE SHIM GOING, not
+// the vendor's verdict on the level: ending the session closes the vendor's
+// query, and a switch in flight is answered vendor_refused "Query closed
+// before response received". It is answered as ErrStandDownOrdered, the same
+// answer as a call the stand-down cut (switchFoundNoShim), the refusal kept
+// in the chain; the pick, recorded first, stands for the replacement
+// (reapplyEffort). 2026-11-25 18:02:50, prod-mediator: a deploy check's
+// switch met the shim a skills_changed bounce was standing down, and was
+// recorded at ERROR while the replacement came up at the pick.
 func applyEffort(ctx context.Context, client shimclientEffort, level conversationv1.AgentEffortLevel) (conversationv1.AgentEffortLevel, error) {
 	response, err := client.SetSessionEffort(ctx, &shimv1.SetSessionEffortRequest{Effort: level})
 	if err != nil {
 		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED, err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED,
-			&ShimRefusal{Verb: "SetSessionEffort", Arm: setEffortArm(failure), Detail: failure.GetDetail()}
+		refusal := &ShimRefusal{Verb: "SetSessionEffort", Arm: setEffortArm(failure), Detail: failure.GetDetail()}
+		if client.StandingDown() {
+			return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED,
+				fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, refusal)
+		}
+		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED, refusal
 	}
 	effective := response.GetSuccess().GetEffortChanged().GetEffectiveEffort()
 	if effective == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
