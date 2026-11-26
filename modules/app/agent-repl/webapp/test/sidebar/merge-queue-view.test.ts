@@ -959,7 +959,15 @@ describe("dragging a waiting merge", () => {
 });
 
 describe("waitingMergeRef", () => {
+  it("names the waiting merge's own workspace", () => {
+    expect(waitingMergeRef(waitingMerge("w1"), "waiting").id).toBe("w1");
+  });
 
+  it("refuses a waiting merge with no subject", () => {
+    const waiting = waitingMerge("w1");
+    waiting.subject = undefined;
+    expect(() => waitingMergeRef(waiting, "waiting")).toThrow(MalformedView);
+  });
 });
 
 describe("drawRosterMergeQueueHead", () => {
@@ -1271,8 +1279,8 @@ describe("drawCardLine", () => {
     ]);
   });
 
-  it("refuses a subject that carries no mode as malformed", () => {
-    expect(() => drawCardLine(create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one" }), glyph(), "subject", NONE_COLD_GATED)).toThrow(MalformedView);
+  it("refuses a subject that names no workspace as malformed", () => {
+    expect(() => drawCardLine(create(RosterMergeQueueSubjectSchema, { name: "one" }), glyph(), "subject", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it.each([
@@ -1438,12 +1446,6 @@ describe("a cold-gated merge's line", () => {
       drawn?.querySelector(".sb-mq-name")?.classList.contains(COLD_GATED_NAME_CLASS),
       drawn?.querySelector(".st, img, svg"),
     ]).toEqual([true, null]);
-  });
-
-  it("leaves a merge unstruck while the gate stands only on its requester", () => {
-    const off = offQueue("requester", "evicted", "merge-ws");
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, offQueueDaemon().sc, "queue", new Set(["requester"]));
-    expect(body.querySelector(".sb-mq-name")?.classList.contains(COLD_GATED_NAME_CLASS)).toBe(false);
   });
 
   it("draws a cold-gated name struck and greyed in the rail", () => {

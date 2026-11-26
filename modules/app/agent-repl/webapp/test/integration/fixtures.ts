@@ -1254,6 +1254,26 @@ export const separationRow = (arm: SeparationArm, overrides?: Partial<RowInit>):
     overrides,
   );
 
+/** A child workspace's bubble, open, in its canonical status color. */
+export const childRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow(
+    {
+      case: "child",
+      value: {
+        head: {
+          glyph: { icon: "⇄" },
+          name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
+          target: { text: "~/.config/doom" },
+          standing: { standing: { case: "open", value: {} } },
+          runtime: { startedAtMs: 1_000n },
+        },
+        summary: { shortSummary: { text: "Fix the flaky test" } },
+        border: { tone: "green" },
+      },
+    },
+    overrides,
+  );
+
 /** The worktree-left `removed` outcome, the one nested arm the table above skips. */
 export const worktreeRemovedRow = (overrides?: Partial<RowInit>): FeedRow =>
   feedRow(

@@ -390,7 +390,7 @@ type cliFixture struct {
 	// dialed is every address the command dialed, in order.
 	dialed []string
 	// unrostered are workspaces the registry holds and the roster leaves
-	// out, such as a hidden merge workspace.
+	// out, such as a backlogged workspace.
 	unrostered []*frontendv1.RosterRow
 	// locateErr fails every locate.
 	locateErr error
@@ -865,9 +865,9 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 		{name: "here", arg: here, want: "ws-caller", code: exitSuccess},
 		{name: "a name two workspaces share", arg: "twin", code: exitFailure},
 		{name: "a name nobody has", arg: "ghost", code: exitFailure},
-		{name: "a hidden merge workspace by name", arg: "merge", want: "ws-merge", code: exitSuccess},
-		{name: "a hidden merge workspace by directory", arg: "/wt/merge", want: "ws-merge", code: exitSuccess},
-		{name: "here in a hidden merge workspace's worktree", arg: here, cwd: "/wt/merge/daemon", want: "ws-merge", code: exitSuccess},
+		{name: "an unrostered workspace by name", arg: "merge", want: "ws-merge", code: exitSuccess},
+		{name: "an unrostered workspace by directory", arg: "/wt/merge", want: "ws-merge", code: exitSuccess},
+		{name: "here in an unrostered workspace's worktree", arg: here, cwd: "/wt/merge/daemon", want: "ws-merge", code: exitSuccess},
 		{name: "here outside every worktree", arg: here, cwd: "/elsewhere", code: exitFailure},
 	}
 	for _, tt := range tests {
@@ -2531,7 +2531,7 @@ func evicted(req *agentreplv1.UpdateMergeQueueRequest) string {
 func TestAQueueVerbAddressesAMergeByTheNameTheQueueListsItUnder(t *testing.T) {
 	for _, verb := range []string{"dequeue", "move-up", "move-down"} {
 		t.Run(verb, func(t *testing.T) {
-			// Arrange: the async merge's workspace is hidden, so no roster row names it.
+			// Arrange: the merge is listed by its queue name, which no roster row carries.
 			f := newCLIFixture()
 			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-evicted"})
 
@@ -2542,7 +2542,7 @@ func TestAQueueVerbAddressesAMergeByTheNameTheQueueListsItUnder(t *testing.T) {
 			if code != exitSuccess {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
-			if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != verb+" ws-hidden-merge" {
+			if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != verb+" ws-evicted" {
 				t.Fatalf("update = %q, want %s of the listed merge's workspace", got, verb)
 			}
 		})
@@ -3959,7 +3959,7 @@ func TestDiscardAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 	}
 	if req := only[*agentreplv1.DiscardMergeRequest](t, f); req.GetWorkspace().GetId() != "ws-evicted" || req.GetRequester() == nil {
-		t.Fatalf("request = %v, want ws-hidden-merge discarded by the caller", req)
+		t.Fatalf("request = %v, want ws-evicted discarded by the caller", req)
 	}
 }
 
