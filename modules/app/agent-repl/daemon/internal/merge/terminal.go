@@ -384,12 +384,12 @@ func (r *run) readClosings(ctx context.Context, log dlog.Logger) []ids.Workspace
 	record, err := r.o.deps.DB.Workspace(ctx, also)
 	switch {
 	case err != nil:
-		log.Error("daemon.merge.teardown", "could not read the workspace an async merge's one-shot closes; it is kept open", dlog.Context{
-			"workspace": string(r.ws), "one_shot": string(also), "error": err.Error()})
+		log.Error("daemon.merge.teardown", "could not read the workspace a one-shot closes once it lands; it is kept open", dlog.Context{
+			"workspace": string(r.ws), "close_after": string(also), "error": err.Error()})
 		return out
 	case record.Closed:
-		log.Info("daemon.merge.teardown", "the workspace an async merge's one-shot closes is already closed", dlog.Context{
-			"workspace": string(r.ws), "one_shot": string(also)})
+		log.Info("daemon.merge.teardown", "the workspace a one-shot closes once it lands is already closed", dlog.Context{
+			"workspace": string(r.ws), "close_after": string(also)})
 		return out
 	}
 	return append(out, also)
@@ -676,8 +676,8 @@ func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger
 	return nil
 }
 
-// cleanupLanded removes the worktree a landed async merge asked to clean up
-// (wsm.MergeOrigin.CleanupDir) through git's clean door, never forced: a
+// cleanupLanded removes the source worktree a landed one-shot was created to
+// clean up (wsm.LandingEffects.CleanupDir) through git's clean door, never forced: a
 // worktree that holds uncommitted changes is kept, and says so. The branch is
 // never deleted.
 func (r *run) cleanupLanded(ctx context.Context, log dlog.Logger) {
@@ -693,14 +693,14 @@ func (r *run) cleanupLanded(ctx context.Context, log dlog.Logger) {
 		return
 	}
 	if !clean {
-		log.Info(op, "kept the worktree an async merge asked to clean up: it holds uncommitted changes", fields)
+		log.Info(op, "kept the source worktree a one-shot was created to clean up: it holds uncommitted changes", fields)
 		return
 	}
 	if err := r.git.RemoveCleanWorktree(ctx, string(r.repo), dir); err != nil {
-		log.Error(op, "could not remove the worktree an async merge asked to clean up", withField(fields, "error", err.Error()))
+		log.Error(op, "could not remove the source worktree a one-shot was created to clean up", withField(fields, "error", err.Error()))
 		return
 	}
-	log.Info(op, "removed the worktree an async merge asked to clean up", fields)
+	log.Info(op, "removed the source worktree a one-shot was created to clean up", fields)
 }
 
 // TerminalDrainBound is how long the orderly exit gives the merge runs that

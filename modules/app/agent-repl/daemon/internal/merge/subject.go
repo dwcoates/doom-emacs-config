@@ -43,11 +43,11 @@ type subject struct {
 	// the one statement of what a merge closes, which the family rules read
 	// too.
 	closes ids.WorkspaceID
-	// closesAlso is ANOTHER workspace an async merge closes once it lands
-	// (wsm.MergeOrigin.CloseOnLanding), empty when it closes none.
+	// closesAlso is ANOTHER workspace a one-shot closes once it lands
+	// (wsm.LandingEffects.CloseAfter), empty when it closes none.
 	closesAlso ids.WorkspaceID
-	// cleanupDir is the worktree an async merge removes once it lands
-	// (wsm.MergeOrigin.CleanupDir), empty when it removes none.
+	// cleanupDir is the source worktree a one-shot removes once it lands
+	// (wsm.LandingEffects.CleanupDir), empty when it removes none.
 	cleanupDir string
 	// other is another workspace whose worktree the merge works in, empty when
 	// it works in none but the requester's.

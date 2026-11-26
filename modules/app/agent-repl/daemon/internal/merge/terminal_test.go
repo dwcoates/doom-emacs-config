@@ -2858,3 +2858,119 @@ func TestAnAbandonmentNamesItsCause(t *testing.T) {
 		})
 	}
 }
+
+// teardownRecorded reports whether the teardown recorded MESSAGE at LEVEL.
+func teardownRecorded(h *harness, level, message string) bool {
+	for _, r := range h.logs.Records() {
+		if r.Level == level && r.Operation == "daemon.merge.teardown" && r.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
+// landOneShot lands the harness workspace's own branch as a one-shot created
+// with EFFECTS (wsm.LandingEffects), arranging the store as ARRANGE says
+// before the run is admitted.
+func landOneShot(t *testing.T, h *harness, effects *wsm.LandingEffects, arrange func()) {
+	t.Helper()
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	setRecord(h, theWorkspace, func(ws *wsm.Workspace) { ws.OneShot, ws.Effects = true, effects })
+	enqueue(t, h)
+	if arrange != nil {
+		arrange()
+	}
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+}
+
+func TestAOneShotLandingClosesTheWorkspaceItsEffectsName(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	landOneShot(t, h, &wsm.LandingEffects{CloseAfter: otherWorkspace}, nil)
+
+	// Assert: the named workspace is stamped merged and closed and its
+	// worktree removed, as the one-shot's own is.
+	if !h.db.closed[otherWorkspace] || h.db.mergedAt[otherWorkspace].IsZero() {
+		t.Fatal("the close-after workspace was not stamped merged and closed")
+	}
+	if !slices.Contains(h.git.removedWorktrees, dir) {
+		t.Fatalf("removed worktrees = %v, want the close-after workspace's %s", h.git.removedWorktrees, dir)
+	}
+	if !h.db.closed[theWorkspace] {
+		t.Fatal("the one-shot itself was not closed by its landing")
+	}
+}
+
+func TestAOneShotWhoseCloseAfterClosedMeanwhileClosesNothingMore(t *testing.T) {
+	// Arrange: the close-after workspace closes before the landing.
+	h := newHarness(t)
+	dir := h.registerOther(otherWorkspace, "ws-two", "other-branch")
+
+	// Act.
+	landOneShot(t, h, &wsm.LandingEffects{CloseAfter: otherWorkspace}, func() {
+		setRecord(h, otherWorkspace, func(ws *wsm.Workspace) { ws.Closed = true })
+	})
+
+	// Assert.
+	if slices.Contains(h.git.removedWorktrees, dir) {
+		t.Fatalf("removed worktrees = %v, want the already-closed workspace's left alone", h.git.removedWorktrees)
+	}
+	if !teardownRecorded(h, "info", "the workspace a one-shot closes once it lands is already closed") {
+		t.Fatal("the pass-over was not recorded")
+	}
+}
+
+func TestAOneShotsCleanupOfItsSourceWorktreeOnLanding(t *testing.T) {
+	const source = "/wt/agent-fix"
+	tests := []struct {
+		name        string
+		effects     *wsm.LandingEffects
+		dirty       bool
+		removeErr   error
+		wantCleaned bool
+		level       string
+		message     string
+	}{
+		{name: "a recorded worktree is removed", effects: &wsm.LandingEffects{CleanupDir: source}, wantCleaned: true,
+			level: "info", message: "removed the source worktree a one-shot was created to clean up"},
+		{name: "no cleanup keeps every worktree", effects: &wsm.LandingEffects{CompactRequester: true}},
+		{name: "a worktree with uncommitted changes is kept", effects: &wsm.LandingEffects{CleanupDir: source}, dirty: true,
+			level: "info", message: "kept the source worktree a one-shot was created to clean up: it holds uncommitted changes"},
+		{name: "a removal git refuses is recorded and the merge still lands", effects: &wsm.LandingEffects{CleanupDir: source}, removeErr: errors.New("locked"),
+			level: "error", message: "could not remove the source worktree a one-shot was created to clean up"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.git.mu.Lock()
+			h.git.clean = true
+			h.git.cleanByDir = map[string]bool{source: !tt.dirty}
+			h.git.cleanRemoveErr = tt.removeErr
+			h.git.mu.Unlock()
+
+			// Act.
+			landOneShot(t, h, tt.effects, nil)
+
+			// Assert.
+			cleaned := slices.Contains(h.git.cleanedWorktrees, source)
+			if cleaned != tt.wantCleaned {
+				t.Fatalf("cleaned worktrees = %v, want %s cleaned %v", h.git.cleanedWorktrees, source, tt.wantCleaned)
+			}
+			if tt.message != "" && !teardownRecorded(h, tt.level, tt.message) {
+				t.Fatalf("no %s teardown record %q: %+v", tt.level, tt.message, h.logs.Records())
+			}
+			if !h.db.closed[theWorkspace] {
+				t.Fatal("the one-shot did not land and close")
+			}
+		})
+	}
+}
