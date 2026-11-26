@@ -1520,8 +1520,22 @@ type TokenUsage struct {
 	// Zero when the vendor reported no thinking tokens, which is also what a
 	// response with no extended thinking reports.
 	OutputThinkingTokens uint64 `protobuf:"varint,4,opt,name=output_thinking_tokens,json=outputThinkingTokens,proto3" json:"output_thinking_tokens,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// TRUE WHEN THIS IS THE VENDOR'S IN-FLIGHT SNAPSHOT of a response that is
+	// still streaming, which the shim's stream plane writes from the SDK's
+	// assistant message as each block lands; false for the SETTLED usage the
+	// sidecar's file plane writes from the record the vendor itself wrote.
+	//
+	// THE TWO PLANES REPORT THE SAME UNIT'S USAGE TWICE BY DESIGN, and the
+	// settled report supersedes the provisional one: a consumer replaces a
+	// provisional usage with whatever follows and never counts the replacement
+	// a contradiction, keeps a settled usage over a provisional one that arrives
+	// after it (the planes carry no ordering), and treats two settled usages
+	// that differ as the producer contradiction they are (2026-11-26: the
+	// topbar warned "two different usages" on every streamed response because
+	// the wire could not say which report was which).
+	Provisional   bool `protobuf:"varint,7,opt,name=provisional,proto3" json:"provisional,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TokenUsage) Reset() {
@@ -1580,6 +1594,13 @@ func (x *TokenUsage) GetOutputThinkingTokens() uint64 {
 		return x.OutputThinkingTokens
 	}
 	return 0
+}
+
+func (x *TokenUsage) GetProvisional() bool {
+	if x != nil {
+		return x.Provisional
+	}
+	return false
 }
 
 // The prompt input this request did not have to process, because the prompt
@@ -1779,14 +1800,15 @@ const file_conversation_v1_api_proto_rawDesc = "" +
 	"\x0f_resolved_model\"\x18\n" +
 	"\x16ModelEffortUnsupported\"Q\n" +
 	"\x14ModelEffortSupported\x129\n" +
-	"\x06levels\x18\x01 \x03(\x0e2!.conversation.v1.AgentEffortLevelR\x06levels\"\xed\x01\n" +
+	"\x06levels\x18\x01 \x03(\x0e2!.conversation.v1.AgentEffortLevelR\x06levels\"\x8f\x02\n" +
 	"\n" +
 	"TokenUsage\x12>\n" +
 	"\n" +
 	"input_hits\x18\x01 \x01(\v2\x1f.conversation.v1.TokenCacheHitsR\tinputHits\x12D\n" +
 	"\finput_misses\x18\x02 \x01(\v2!.conversation.v1.TokenCacheMissesR\vinputMisses\x12#\n" +
 	"\routput_tokens\x18\x03 \x01(\x04R\foutputTokens\x124\n" +
-	"\x16output_thinking_tokens\x18\x04 \x01(\x04R\x14outputThinkingTokens\"$\n" +
+	"\x16output_thinking_tokens\x18\x04 \x01(\x04R\x14outputThinkingTokens\x12 \n" +
+	"\vprovisional\x18\a \x01(\bR\vprovisional\"$\n" +
 	"\x0eTokenCacheHits\x12\x12\n" +
 	"\x04read\x18\x01 \x01(\x04R\x04read\"J\n" +
 	"\x10TokenCacheMisses\x12\x18\n" +
