@@ -49,7 +49,7 @@ Places one harness change in its one home and lands it. Every instruction to age
   - d. The repository's tests check that the availability table and the requirements agree; run them with the touched suites.
 
 5. Land the change.
-  - Invoke `/agent-repl-merge-queue` and land the branch as an async merge, placement back.
+  - Invoke `/agent-repl-merge-queue` and land the branch through a landing child, placement back.
   - *NOTE*: the metaprompt is read back by its own suites, so a metaprompt edit runs those suites at the gate like any code change.
 
 ## Notes

@@ -1,7 +1,7 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up, down, or to any place in one call (front, back, behind a merge, or an index), pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s depletion, pause and resume (following one workspace''s merge is `workspace subscribe`, `/agent-repl-workspaces`''). Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
-argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | requeue | discard | move-up | move-down | move | pause [-hard] [-to-land] | resume | subscribe | unsubscribe"
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). A LANDING CHILD (`workspace create -relationship child -one-shot -source-branch BRANCH`) lands a NAMED BRANCH (one cut by hand, or any workspace''s, whoever owns it), or this workspace''s own branch while it stays open, in a visible one-shot child cut from that branch while this workspace keeps working, optionally closing another workspace, removing the branch''s worktree, compacting this workspace or profiling the merge gate once it lands; its landing reaches this workspace as one line. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up, down, or to any place in one call (front, back, behind a merge, or an index), pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s depletion, pause and resume (following one workspace''s merge is `workspace subscribe`, `/agent-repl-workspaces`). Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+argument-hint: "here [front] [minor|patch <changelog-line>] | land-child <branch> ... | status | dequeue | requeue | discard | move-up | move-down | move | pause [-hard] [-to-land] | resume | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
 
@@ -20,16 +20,17 @@ Choose by these rules, in order.
 
 1. The user named one: use it.
 2. This workspace's worktree is the repository's MAIN worktree: NEVER merge
-   `here`. Land work from it as an async merge of a branch cut for it.
+   `here`. Land work from it through a landing child of a branch cut for it.
 3. This workspace concludes once the merge lands (nothing more is to be done in
    it; work after the landing is lost): finish `here`.
-4. Otherwise: an ASYNC MERGE. It is the kind for:
+4. Otherwise: a LANDING CHILD. It is the kind for:
    - a tangential or piecemeal fix landed while this workspace keeps working;
    - an implementation attempt landed so this workspace and the user can test
      it on master;
    - a round of an instrumentation loop (step 3e);
-   - landing a subagent's finished branch, or combining several through an
-     `-instruction`.
+   - landing a finished branch of another workspace.
+   - A subagent's branch (`-context subagent -subagent AGENT_ID`) is refused
+     loudly for now: land it by another route the user names.
 
 Before finishing `here`:
 
@@ -39,37 +40,33 @@ Before finishing `here`:
 - Every change is committed with its tests passing; work left uncommitted when
   the turn ends fails the merge.
 
-Before an async merge:
+Before a landing child:
 
-- The branch holds exactly the work to land, committed, with its tests passed;
-  where it does not, `-instruction` says how the merge workspace makes it so.
-- Any existing branch may be queued, whichever workspace owns it, open or
+- The branch holds exactly the work to land, committed, with its tests passed.
+- Any existing branch may be landed, whichever workspace owns it, open or
   closed; who owns it is never a refusal. To land THIS workspace's own work,
   finish the workspace (`workspace finished here`) unless it must land while
   this workspace keeps working.
-- Give `-cleanup-worktree` unless the branch's worktree must be kept, and
-  `-close-after WS` when the work came from another workspace that is done
-  once it lands.
-- A subagent's branch names the subagent: `-maker-subagent ID` with
-  `-context-fork` naming the workspace that spawned it; otherwise
-  `-maker WS`. `-target primary` lands on the main branch, `-target maker`
-  into the maker's branch.
+- The child works on a NEW branch cut at the branch's tip when it is created;
+  the branch itself is left untouched.
+- Give `-cleanup-source-worktree` unless the branch's worktree must be kept
+  (it removes only the worktree that had the branch checked out, never the
+  main worktree or a registered workspace's), and `-close-after WS` when the
+  work came from another workspace that is done once it lands.
+- `-compact-requester-after` ONLY when the user asked for this workspace to be
+  compacted once the landing is told; `-profile-gate` ONLY when the user asked
+  for the merge's test gate to be profiled.
 
-Either kind:
+Either kind (a landing child's placement and version go on its own
+`workspace finished here`):
 
 - `-placement front` only for a merge that must land before the work already
   waiting (a hotfix); `-placement behind=MERGE` to land directly after a named
   merge in line (the name `merge-queue status` lists), taking its front mark;
-  otherwise `-placement back`. MERGE may also be an async merge this
-  workspace asked for and has not handed off yet, such as one asked for
-  earlier in the same turn. A turn may ask for any number of async merges;
-  they join the line in the order asked for, so the later one lands directly
-  behind it. Any other name not in line is still refused
+  otherwise `-placement back`. A name not in line is refused
   (`placement_behind_not_in_line`).
-  - A merge placed `behind=MERGE` waits on MERGE: it is not admitted, and its
-    `-instruction` does not run, until MERGE has left the queue. So an
-    instruction may rely on MERGE's work being on the target, and the merge
-    workspace is told to rebase onto it first.
+  - A merge placed `behind=MERGE` waits on MERGE: it is not admitted until
+    MERGE has left the queue.
   - If MERGE leaves without landing, the merge behind it fails too, naming
     MERGE, and its requester is told.
 - `-compact-after`, and the hook flags `-pre-deploy-prompt`,
@@ -90,9 +87,17 @@ Either kind:
 
 - Finish this workspace: `workspace finished here -placement back|front
   [-version-part ... -changelog-line ...]`.
-- Async: `workspace async-merge -name NAME -branch BRANCH ...`, NAME a short
-  slug naming what lands. A name already taken is refused; ask again with
-  another.
+- Landing child: `workspace create -repository here -relationship child
+  -parent here -lands-into main -source-branch BRANCH -context fork -fork here
+  -one-shot -prompt TEXT [-close-after WS] [-cleanup-source-worktree]
+  [-compact-requester-after] [-profile-gate]`, the prompt telling the child to
+  land itself with `workspace finished here -placement back|front` and, for
+  agent-repl's master, `-version-part minor|patch -changelog-line TEXT`.
+  - The child is drawn in this workspace's feed as a bubble (its name opens
+    it, with its short and long summary, bordered in its status color while
+    open) and listed in the footer's children panel while open, then in the
+    topbar summary's click menu once merged or closed. A child acknowledged
+    merged is closed.
 - Refused: report the printed arm verbatim and STOP.
 
 ## 2. End the turn
@@ -102,8 +107,8 @@ Either kind:
   finish-stage hooks run first, before the deploy is put in line
   (`/agent-repl-workspaces`); the deploy starts after them.
   NEVER request it a second time.
-- After an async merge: say so in one line and END THE TURN. The merge cannot
-  start while this turn runs; do NOT wait, poll or check on it.
+- After creating a landing child: say so in one line and carry on with this
+  workspace's work. The child lands itself; do NOT wait, poll or check on it.
 
 ## 3. Answer the merge's prompts (later turns)
 
@@ -122,10 +127,8 @@ Either kind:
   why. The merge leaves the queue at once and no test run starts. CRITICAL:
   NEVER leave a repair broken, unresolved or uncommitted on purpose to make the
   merge fail; that spends a whole test run on a merge that cannot land.
-- c. A report of how a merge ended (landed, failed, or given up under its
-  workspace closing or the daemon shutting down; a merge the user or the
-  operator evicted or dequeued is never reported back): report it in one line,
-  then go to step 3e for a round of an instrumentation loop;
+- c. The line "Your child `X` landed; this is its one update to you.": report
+  it in one line, then go to step 3e for a round of an instrumentation loop;
   otherwise STOP. A merge that left without landing stays off the queue with
   its request: requeue it with `merge-queue requeue NAME` (NEVER re-request it,
   NEVER make a new workspace), or end it with `merge-queue discard NAME`. A
@@ -143,7 +146,7 @@ Either kind:
   subscribe again only if the work you subscribed for still needs it.
 - e. A landing report for an instrumentation round: reproduce, read the records
   the round added, and either remediate (landing the fix as the next round) or
-  add the records still missing and land them as the next async merge. While a
+  add the records still missing and land them as the next landing child. While a
   round's merge runs, work the next open question; never wait on it.
 - f. A report that a deploy HOOK failed (a script that exited non-zero, ran
   past its timeout or could not start, or a prompt hook that did not
@@ -163,7 +166,7 @@ Either kind:
   (`90m`, `36h`, `7d`), a date (`2026-11-20`, local midnight) or an RFC 3339
   instant; an unset `-until` is now; both edges are inclusive.
   - `throughQueue` lists, with its `count`, the merges the queue landed: a
-    finish, a one-shot's, an async merge.
+    finish, a one-shot's, a landing child's.
   - `otherwise` lists, with its `count`, every other landing, each with its
     `path`: `queueBypass`, `deployMediator`, or `direct` (`land-direct.sh` run
     by a caller holding neither role).
@@ -181,8 +184,7 @@ Either kind:
     many landed.
 - `merge-queue dequeue MERGE`, `merge-queue move-up MERGE` and
   `merge-queue move-down MERGE` take a merge off the queue or move it one
-  place. MERGE is the name `merge-queue status` lists it under (an async
-  merge's `-name`), or `here` for this workspace's own merge.
+  place. MERGE is the name `merge-queue status` lists it under (a landing child's workspace name), or `here` for this workspace's own merge.
 - `merge-queue move MERGE|here -placement front|back|behind=MERGE|index=N`
   moves a WAITING merge to any place in its queue in ONE atomic call. CRITICAL:
   use `move` whenever a merge must go more than one place; NEVER loop
@@ -209,16 +211,10 @@ Either kind:
   landing (dequeue, failure, a restart that could not resume it, backlogged at its
   cold gate, the merge ahead not landing) keeps it OFF THE QUEUE with its
   cause, keeping its branch, version part, changelog line, hooks and cleanup
-  flags; an async merge's hidden merge workspace stays open under its name.
+  flags.
 - `merge-queue requeue MERGE|here [-placement back|front|behind=MERGE]
-  [-version-part minor|patch -changelog-line TEXT] [-model M]` puts the SAME
-  request back in line as itself (same workspace or merge workspace, same
-  branch and values). Placement defaults to back.
-  - `-version-part` and `-changelog-line` are ONLY for a merge whose cause is
-    `adopted` (a merge workspace left open before requests were kept, which
-    recorded no values); a versioned main-branch landing of an adopted merge
-    asked by an agent is refused `version_increment_required` without them,
-    and giving them for any other merge is refused `version_already_recorded`.
+  [-model M]` puts the SAME request back in line as itself (same workspace,
+  same branch and values). Placement defaults to back.
   - `-model M` makes the merge's session resume on model M in the same step,
     so a cold conversation is read once on it, with no separate SetModel; M
     not in the login's catalog is refused `not_in_catalog`.
@@ -229,22 +225,15 @@ Either kind:
   - Refusals: `unknown_merge`, `still_queued`, `branch_gone`,
     `already_landed`, `workspace_closed`, `placement_behind_not_in_line`,
     `not_in_catalog`.
-- `merge-queue discard MERGE|here` ends a request off the queue. An async
-  merge's merge workspace is closed and the worktree its request asked to
-  clean up is removed when clean; a workspace's own merge loses only its
-  request. No branch is ever deleted. A merge still in line is refused
+- `merge-queue discard MERGE|here` ends a request off the queue, closing no
+  workspace. No branch is ever deleted. A merge still in line is refused
   `still_queued` (dequeue first).
-- `workspace async-merge` under a name an off-queue merge holds is refused
-  `async_merge_name_off_queue`, naming that merge: requeue it instead.
-- An agent's `workspace finished` and `workspace async-merge` first run the
+- An agent's `workspace finished` first runs the
   repository's rule suites (`repo-scans`, `byte-compile`, `shellcheck`,
   `ert-rules`, `webapp-rules`) on the branch's worktree through the daemon,
   and the call waits for them. A failure is refused, recording nothing:
-  `rule_checks_failed` (`async_merge_rule_checks_failed` for an async merge)
-  names the failing cases with the command that reruns each group and the
-  archived run; fix them, commit, and ask again. An async merge whose branch
-  no worktree has checked out is not checked first: the queue makes it a
-  worktree and the gate checks it. The contract is
+  `rule_checks_failed` names the failing cases with the command that reruns each group and the
+  archived run; fix them, commit, and ask again. The contract is
   `modules/app/agent-repl/AGENTS.md`, "The merge queue's test gate and
   remediation contract".
 - `merge-queue pause -repository here|DIR|all` and `merge-queue resume
@@ -253,7 +242,7 @@ Either kind:
 - `merge-queue pause -hard -repository here|DIR|all` is a HARD STOP: it pauses
   the queue and also interrupts the agent turn of every merge stopped at a
   fixing attempt or a conflict resolution, and of every waiting merge's
-  background rebase. A turn at any other step (a pick, a deploy-stage prompt)
+  background rebase. A turn at any other step (a deploy-stage prompt)
   is left to finish. A queue already paused is not refused. On resume, each
   interrupted step is prompted again without spending an attempt.
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
@@ -317,8 +306,7 @@ Either kind:
     mediator across every deploy, on Opus at low effort: it checks each
     deploy, fixes what it dispatches to itself in the same turn (finishing on
     its own), and settles an escalation with the user (finishing once they
-    agree). It is named `deploy-mediator`, a name no create, rename or async
-    merge may take. It stays open, warm and in sight in its
+    agree). It is named `deploy-mediator`, a name no create or rename may take. It stays open, warm and in sight in its
     repository's section for good, and the queue's purple label opens it too;
     its conversation is compacted by Haiku the moment three quiet checks
     follow a dispatch or an escalation, never cleared.
@@ -383,7 +371,7 @@ it; it discards the running merge's test progress.
 4. Once `merge-queue status` shows the commandeering merge running,
    `merge-queue requeue RUNNING -placement front` puts the displaced merge
    back at the FRONT so it runs right after. Anyone may run it: NEVER prompt
-   the workspace, and NEVER re-request an async merge.
+   the workspace, and NEVER re-request the merge.
 5. Report which merge was displaced and that it was requeued.
 
 - **CRITICAL: between the dequeue (step 3) and the requeue (step 4), a

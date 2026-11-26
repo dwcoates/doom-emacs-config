@@ -77,7 +77,7 @@ response, and the other way round.
 
 These clicks jump to an entry in the feed:
 
-- a background agent, shell, monitor or async merge row in the expanded footer;
+- a background agent, shell or monitor row in the expanded footer;
 - a breadcrumb above a subagent's feed;
 - the "gated:" link on a hook card.
 
@@ -142,7 +142,6 @@ These clicks jump to an entry in the feed:
   - Clicking it opens the target branch's magit log (master's, for a merge onto master) in the popup on the right, with point on that commit.
   - A commit older than the log's commit limit opens the log at its top, and the echo area says the commit is not shown.
 - **A merge never opens the expanded footer.**
-  - An async merge still in flight is listed in it, under the `⇄` chip (see "Background work in the expanded footer").
 - **The bubble has one rebasing tab and one tests tab, each with tabs of its own inside.**
   - The rebasing tab has a tab for each commit being replayed, named by its short hash and subject; commits the rebase has not reached yet show no clock.
     - The short hash is drawn smaller and in a darker grey than the subject.
@@ -350,15 +349,13 @@ A priority marks a workspace P0.5, P1, P2 or P3, highest first.
   - Clearing it leaves the workspace where it is.
 - **A workspace the Slack emoji-ack intake created also wears a thumbs up.** It is drawn right after the priority icon, in the same places.
 
-## Sync and async merges
+## Landing a branch, and landing children
 
-- **A merge is a ONE-SHOT or ASYNC.**
-  - A one-shot is the only sync merge: it runs in your workspace, your agent resolves its conflicts and fixes its tests in the bubble's tabs, your prompts are held until it ends, and your workspace closes once it lands.
+- **A workspace lands its own work by finishing, in place.**
+  - A one-shot runs the merge in your workspace: your agent resolves its conflicts and fixes its tests in the bubble's tabs, your prompts are held until it ends, and your workspace closes once it lands.
     - The prompts you queued before the agent asked for it are sent to the agent at once, in order, without interrupting it, so it answers them before the merge starts.
     - Prompts you send once the merge is running wait for it to end.
     - A one-shot that fails leaves your workspace open, and the agent is told why.
-  - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
-  - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
 - **An agent finishes its own workspace (`agent-repld workspace finished here`, through `/agent-repl-merge-queue`) only when your workspace is done once it deploys.**
   - What finishing does is the repository's own `.agent-repl/lifecycle.yaml`: for agent-repl, the branch lands on master and the runtime rolls out. A repository without the file refuses it (see `/agent-repl-workspaces`).
   - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (a red-and-white target) while the agent keeps working.
@@ -366,43 +363,39 @@ A priority marks a workspace P0.5, P1, P2 or P3, highest first.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
   - `SPC TAB M` and the sidebar's Finish are the same.
   - The main workspace (the repository's own checkout) never one-shots.
-- **Every other merge is an async merge (`agent-repld workspace async-merge -name <name> -branch <branch>`).**
+- **A workspace that must stay open while a branch lands asks a landing child to land it (`agent-repld workspace create -source-branch <branch> -one-shot`).**
   - It is for a fix beside the point of what remains, an attempt landed so you can test it on master, or the main workspace landing its subagents' branches.
-  - The agent names the merge workspace; a name that is already a workspace, a branch, an occupied worktree directory or another merge's reservation is refused, and the agent asks again with another.
-  - The branch is never one a workspace owns, the asking workspace's included; the daemon refuses it.
-  - `-instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
-  - `-close-after <workspace>` closes another workspace once the merge lands, such as the subagent workspace the work came from.
-  - `-cleanup-worktree` removes the worktree that had the branch checked out once the merge lands; branches are kept.
-  - `-before-merge <prompt>` and `-after-merge <prompt>` are prompts the merge workspace runs before the landing and after it.
-    - A failed `-before-merge` prompt fails the merge, and `-after-merge` never does.
-    - The merge workspace runs only the prompts its request names, never the ones the asking workspace was created with.
-  - The main workspace can ask for an async merge; it lands in the repository's own checkout.
-- **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
-  - It is listed among the closed workspaces, and under Recently Deployed once it lands.
-  - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.
-  - Every queue tab lists the merge by its own name; clicking the entry switches to your workspace and opens the merge's bubble there, and never selects or reveals the merge workspace.
-- **The merge workspace is revealed, and stays visible, when:**
-  - its agent asks a question or for a permission;
-  - you press a running tab's `stop`;
-  - you select it.
-- **A merge workspace is never revealed by its merge's own outcome.**
-  - A failed merge's workspace stays hidden, listed among the closed workspaces.
-  - Selecting it there reveals it.
-- **A revealed merge workspace is an ordinary workspace.**
-  - Its feed has no merge bubble, and its footer shows its own statuses.
-  - The bubble's header then carries an `open merge workspace` button.
-- **A running agentic tab's `stop` stops only that merge's agent.**
-  - `C-c C-k` in your own workspace never stops an async merge.
-- **When an async merge ends, a badge in your feed says how (`merge of <branch> landed`), and your agent is told.**
-  - A landed merge closes its merge workspace; its conversation stays there to read.
-  - A failed merge leaves the merge workspace open where it stopped, for you to finish.
-  - A merge you or an agent take off the queue on purpose ends its bubble, but your agent is not told: nothing failed.
-- **A merge workspace nobody has used for 15 calendar days is removed.**
-  - The bubble's button then reads `merge workspace removed` and does nothing.
-- **Your own workspace is retired a day after its async merge lands, if nobody has used it since.**
-  - Its session stops, its worktree is removed, and it moves to Recently Deployed, as a sync merge leaves it.
-  - Its branch is kept.
-  - It is kept while it holds commits or changes the merge did not take, while anything runs or is held in it, or while another open workspace was cut from it.
+  - The child is a one-shot workspace cut from the branch's tip when it is created, so what lands is fixed then; commits added to the branch afterwards are not taken.
+  - It is an ordinary workspace: it is never hidden, has its own tab and sidebar row, and lands itself by finishing like any one-shot.
+  - The create can carry what the landing does besides landing:
+    - `-close-after <workspace>` closes another workspace once the child lands, such as the subagent workspace the work came from;
+    - `-cleanup-source-worktree` removes the worktree that had the branch checked out once it lands; branches are kept;
+    - `-compact-requester-after` compacts the asking workspace's conversation after the landing notice;
+    - `-profile-gate` profiles the deploy gate of the landing.
+  - The main workspace can ask for a landing child; it lands in the repository's own checkout.
+- **When a landing child lands, its parent is told in one line, and the child closes.**
+  - Nothing is mirrored into the parent's feed: the child's turns stay in the child.
+  - A child that did not land stays open where it stopped, for you or its parent to finish.
+
+### Children in the feed, the footer and the top bar
+
+A workspace created from another is its child. Every child is drawn in three places, and a child is never hidden.
+
+- **Each child is a bubble in its parent's feed.**
+  - The head shows the child's name in purple, the branch it lands on, how it stands (`open`, `merging`, `merged` with its version, `closed` or `removed`) and its runtime.
+  - Clicking the name selects the child. The bubble mirrors nothing of the child's turns.
+  - Its short summary shows under the head while the bubble is folded, and its long summary once you open it. The fold is the page's own: it starts folded and is not kept across a reload.
+  - A thin border in the child's status color shows what it is doing while it is open, the same color its sidebar row wears; a child that is not open has no border.
+  - A child you created yourself, from no workspace, has no bubble in any feed.
+- **The `⇄` chip in the expanded footer lists the open children.**
+  - Each row reads the child's name in purple, its status as a word in its status color, and its short summary. Clicking a row selects the child.
+  - The chip carries `? N` beside its count while N children wait on a question or a permission.
+- **A click on the top bar's summary drops a menu of the children that are not open.**
+  - A row's title is the child's short summary and its second line the child's name, with a `merged` or `closed` badge; clicking it selects the child.
+  - The most recently ended child comes first.
+  - A child you reopen is open again, so it leaves the menu and joins the footer.
+- **A child shows in exactly one of the footer and the menu.** A removed child is in neither; its bubble alone keeps it, standing `removed`.
+
 
 ## File links in prompts and responses
 
@@ -508,11 +501,8 @@ Every code block in the feed has a small copy icon at its top right.
 
 The expanded footer lists the running background agents, shells and monitors, one row each.
 
-- **The `⇄` chip lists your async merges that are still queued or merging.**
-  - Each row reads the branch line, the step the merge is on (the bubble's current tab), and its clock.
-  - A row reads `waiting on you` while the merge workspace's agent waits on a question or a permission, and the chip then carries `? N` beside its count.
-  - A row leaves when its merge lands, fails or is taken off the queue, and clicking it jumps to the merge's bubble.
-  - Your workspace's own sync merge has no row: the footer's `merging` status already shows it.
+- **The `⇄` chip lists the workspace's open children, in their own panel** (see "Children in the feed, the footer and the top bar").
+  - Your workspace's own merge has no row: the footer's `merging` status already shows it.
 
 - **Clicking anywhere on a row jumps to its entry in the feed.**
   - Hovering anywhere on the row highlights the whole row.
@@ -895,8 +885,7 @@ A workspace that fails to be created is reported in two places.
   - The request names what the create asked for and the failure, and asks the agent to analyze it without changing anything until you answer.
   - It waits behind a turn the main worktree is already running, and never interrupts it.
 - This holds however the workspace was asked for: an Emacs key, an agent's `agent-repld workspace create` (`/agent-repl-workspaces`), or a support workspace.
-- Nothing is reported for a create handed to a new daemon during a restart, or for the hidden workspace an async merge runs in.
-  - The merge queue reports that one's failure back to the workspace that asked for the merge.
+- Nothing is reported for a create handed to a new daemon during a restart.
 - The request's wording is `prompts/workspace-create-failed.md`.
 - A name you type for a workspace (`SPC TAB N`, `SPC TAB C`, `SPC TAB F`) is checked before anything is built.
   - The last part must be lowercase words joined by single hyphens, such as `fix-login`.
@@ -991,9 +980,9 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - Each merge that left the queue without landing (evicted, failed, or stopped by a restart) follows, marked `evicted`.
       - `merge-queue status` still names the exact cause.
       - A merge is left out once any of its branch's commits is on master, by ancestry or as an equivalent patch, or once its branch is gone; its request stays and can still be requeued by name.
-      - Its request stays: its branch, version increment, changelog line, hooks and cleanup are kept, and an async merge's hidden merge workspace stays open under its name.
+      - Its request stays: its branch, version increment, changelog line, hooks and cleanup are kept.
       - `↺` puts it back in line, at the back, as itself; no new workspace is made.
-      - `✕` discards it; an async merge's merge workspace closes, and the worktree it asked to clean up is removed when it holds no uncommitted changes. No branch is deleted.
+      - `✕` discards it; the worktree it asked to clean up is removed when it holds no uncommitted changes. No branch is deleted.
       - A repository with only such merges is still listed.
   - A paused queue shows on its own repository.
     - The repository's name turns red, and its merge icons amber.
@@ -1129,8 +1118,7 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - Its sidebar row's name and its tab's name dim the moment you scroll its feed, type in its composer, step through its feed or follow a link in its page.
   - Looking at it, for any length of time, does not dim it.
   - The next turn's start brings the color back.
-- **A working or sync-merging workspace's sidebar name always wears its status color**, red or purple, whether or not you have worked in it.
-- **A workspace whose branch merges async shows the merge in its purple mark alone**: its name follows the same rules, so an idle one dims once you work in it.
+- **A working or merging workspace's sidebar name always wears its status color**, red or purple, whether or not you have worked in it.
 - **A background workspace's sidebar name is red while it runs a turn.**
   - Otherwise it follows the idle rule, in the color of the turn end beneath the background (green, or turquoise for a failed turn) until you work in it.
 - **A colored bar left of a sidebar row's tab number shows how few presses of `s-[` or `s-]` reach it.**

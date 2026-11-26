@@ -8,12 +8,10 @@
   - A failed creation script, or a creation prompt naming `{{slack_thread}}`
     for a workspace with no Slack origin, FAILS THE CREATE: it is undone and
     reported to the repository's main workspace (`creation_hook_failed`).
-  - An async merge's hidden merge workspace runs no creation stage.
 - **Finish.** Nothing is drawn as a bubble meanwhile. Prompt hooks are turns
   of the workspace, drawn in its own feed; scripts keep their log among the
   queue's logs. A failed hook withdraws the deploy before it is ever in line
   and hands the failure back to the workspace. It is durable across restarts.
-  - An async merge has no finish stage.
   - A user-requested finish of a workspace whose kind has finish hooks waits
     for any turn in flight, then runs them.
 - **TWO KINDS OF WORKSPACE, decided only by who created it**: `emoji_ack`

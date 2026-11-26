@@ -69,7 +69,7 @@
 ### Bypass mode never uses the merge queue, and does its own work
 
 - Bypass mode exists to skip the merge queue, so nothing this workspace lands or dispatches ever goes through it (owner ruling, 2026-11-15).
-  - Every change lands directly on the main branch with `land-direct.sh`, never as a queued merge, an async merge, or a one-shot's finish.
+  - Every change lands directly on the main branch with `land-direct.sh`, never as a queued merge, a landing child, or a one-shot's finish.
   - This workspace never marks itself a one-shot: the daemon refuses the mark with `requester_bypassing_queue`.
 - This workspace does the work itself: it creates no child workspace and runs no subagent unless the user explicitly asks for that particular thing to be done in a workspace or a subagent.
   - Every rule that would dispatch work (a handed failure's fix, a noticed deficiency's fix) is carried out here, by this workspace itself.

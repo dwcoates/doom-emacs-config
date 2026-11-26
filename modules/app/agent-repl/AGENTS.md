@@ -1254,24 +1254,25 @@ symptom is visible in the logs. Inference is not a diagnosis.
 - The fix is verified the same way: reproduce again and show the records that
   prove the chain is now broken.
 
-### Instrumentation reaches the running runtime through an async merge (owner technique, 2026-10-14)
+### Instrumentation reaches the running runtime through a landing child (owner technique, 2026-10-14)
 
 A logging gap in the daemon, shim, webapp or sidecar is closed in the RUNNING
 runtime by landing the new records on master, not by a hand deploy from a
 feature branch.
 
 - Commit the instrumentation (with its tests) on a branch of its own, cut from
-  the investigation's branch or from master, and request an `async` merge of
-  it through `/agent-repl-merge-queue`. The investigating workspace stays open and keeps
-  working while the merge runs.
-- The queue's landing deploys the build, and the async merge's report arrives
-  in the investigating session only once the running runtime carries it.
-  THAT REPORT IS THE CUE: from then on the new records are live, so reproduce
-  and read them.
+  the investigation's branch or from master, and ask a landing child to land it
+  (`workspace create -source-branch BRANCH -one-shot`, through
+  `/agent-repl-workspaces`). The investigating workspace stays open and keeps
+  working while the child lands.
+- The queue's landing deploys the build, and the child's one-line landing
+  report arrives in the investigating session only once the running runtime
+  carries it. THAT REPORT IS THE CUE: from then on the new records are live,
+  so reproduce and read them.
 - The loop is: decide what the logs cannot show yet, land the instrumentation
-  async, wait for the landing report, reproduce, read the chain, and repeat
-  until every link is evidenced. Work the next open question while a merge
-  runs rather than idling on it.
+  through a child, wait for the landing report, reproduce, read the chain, and
+  repeat until every link is evidenced. Work the next open question while a
+  child lands rather than idling on it.
 - A report saying the rollouts are held or the deploy failed means the
   runtime does NOT carry the records yet; it is not the cue.
 - Elisp instrumentation needs no merge: it is hot-loaded through
@@ -1401,11 +1402,9 @@ like an improvement still needs that conversation. Code:
   `ert-rules`, `webapp-rules`) are the checks that read the module's sources
   and hold them to a structural rule, which no workspace's targeted run ever
   names; before 2026-11-25 they first ran in the gate, where they failed 44 of
-  the 93 failed gates in the 3.5 days before. `workspace async-merge` and
-  `workspace finished`, asked by an agent, now run them on the branch's
-  worktree (the finishing workspace's own; for an async merge, the worktree
-  that has its branch checked out, and none for a branch no worktree holds,
-  which the queue makes a worktree for and the gate checks), in the maker's
+  the 93 failed gates in the 3.5 days before. `workspace finished`, asked by an agent
+  (a landing child's own finish included), now runs them on the branch's
+  worktree (the finishing workspace's own), in the maker's
   name and on the test
   service, before anything is recorded (`daemon/internal/merge/rulecheck.go`).
   A failure refuses the merge (`MergeRuleChecksFailed`: the failing cases,
@@ -1538,13 +1537,6 @@ like an improvement still needs that conversation. Code:
   (`prompts/merge-conflict-resolve.md`, `prompts/merge-test-failure-resolve.md`)
   forbid leaving a repair broken, unresolved or uncommitted to make the merge
   fail, and say what the give-up leaves the agent (`run.afterGiveUp`).
-- **An async merge that ends without landing ends its session at once.** A
-  give-up, a failure, a dequeue, a drop or an eviction force-stops its merge
-  workspace's session, the running turn with it (`orchestrator.endSession`,
-  under `daemon.merge.end_session`, from `settle`), before a give-up answers:
-  its agent, forked from its maker's conversation, has no work left, and the
-  withheld stand-down would wait for the turn to end. A merge workspace the
-  user revealed is theirs, and keeps its session.
 - **A rebase never fails on uncommitted changes it meets.** When the
   worktree is dirty at the rebase's clean check, or git refuses to start the
   rebase over changes (`gitclient.ErrDirtyWorktree`), the merge keeps its
@@ -1631,9 +1623,9 @@ What carries the cleanup out today:
   `daemon/internal/merge/terminal.go`: the teardown runs only for a merge
   that landed (`out.landed` set, `out.failed` and `out.abandoned` empty), and
   for each workspace the landing closes (`closings`: the requester's own
-  one-shot, or the one-shot an async merge names) `closeLanded` stops the
+  one-shot, and the workspace its `-close-after` names) `closeLanded` stops the
   session and calls `RemoveWorktree`. `cleanupLanded` removes, through the
-  clean door, the worktree an async merge asked to clean up; a worktree the
+  clean door, the worktree its `-cleanup-source-worktree` asked to clean up; a worktree the
   merge itself made for a branch is removed by the `RemoveWorktree` that
   follows. A failed merge skips all of this, which is what keeps a failed
   one-shot open.
@@ -1643,6 +1635,32 @@ What carries the cleanup out today:
   on the default branch, once idle, clean and not an open workspace's, is
   removed, and its branch is deleted with `DeleteBranchAt` at the judged
   head. It only sees branches that still have a worktree.
+
+## A child is a workspace, drawn once, by the daemon, in the parent's feed, footer or menu
+
+Owner request, 2026-11-26 (`docs/protobuf-design/2026-11-26-children-replace-async-merges.md`).
+A workspace lands a branch while staying open through a LANDING CHILD: a
+one-shot child cut from the branch's tip (`workspace create ... -source-branch
+BRANCH -one-shot`). There is no hidden merge workspace, no turn mirror into
+the parent's feed and no second kind of queue member; the one-shot effects
+(`-close-after`, `-cleanup-source-worktree`, `-compact-requester-after`,
+`-profile-gate`) ride the create.
+
+- **`daemon/internal/children` is the ONE tracker of a parent's children.** It
+  draws each as a `frontend.v1.FeedChild` row (`feedid.KindChild`) in the
+  parent's root feed, in the footer's `⇄` chip and panel while the child is
+  open, and in the topbar summary's click menu once it is not open. A child is
+  in exactly one of the footer and the menu.
+- **Every color a child's surfaces draw is a color NAME from
+  `render-colors.json`, resolved by the daemon from the roster row's own status
+  ladder.** The bubble's border, the footer row and the sidebar row can never
+  disagree. The child's name is the canonical purple (`vocab.wireColor` in the
+  webapp refuses a name outside the closed set).
+- **The bubble is a door, never a mirror**: its content is the child's
+  summaries, and a click on the name selects the child. Its fold is
+  webview-local. The webapp draws it in `src/feed/child.ts`, the footer's
+  panel in `src/footer/expanded.ts` and the summary's menu in
+  `src/topbar/strip.ts`.
 
 ## ONE deploy per complete change landing on master, and the daemon runs it
 
@@ -2853,8 +2871,7 @@ A workspace the user has interacted with since its status last changed is
 **partial**: the tab's name falls back to the bar's ground (`[N]` keeps the
 status colour) and an idle sidebar row's name greys to `--muted`. A **full**
 idle row's sidebar name wears its status colour, with no fade. A working (red)
-or merging (purple) row's sidebar name holds its colour in either mode, and an
-async merge changes nothing of the name; the whole rule is
+or merging (purple) row's sidebar name holds its colour in either mode, the whole rule is
 `webapp/src/sidebar/name-tint.ts`'s. **The status itself never recedes**: the
 bracket and the sidebar dot keep their colour in either mode. The mode says
 what the user has acted on; the colour says what the workspace is DOING.
@@ -2991,23 +3008,6 @@ therefore cannot split the surfaces. A new fact that should move a
 workspace's status is fed to the footer; the roster needs it only when it
 refines the idle rung's detail (an unread turn end).
 
-AN ASYNC MERGE IS A ROW MARKER, NEVER A STATUS (owner request, 2026-10-13).
-While a workspace's own branch has an async merge on its repository's merge
-queue (the requester's detached request, then the hidden merge workspace's
-row, until the row leaves the queue), the row carries
-`frontend.v1.RosterRow.async_merging` beside its own status arm, whatever that
-arm is. The row's NAME keeps the status's color, and both surfaces draw the
-marker from `render-colors.json#async_merge_mark`: the sidebar draws the
-merge glyph, purple, in place of the PLAIN status dot, and breathes the
-row's name (owner
-request, 2026-10-14; every other mark -- a gate glyph, the
-one-shot glyph, a merge glyph, compacting's orange dot -- outranks it), and
-the Emacs tab bar paints the `[N]` bracket purple while the space after it and
-the name keep the status background. A SYNC merge raises no marker: it is the row's own merge arms. The
-merge orchestrator tells the roster the whole set per repository
-(`sidebar.Resolver.SetAsyncMerges`) after every write that adds or removes a
-queue row (`daemon/internal/merge/asyncmerges.go`).
-
 | Color | Meaning | Usable? | Statuses |
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
@@ -3029,6 +3029,31 @@ in the light one. It is the purple the sidebar draws its section titles in
 `--info-agents`, `--tool-title`) are NOT it. Anything that must carry one fixed
 purple outside a theme (an app icon, a desktop banner) takes the dark value,
 `#7d4bcf`, the one the owner's dark-mode sidebar shows.
+
+### The canonical colors
+
+Owner ruling, 2026-11-26. Each status a workspace can stand in has ONE
+canonical color, the same on every surface that shows it: the Emacs tab bar,
+the sidebar row, the footer strip, a child's bubble border in its parent's
+feed (`frontend.v1.FeedChildBorder`), and a child's row in its parent's footer
+panel (`frontend.v1.FooterChildRow`). The daemon resolves the color from the
+row's status arm through `render-colors.json#roster_status`
+(`sidebar.WithArmSink`), and every renderer paints the name it is handed, so
+no surface picks a color of its own:
+
+| Color | Stands for |
+|---|---|
+| Green | idle: ready for you |
+| Red | working |
+| Purple | merging; also agent-repl's own flair color (The canonical purple, above) |
+| Orange | compaction; also flair, beside the purple |
+| Yellow | background: detached work runs while the main thread is idle |
+| Blue | disconnected or detached from the daemon: unusable right now |
+
+Turquoise (wrong but usable) and grey (nothing runs) keep their meanings from
+the table above. A color name a wire field carries is checked against the
+vocabulary (`webapp/src/vocab.ts`, `wireColor`); a name it does not declare is
+a malformed view, never a guess.
 
 ### The three fault domains
 

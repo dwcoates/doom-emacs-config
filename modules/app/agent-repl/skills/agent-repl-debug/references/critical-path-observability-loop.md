@@ -94,15 +94,14 @@ For Emacs:
 5. Treat a queued eval as incomplete until the verification read returns.
 
 For daemon, shim, webapp, sidecar, or store instrumentation, land it in the
-running runtime through an async merge (agent-repl `AGENTS.md`,
-"Instrumentation reaches the running runtime through an async merge"):
+running runtime through a landing child (`/agent-repl-merge-queue`):
 
 1. Commit the instrumentation and its focused tests on a branch of its own,
    never the branch this workspace has checked out.
-2. Request an `async` merge of that branch through `/agent-repl-merge-queue`, then work
-   the next open question while it runs; never idle on it.
-3. Take the merge's landing report as the cue that the new records are live:
-   it arrives only once the running build carries the landing.
+2. Cut a landing child for that branch as `/agent-repl-merge-queue` says, then
+   work the next open question while it runs; never idle on it.
+3. Take the landing child's one-line report as the cue that the new records
+   are live: it arrives only once the running build carries the landing.
 4. A report that the rollouts are held or the deploy failed is NOT the cue:
    the running build does not carry the records yet.
 5. Re-run readiness, then run the capture below.
@@ -152,7 +151,7 @@ If the capture does not establish a root cause:
    surviving hypotheses.
 3. Add or update focused tests.
 4. Reload and prove the new source is active: hot-load elisp, and land
-   anything else through an async merge, waiting for its landing report
+   anything else through a landing child, waiting for its report
    (see "Reload and prove loaded state").
 5. Repeat the bounded provoke, deprovoke, and log capture.
 
