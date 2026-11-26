@@ -870,6 +870,63 @@ func TestAReactionAddedAfterTheBaselineFiresOnce(t *testing.T) {
 	}
 }
 
+func TestADirectMessageReactionWithNoLinkFiresWithTheResolvedLink(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.w.PollReactions(context.Background())
+	dm := reacted("1.2", "agent-ack")
+	dm.Channel, dm.Permalink = "D1", ""
+	r.gns.reacted = []gnsclient.ReactedMessage{dm}
+	r.gns.permalink = "https://chesscom.slack.com/archives/D1/p12"
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	if len(r.intakes.got) != 1 || !strings.Contains(r.intakeText(t, r.intakes.got[0]), r.gns.permalink) || !slices.Equal(r.gns.permalinks, []string{"D1:1.2"}) {
+		t.Fatalf("intakes %+v, resolver calls %v", r.intakes.got, r.gns.permalinks)
+	}
+}
+
+func TestAReactionWhoseLinkCannotBeResolvedIsRecordedAndRetriedNextPoll(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.w.PollReactions(context.Background())
+	dm := reacted("1.2", "agent-ack")
+	dm.Channel, dm.Permalink = "D1", ""
+	r.gns.reacted = []gnsclient.ReactedMessage{dm}
+	r.gns.permalinkErr = errBoom
+
+	// Act
+	r.w.PollReactions(context.Background())
+	r.gns.permalinkErr, r.gns.permalink = nil, "https://chesscom.slack.com/archives/D1/p12"
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	r.record(t, "error", opReactions, "Slack named no link for a triggering message and its link could not be resolved; it is not fired, and the next poll reads it again")
+	if len(r.intakes.got) != 1 || len(r.gns.permalinks) != 2 {
+		t.Fatalf("the failed trigger was not retried: intakes %+v, resolver calls %v", r.intakes.got, r.gns.permalinks)
+	}
+}
+
+func TestAReactionWithALinkNeverCallsTheResolver(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.settle(t, ackBinding)
+	r.w.PollReactions(context.Background())
+	r.gns.reacted = []gnsclient.ReactedMessage{reacted("1.2", "agent-ack")}
+
+	// Act
+	r.w.PollReactions(context.Background())
+
+	// Assert
+	if len(r.gns.permalinks) != 0 || len(r.intakes.got) != 1 {
+		t.Fatalf("resolver calls %v, intakes %d", r.gns.permalinks, len(r.intakes.got))
+	}
+}
+
 func TestATypedShortcodeInTheWindowFires(t *testing.T) {
 	// Arrange
 	r := newRig(t)
@@ -1067,31 +1124,6 @@ func TestAnIntakeThatCannotBeCreatedIsRecordedAndNotFiredAgain(t *testing.T) {
 	r.record(t, "error", opReactions, "could not create a fired binding's intake workspace; the trigger is recorded fired and creates nothing")
 	if len(r.intakes.got) != 0 {
 		t.Fatalf("a failed trigger fired again: %+v", r.intakes.got)
-	}
-}
-
-func TestATriggerSlackNamesNoLinkForIsRecordedOnceAndNotFiredAgain(t *testing.T) {
-	// Arrange
-	r := newRig(t)
-	r.settle(t, ackBinding)
-	r.w.PollReactions(context.Background())
-	linkless := reacted("1.2", "agent-ack")
-	linkless.Permalink = ""
-	r.gns.reacted = []gnsclient.ReactedMessage{linkless}
-	message := "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing"
-
-	// Act
-	r.w.PollReactions(context.Background())
-	r.w.PollReactions(context.Background())
-
-	// Assert
-	rec := r.record(t, "info", opReactions, message)
-	if rec.Context["dispatch_id"] != DispatchID("C1", "1.2", "agent-ack") || rec.Context["ts"] != "1.2" || rec.Context["channel"] != "C1" {
-		t.Fatalf("record context = %+v", rec.Context)
-	}
-	n := len(dlog.FilterRecords(r.log.Records(), dlog.RecordQuery{Operation: opReactions, Message: message}))
-	if n != 1 || len(r.intakes.got) != 0 {
-		t.Fatalf("logged %d times and fired %+v; want one record and no intake", n, r.intakes.got)
 	}
 }
 

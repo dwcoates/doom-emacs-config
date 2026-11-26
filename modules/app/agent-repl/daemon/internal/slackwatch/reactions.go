@@ -253,22 +253,29 @@ func slackTime(ts string) (time.Time, bool) {
 }
 
 // fire creates B's intake for the message at TS in CHANNEL, once ever: the
-// trigger is recorded fired before its link is read or the intake is asked
-// for, so a failure after the mark (Slack naming no link among them) is
-// never fired twice, and is recorded once.
+// trigger's link is resolved first (a failure leaves it unmarked, so the next
+// poll retries), then it is recorded fired before the intake is asked for, so
+// a failure after the mark is never fired twice, and is recorded once.
 func (w *Watcher) fire(ctx context.Context, settings wsm.SlackReactionSettings, b wsm.SlackReactionBinding, channel, ts, link string, fired *int) {
 	trigger := wsm.SlackReactionTrigger{DispatchID: DispatchID(channel, ts, b.Emoji), Channel: channel, TS: ts, Emoji: b.Emoji}
 	fields := dlog.Context{"dispatch_id": trigger.DispatchID, "emoji": b.Emoji, "channel": channel, "ts": ts, "link": link}
+	if link == "" {
+		// Slack's listings name no link for a direct message, so it is asked
+		// for; a failure leaves the trigger unmarked for the next poll.
+		resolved, err := w.deps.GNS.Permalink(ctx, channel, ts)
+		if err != nil {
+			w.deps.Log.Error(opReactions, "Slack named no link for a triggering message and its link could not be resolved; it is not fired, and the next poll reads it again", dlog.WithCause(fields, err))
+			return
+		}
+		link = resolved
+		fields["link"] = link
+	}
 	fresh, err := w.deps.Store.MarkSlackReactionFired(ctx, trigger, w.deps.Clock.Now())
 	if err != nil {
 		w.deps.Log.Error(opReactions, "could not record a trigger as fired; it is not fired, and the next poll reads it again", dlog.WithCause(fields, err))
 		return
 	}
 	if !fresh {
-		return
-	}
-	if link == "" {
-		w.deps.Log.Info(opReactions, "Slack named no link for a triggering message; the trigger is recorded fired and creates nothing", fields)
 		return
 	}
 	values, err := w.intakeValues(b, channel, ts, link)

@@ -433,6 +433,51 @@ func TestListReactedRefusesSlacksRefusal(t *testing.T) {
 	}
 }
 
+func TestPermalinkResolvesAMessageThroughGNSMessages(t *testing.T) {
+	// Arrange
+	bin, dir := fakeGNS(t, `{"messages":[{"channel":"D1","ts":"1.2","permalink":"https://x.slack.com/archives/D1/p12","status":"ok"}]}`, "", 0, "")
+	c, _ := newClient(t, bin, 0)
+
+	// Act
+	got, err := c.Permalink(context.Background(), "D1", "1.2")
+
+	// Assert
+	if err != nil || got != "https://x.slack.com/archives/D1/p12" {
+		t.Fatalf("Permalink = %q, %v", got, err)
+	}
+	if strings.Join(argsOf(t, dir), " ") != "slack messages D1:1.2 --json" {
+		t.Fatalf("args = %v", argsOf(t, dir))
+	}
+}
+
+func TestPermalinkRecordsAMessageSlackWillNotOpen(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGNS(t, `{"messages":[{"channel":"D1","ts":"1.2","status":"not_found"}]}`, "", 0, "")
+	c, log := newClient(t, bin, 0)
+
+	// Act
+	_, err := c.Permalink(context.Background(), "D1", "1.2")
+
+	// Assert
+	if err == nil || !failedRecord(log, "gns slack messages D1:1.2") {
+		t.Fatalf("Permalink = %v; want the unopenable message recorded", err)
+	}
+}
+
+func TestPermalinkRecordsAnAnswerOfTheWrongSize(t *testing.T) {
+	// Arrange
+	bin, _ := fakeGNS(t, `{"messages":[]}`, "", 0, "")
+	c, log := newClient(t, bin, 0)
+
+	// Act
+	_, err := c.Permalink(context.Background(), "D1", "1.2")
+
+	// Assert
+	if err == nil || !failedRecord(log, "gns slack messages D1:1.2") {
+		t.Fatalf("Permalink = %v; want the empty answer recorded", err)
+	}
+}
+
 func TestListMyChannelsReadsEveryChannelInSlacksOrder(t *testing.T) {
 	// Arrange
 	bin, dir := fakeGNS(t, `{"channels": [
