@@ -362,4 +362,9 @@ quiet state, not the switch.
   - The attempt's survey (section 12's scan and the hotspot's sighting,
     Bluetooth, the lid, the display and the power) is unchanged.
   - Every hotspot join keeps its one record (`hotspotJoinRecord`).
+  - THE JOIN NEVER UNDOES A NETWORK MACOS REJOINED: the standing is read
+    again right before the hotspot join (`stillLost`), and a network joined
+    meanwhile stands the failover down. On 2026-11-26 13:08:04 an attempt
+    whose survey began while the link was down joined the hotspot six
+    seconds after the Mac was back on a network, and the join dropped it.
 

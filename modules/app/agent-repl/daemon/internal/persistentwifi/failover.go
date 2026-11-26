@@ -289,6 +289,10 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 	if !c.stillWanted(attempt, "hotspot_join") {
 		return
 	}
+	rd, lost := c.stillLost(attempt)
+	if !lost {
+		return
+	}
 	c.log.Info(opFailover, "joining the hotspot after Wi-Fi was lost", dlog.Context{
 		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": attempt.number,
 	})
@@ -340,6 +344,34 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 			dlog.Context{"hotspot": c.cfg.Hotspot, "retry_every": every.String(),
 				"lost_for": failedAt.Sub(c.failover.lost).String(), "attempts": attempt.number})
 	}
+}
+
+// stillLost reads the standing again right before the hotspot join and
+// answers it, and whether Wi-Fi is still lost. THE JOIN NEVER UNDOES A
+// NETWORK MACOS REJOINED (2026-11-26 13:08:04: an attempt whose survey began
+// while the link was down joined the hotspot six seconds after the Mac was
+// back on a network, and the join dropped it): a network joined meanwhile
+// stands the failover down, recorded with what was joined. It takes the lock
+// for the read alone.
+func (c *Controller) stillLost(attempt failoverAttempt) (reading, bool) {
+	c.mu.Lock()
+	rd := c.readLocked(attempt.ctx)
+	if attempt.ctx.Err() != nil {
+		// An abandoned read says nothing about the link (readLocked).
+		c.mu.Unlock()
+		c.stillWanted(attempt, "hotspot_reread")
+		return rd, false
+	}
+	defer c.mu.Unlock()
+	if failoverWants(rd.state) {
+		return rd, true
+	}
+	c.log.Info(opFailover, "Wi-Fi came back before the hotspot join, so the hotspot is not joined", dlog.Context{
+		"attempt": attempt.number, "wifi": wifiArm(rd.state), "mode": modeArm(rd.state),
+		"network_name": rd.state.GetJoined().GetNetworkName(), "lost_for": c.clock.Now().Sub(c.failover.lost).String(),
+	})
+	c.standDownFailoverLocked(rd)
+	return rd, false
 }
 
 // hotspotJoinRecord is THE ONE record of a hotspot join: the interface, the

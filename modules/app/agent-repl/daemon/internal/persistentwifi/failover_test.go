@@ -158,7 +158,7 @@ func TestAScanThatNamesNoNetworkIsAnErrorOnceAndTheHotspotIsStillTried(t *testin
 func TestAJoinedHotspotEndsTheFailoverAndIsKept(t *testing.T) {
 	// Arrange: no saved network but the hotspot, which joins.
 	h := lostClosed(t)
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
 	h.r.on(argJoin, answer{})
 
 	// Act.
@@ -174,6 +174,53 @@ func TestAJoinedHotspotEndsTheFailoverAndIsKept(t *testing.T) {
 	}
 	if in, waiting := h.c.failoverRetryIn(); waiting {
 		t.Fatalf("failoverRetryIn = (%v, true), want nothing scheduled on the hotspot", in)
+	}
+}
+
+// TestAJoinMacOSMadeDuringTheSurveyIsNeverUndone pins 2026-11-26 13:08:04:
+// an attempt whose survey began while the link was down joined the hotspot
+// after the Mac was back on a network, and the join dropped it.
+func TestAJoinMacOSMadeDuringTheSurveyIsNeverUndone(t *testing.T) {
+	// Arrange: the beat reads the loss; macOS has rejoined Home by the read
+	// right before the join.
+	h := lostClosed(t)
+	h.sight(inSight(""))
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, "Home")})
+
+	// Act.
+	h.tickAt(0)
+
+	// Assert.
+	if n := h.r.count(argJoin); n != 0 {
+		t.Fatalf("hotspot joins = %d, want none once a network was joined again", n)
+	}
+	back := h.failoverRecords("info", "Wi-Fi came back before the hotspot join, so the hotspot is not joined")
+	if len(back) != 1 || back[0]["attempt"] != 1 || back[0]["wifi"] != "joined" || back[0]["network_name"] != "Home" {
+		t.Fatalf("came-back records = %+v, want one naming the network joined", back)
+	}
+	if h.c.failover.attempts != 0 || !h.c.failover.lost.IsZero() {
+		t.Fatalf("failover = %+v, want it stood down", h.c.failover)
+	}
+}
+
+func TestTheHotspotIsJoinedWhenTheReadBeforeTheJoinStillFindsWifiLost(t *testing.T) {
+	// Arrange: both reads find Wi-Fi lost.
+	h := lostClosed(t)
+	h.sight(inSight(""))
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")})
+
+	// Act.
+	h.tickAt(0)
+
+	// Assert.
+	if n := h.r.count(argJoin); n != 1 {
+		t.Fatalf("hotspot joins = %d, want one", n)
+	}
+	if n := h.r.count(argSummary); n < 2 {
+		t.Fatalf("link reads = %d, want the beat's and the one before the join", n)
+	}
+	if back := h.failoverRecords("info", "Wi-Fi came back before the hotspot join, so the hotspot is not joined"); len(back) != 0 {
+		t.Fatalf("came-back records = %+v, want none", back)
 	}
 }
 
@@ -432,9 +479,10 @@ func TestTickRecordsTheLinkSummaryOfTheLoss(t *testing.T) {
 }
 
 func TestTickRecordsALossOncePerLoss(t *testing.T) {
-	// Arrange: lost, still lost, joined, then lost again.
+	// Arrange: lost, still lost, joined, then lost again; each attempt reads
+	// the link again before its join.
 	h := lostClosed(t)
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(false, "")},
 		answer{out: summary(true, "Home")}, answer{out: summary(false, "")})
 
 	// Act.
@@ -667,7 +715,7 @@ func TestEveryHotspotJoinRecordsItsExactOutcome(t *testing.T) {
 	h := lostClosed(t)
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."}, answer{})
 	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
-		answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+		answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
 
 	// Act.
 	h.tickAt(0)
