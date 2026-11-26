@@ -86,26 +86,42 @@
 
 ;;;; ---- The request ----
 
+(defun agent-repl-test-recency-reach--open-entry (name)
+  "Return a roster open entry for NAME whose ref names NAME's directory."
+  (list :name name :ref (list :id name :dir (concat "/w/" name))))
+
 (ert-deftest agent-repl-test-recency-reach-request-names-each-ref ()
   "Each reach is sent with its workspace's daemon ref."
-  (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id ws :dir (concat "/w/" ws)))))
+  (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named) #'agent-repl-test-recency-reach--open-entry))
     (should (equal (agent-repl--recency-reach-request '(("a" :older 1) ("b" :newer 2)))
                    '(:reaches ((:workspace (:id "a" :dir "/w/a") :direction (:arm :older :value (:presses 1)))
                                (:workspace (:id "b" :dir "/w/b") :direction (:arm :newer :value (:presses 2)))))))))
 
-(ert-deftest agent-repl-test-recency-reach-request-refuses-an-unregistered-tab ()
-  "A reached tab with no ref is a broken invariant: recorded at error and signalled."
+(ert-deftest agent-repl-test-recency-reach-request-refuses-a-tab-the-roster-does-not-list ()
+  "A reached tab with no open roster entry is a broken invariant: recorded at error and signalled."
   (let ((records nil))
-    (cl-letf (((symbol-function 'agent-repl-host-ref) #'ignore)
+    (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named) #'ignore)
               ((symbol-function 'agent-repl--emit-error)
                (agent-repl-test--record-leveled-into records 'error)))
       (should-error (agent-repl--recency-reach-request '(("a" :older 1))))
       (should (seq-some (lambda (r) (string-match-p "recency-reach.unregistered ws=a arm=:older presses=1" (cdr r)))
                         records)))))
 
+(ert-deftest agent-repl-test-recency-reach-request-reads-the-ref-off-the-roster-not-the-host ()
+  "A killed workspace the roster still lists is sent with the roster's ref.
+Killing forgets the host entry before the roster's next push drops the row;
+on 2026-11-25 the reach computed in that window signalled."
+  (cl-letf (((symbol-function 'agent-repl-host-ref) #'ignore)
+            ((symbol-function 'agent-repl-roster-open-entries)
+             (lambda (&optional _roster)
+               (list (list :name "a" :ref '(:id "id-a" :dir "/w/a"))))))
+    (should (equal (agent-repl--recency-reach-request '(("a" :older 1)))
+                   '(:reaches ((:workspace (:id "id-a" :dir "/w/a")
+                                :direction (:arm :older :value (:presses 1)))))))))
+
 (ert-deftest agent-repl-test-recency-reach-request-encodes ()
   "The request a reach builds is one the wire codec takes."
-  (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id ws :dir (concat "/w/" ws)))))
+  (cl-letf (((symbol-function 'agent-repl-roster-open-entry-named) #'agent-repl-test-recency-reach--open-entry))
     (should (equal (json-serialize
                     (agent-repl-wire-encode-report-recency-reach-request
                      (agent-repl--recency-reach-request '(("a" :older 1)))))
@@ -128,7 +144,7 @@ with its callbacks in `answers', and every log record into `records' as
          (records nil))
      (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () ,conn))
                ((symbol-function 'agent-repl--recency-reach-now) (lambda () reach-now))
-               ((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id ws :dir "/w")))
+               ((symbol-function 'agent-repl-roster-open-entry-named) #'agent-repl-test-recency-reach--open-entry)
                ((symbol-function 'agent-repl-rpc-report-recency-reach)
                 (lambda (c request &rest keys)
                   (push (cons c request) calls)
