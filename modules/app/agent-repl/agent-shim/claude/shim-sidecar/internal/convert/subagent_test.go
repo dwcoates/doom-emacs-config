@@ -3,6 +3,7 @@ package convert
 // subagent_test.go — the spawn, and the agent it created.
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -77,6 +78,28 @@ func TestSettledSpawnNamesTheCreatedAgentOnItsSuccessArm(t *testing.T) {
 	success := activityOf(entryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetSuccess()
 	if got := success.GetCreatedAgentId().GetValue(); got != "toolu_spawn" {
 		t.Fatalf("created_agent_id = %q, want the spawning call's own id", got)
+	}
+}
+
+func TestSpawnTotalsWarnAndTakeThinkingTokensWhenTheTwoNamesDisagree(t *testing.T) {
+	// Arrange. A spawn's totals are read by the same usage reader as a
+	// response, so the vendor contradicting itself there is warned too.
+	c, sink := loggedConverter(t)
+	disagreeing := strings.Replace(agentResult, `"output_tokens":40}`,
+		`"output_tokens":40,"output_tokens_details":{"thinking_tokens":9,"reasoning_tokens":3}}`, 1)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	result := toolResultLine("u1", "toolu_spawn", ts2, `[{"type":"text","text":"r"}]`, disagreeing)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	totals := activityOf(entryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetSuccess().GetTotals()
+	if got := totals.GetFull().GetOutputThinkingTokens(); got != 9 {
+		t.Fatalf("output_thinking_tokens = %d, want thinking_tokens (9)", got)
+	}
+	if got := levelForMessage(t, sink, "two different thinking counts"); got != "warn" {
+		t.Fatalf("level = %q, want warn: %s", got, sink.String())
 	}
 }
 

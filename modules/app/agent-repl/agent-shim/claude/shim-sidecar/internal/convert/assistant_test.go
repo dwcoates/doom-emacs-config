@@ -104,7 +104,7 @@ func TestUsageIsOrganizedByEconomicsNotByVendorFieldNames(t *testing.T) {
 	line := `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"` + ts1 +
 		`","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"a"}],` +
 		`"usage":{"input_tokens":11,"cache_creation_input_tokens":22,"cache_read_input_tokens":33,` +
-		`"output_tokens":44,"output_thinking_tokens":5}}}`
+		`"output_tokens":44,"output_tokens_details":{"thinking_tokens":5}}}}`
 
 	// Act.
 	entries := convertLines(t, c, line)
@@ -125,6 +125,94 @@ func TestUsageIsOrganizedByEconomicsNotByVendorFieldNames(t *testing.T) {
 	}
 	if got := usage.GetOutputThinkingTokens(); got != 5 {
 		t.Fatalf("output_thinking_tokens = %d, want 5 (a PARTITION of output_tokens, never an addition)", got)
+	}
+}
+
+// usageLine is one assistant line whose usage block is exactly USAGE.
+func usageLine(usage string) string {
+	return `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"` + ts1 +
+		`","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"a"}],"usage":` + usage + `}}`
+}
+
+func TestThinkingTokensAreReadFromTheVendorsOutputTokenDetails(t *testing.T) {
+	// The vendor writes output_tokens_details.thinking_tokens (transcript record
+	// 6ed6dcd3 of session 43614927, 2026-11-26: thinking_tokens 209);
+	// reasoning_tokens is the name the earlier harvest modeled.
+	tests := []struct {
+		name  string
+		usage string
+		want  uint64
+	}{
+		{name: "thinking_tokens, the vendor's name", usage: `{"output_tokens":761,"output_tokens_details":{"thinking_tokens":209}}`, want: 209},
+		{name: "reasoning_tokens, the earlier name", usage: `{"output_tokens":761,"output_tokens_details":{"reasoning_tokens":7}}`, want: 7},
+		{name: "both names disagreeing takes thinking_tokens", usage: `{"output_tokens":761,"output_tokens_details":{"thinking_tokens":209,"reasoning_tokens":7}}`, want: 209},
+		{name: "both names agreeing", usage: `{"output_tokens":761,"output_tokens_details":{"thinking_tokens":7,"reasoning_tokens":7}}`, want: 7},
+		{name: "no output-token details at all", usage: `{"output_tokens":761}`, want: 0},
+		{name: "a top-level output_thinking_tokens the vendor never writes", usage: `{"output_tokens":761,"output_thinking_tokens":5}`, want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+
+			// Act.
+			entries := convertLines(t, c, usageLine(test.usage))
+
+			// Assert.
+			if got := activityOf(entries[0]).GetUsage().GetOutputThinkingTokens(); got != test.want {
+				t.Fatalf("output_thinking_tokens = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDisagreeingThinkingCountsAreWarned(t *testing.T) {
+	tests := []struct {
+		name     string
+		usage    string
+		wantWarn bool
+	}{
+		{name: "the two names disagree", usage: `{"output_tokens_details":{"thinking_tokens":209,"reasoning_tokens":7}}`, wantWarn: true},
+		{name: "the two names agree", usage: `{"output_tokens_details":{"thinking_tokens":7,"reasoning_tokens":7}}`, wantWarn: false},
+		{name: "only thinking_tokens", usage: `{"output_tokens_details":{"thinking_tokens":209}}`, wantWarn: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			c, sink := loggedConverter(t)
+
+			// Act.
+			convertLines(t, c, usageLine(test.usage))
+
+			// Assert.
+			warned := strings.Contains(sink.String(), "two different thinking counts")
+			if warned != test.wantWarn {
+				t.Fatalf("warned = %v, want %v: %s", warned, test.wantWarn, sink.String())
+			}
+			if test.wantWarn {
+				if got := levelForMessage(t, sink, "two different thinking counts"); got != "warn" {
+					t.Fatalf("level = %q, want warn", got)
+				}
+			}
+		})
+	}
+}
+
+func TestFilePlaneUsageIsSettledNotProvisional(t *testing.T) {
+	// Arrange. The file plane reads the record the vendor wrote once the
+	// response settled; its usage supersedes the stream plane's snapshot.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, usageLine(`{"input_tokens":1,"output_tokens":2}`))
+
+	// Assert.
+	usage := activityOf(entries[0]).GetUsage()
+	if usage == nil {
+		t.Fatal("the response carried a usage block; the unit must carry usage")
+	}
+	if usage.GetProvisional() {
+		t.Fatal("a file-plane usage is the settled one and must not be provisional")
 	}
 }
 
