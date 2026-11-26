@@ -77,7 +77,7 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     mergeHead: withCardQuestion(drawFeedMerge),
     subagentHead: withCardQuestion(drawFeedSubagent),
     detachedSubagentHead: withCardQuestion(drawFeedDetachedSubagent),
-    childHead: drawFeedChild,
+    childHead: withCardQuestion(drawFeedChild),
     commandPanel: withCardQuestion(drawFeedCommandPanel),
     commandRefused: withCardQuestion(drawFeedCommandRefused),
     mergeBody: mergeBubbleBody,
