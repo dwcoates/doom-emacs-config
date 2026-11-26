@@ -229,13 +229,16 @@ func TestAnAuthorizeLaunchThatFailsIsAnError(t *testing.T) {
 
 func TestHelperLaunch(t *testing.T) {
 	cases := []struct {
-		name string
-		wait helperWait
-		verb string
-		want string
+		name  string
+		wait  helperWait
+		verb  string
+		flags []string
+		want  string
 	}{
 		{name: "a scan waits for its answer", wait: helperWaits, verb: "scan", want: argScan + "/f"},
 		{name: "an authorize is launched and left", wait: helperLeftRunning, verb: "authorize", want: argAuthorize + "/f"},
+		{name: "a verb's flags come before its answer file", wait: helperWaits, verb: "probe", flags: []string{"--name", "A B"},
+			want: "/t/open -W -n -g -a /t/AgentReplWifi.app --args probe --name A B --out /f"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -243,7 +246,7 @@ func TestHelperLaunch(t *testing.T) {
 			tools := Tools{Open: "/t/open", WifiApp: "/t/AgentReplWifi.app"}
 
 			// Act
-			got := strings.Join(helperLaunch(tools, tc.wait, tc.verb, "/f"), " ")
+			got := strings.Join(helperLaunch(tools, tc.wait, tc.verb, "/f", tc.flags...), " ")
 
 			// Assert: the very argv every controller launch is scripted against.
 			if got != tc.want {

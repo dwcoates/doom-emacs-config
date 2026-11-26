@@ -117,3 +117,36 @@ func TestAScanNeverReadsAnAnswerLeftFromBefore(t *testing.T) {
 		t.Fatalf("scanWifi error = %v, want the stale answer ignored", err)
 	}
 }
+
+func TestRunHelperDecodesAnyVerbsAnswer(t *testing.T) {
+	cases := []struct {
+		name         string
+		said         answer
+		wantWaitLost string
+	}{
+		{name: "a helper that answered", said: answer{}},
+		{name: "a helper that answered before open waited", said: answer{out: openWaitLostSaid, code: 1},
+			wantWaitLost: "/t/open exited 1: " + openWaitLostSaid},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a verb with a flag, answering in its file.
+			h := newHarness(t)
+			h.r.onPrefix("/t/open -W -n -g -a /t/AgentReplWifi.app --args probe --name A --out ", func(argv []string) answer {
+				writing(`{"value":3}`)(argv)
+				return tc.said
+			})
+			var got struct {
+				Value int `json:"value"`
+			}
+
+			// Act.
+			waitLost, err := h.c.host.(*darwinHost).runHelper(context.Background(), "probe", []string{"--name", "A"}, &got)
+
+			// Assert.
+			if err != nil || got.Value != 3 || waitLost != tc.wantWaitLost {
+				t.Fatalf("runHelper = (%+v, %q, %v), want the answer decoded and the wait %q", got, waitLost, err, tc.wantWaitLost)
+			}
+		})
+	}
+}

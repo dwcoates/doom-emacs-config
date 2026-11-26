@@ -131,46 +131,15 @@ func (h *darwinHost) SetRadio(ctx context.Context, device string, on bool) error
 	return err
 }
 
-// Scan launches the Wi-Fi helper app with `open`, so the Location Services
-// permission is the helper's own, and reads the answer it writes to a file,
-// since `open` hands back no output.
-//
-// THE ANSWER FILE IS THE SCAN'S ANSWER, NOT `open`'s EXIT. `open -W` finds
-// the helper's process and only then waits on it, so a helper that answered
-// and exited in between fails the wait with ESRCH (openWaitLost) though its
-// answer is written (2026-11-20 19:06:03, a scan answering in 400ms). That
-// failure with an answer in the file is the answer, the lost wait kept in
-// the scan's record (wifiScan.WaitLost); without one it is the helper's
-// failure. A file left from before is removed first, so the answer read is
-// always this launch's.
+// Scan is the helper's scan verb (runHelper): the joined network and every
+// visible one.
 func (h *darwinHost) Scan(ctx context.Context) (wifiScan, error) {
-	h.mu.Lock()
-	h.scanSeq++
-	out := filepath.Join(h.scanDir, fmt.Sprintf("agent-repl-wifi-scan-%d-%d.json", os.Getpid(), h.scanSeq))
-	h.mu.Unlock()
-	if err := os.Remove(out); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper's earlier answer at %s could not be removed: %w", out, err)
-	}
-	defer os.Remove(out)
-	said, launchErr := run(ctx, h.runner, helperLaunch(h.tools, helperWaits, verbScan, out)...)
-	waitLost := launchErr != nil && strings.Contains(said, openWaitLost)
-	if launchErr != nil && !waitLost {
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper could not be run: %w", launchErr)
-	}
-	raw, err := os.ReadFile(out)
-	switch {
-	case err != nil && waitLost:
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper exited before `open -W` could wait on it and wrote no answer to %s (%v): %w", out, err, launchErr)
-	case err != nil:
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper wrote no answer to %s: %w", out, err)
-	}
 	var scan wifiScan
-	if err := json.Unmarshal(raw, &scan); err != nil {
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper's answer could not be read: %w", err)
+	waitLost, err := h.runHelper(ctx, verbScan, nil, &scan)
+	if err != nil {
+		return wifiScan{}, err
 	}
-	if waitLost {
-		scan.WaitLost = launchErr.Error()
-	}
+	scan.WaitLost = waitLost
 	if scan.Error != "" {
 		return scan, fmt.Errorf("the Wi-Fi helper's %s", scan.Error)
 	}
@@ -178,6 +147,48 @@ func (h *darwinHost) Scan(ctx context.Context) (wifiScan, error) {
 		return scan, unauthorizedScan(scan.Authorization)
 	}
 	return scan, nil
+}
+
+// runHelper launches the Wi-Fi helper app's VERB with FLAGS, through `open`
+// so the Location Services permission is the helper's own, and decodes the
+// answer it writes to a file into ANSWER, since `open` hands back no output.
+//
+// THE ANSWER FILE IS THE HELPER'S ANSWER, NOT `open`'s EXIT. `open -W` finds
+// the helper's process and only then waits on it, so a helper that answered
+// and exited in between fails the wait with ESRCH (openWaitLost) though its
+// answer is written (2026-11-20 19:06:03, a scan answering in 400ms). That
+// failure with an answer in the file is the answer, the lost wait answered
+// (waitLost) for the caller's record; without one it is the helper's
+// failure. A file left from before is removed first, so the answer read is
+// always this launch's.
+func (h *darwinHost) runHelper(ctx context.Context, verb string, flags []string, answer any) (waitLost string, err error) {
+	h.mu.Lock()
+	h.scanSeq++
+	out := filepath.Join(h.scanDir, fmt.Sprintf("agent-repl-wifi-%s-%d-%d.json", verb, os.Getpid(), h.scanSeq))
+	h.mu.Unlock()
+	if err := os.Remove(out); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("the Wi-Fi helper's earlier answer at %s could not be removed: %w", out, err)
+	}
+	defer os.Remove(out)
+	said, launchErr := run(ctx, h.runner, helperLaunch(h.tools, helperWaits, verb, out, flags...)...)
+	lost := launchErr != nil && strings.Contains(said, openWaitLost)
+	if launchErr != nil && !lost {
+		return "", fmt.Errorf("the Wi-Fi helper could not be run: %w", launchErr)
+	}
+	raw, err := os.ReadFile(out)
+	switch {
+	case err != nil && lost:
+		return "", fmt.Errorf("the Wi-Fi helper exited before `open -W` could wait on it and wrote no answer to %s (%v): %w", out, err, launchErr)
+	case err != nil:
+		return "", fmt.Errorf("the Wi-Fi helper wrote no answer to %s: %w", out, err)
+	}
+	if err := json.Unmarshal(raw, answer); err != nil {
+		return "", fmt.Errorf("the Wi-Fi helper's answer could not be read: %w", err)
+	}
+	if lost {
+		return launchErr.Error(), nil
+	}
+	return "", nil
 }
 
 // AskScanPermission launches the helper's authorize verb, left running: macOS
