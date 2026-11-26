@@ -424,6 +424,66 @@ describe("the send ledger", () => {
     expect([turnOf(verdict), verdict.ended]).toEqual(["send:turn-1", true]);
   });
 
+  it("keeps the turn on its first send when a frame names only the member it consumed", () => {
+    // Arrange: the member was folded into the first send's turn, and the fold
+    // then took the echo over (doom, 2026-11-24, de-opionize-pr-creation).
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+    ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect({ turn: turnOf(verdict), absorbed: verdict.absorbed }).toEqual({ turn: "send:turn-1", absorbed: [] });
+  });
+
+  it("ends the first send's turn on a result naming only the member it consumed", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+    ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(result(stamp(SECOND.uuid)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.ended, ledger.openSendOf(FIRST.turnId)]).toEqual(["send:turn-1", true, undefined]);
+  });
+
+  it("keeps the turn on the answering send when a frame names only a send it consumed unbatched", () => {
+    // Arrange: the vendor merged FIRST into SECOND's turn.
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Assert
+    expect({ turn: turnOf(verdict), absorbed: verdict.absorbed }).toEqual({ turn: "send:turn-2", absorbed: [] });
+  });
+
+  it("forgets a consumption once the consuming send leaves the retired ring", () => {
+    // Arrange: SECOND is consumed into FIRST's turn, which then ends; enough
+    // later sends retire that FIRST is no longer remembered.
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.batched(FIRST.turnId, [SECOND.turnId]);
+    ledger.attribute(reply(stamp(FIRST.uuid, SECOND.uuid)));
+    ledger.attribute(result(stamp(FIRST.uuid, SECOND.uuid)));
+    for (let index = 0; index < RETIRED_SENDS_REMEMBERED; index++) {
+      const send: Send = { uuid: `later-${index}`, turnId: `turn-l${index}`, keepalive: false };
+      ledger.sent(send);
+      ledger.forget(send.turnId, "test");
+    }
+    ledger.sent(SECOND);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("send:turn-2");
+  });
+
   it("attributes a batch member answered alone to the member itself", () => {
     // Arrange: the vendor ran the member as its own turn, not beside the first.
     const ledger = ledgerWith(FIRST, SECOND);
@@ -614,6 +674,19 @@ describe("the send ledger's lifecycle path, for peer sends", () => {
       ["send:peer-turn"],
       undefined,
     ]);
+  });
+
+  it("keeps the turn on the running send when a frame names only a peer send folded into it", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, PEER);
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+    ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(PEER.uuid)));
+
+    // Assert
+    expect({ turn: turnOf(verdict), absorbed: verdict.absorbed }).toEqual({ turn: "send:turn-1", absorbed: [] });
   });
 
   it("takes a vendor-started turn over for a peer send folded into it, absorbing the vendor turn", () => {

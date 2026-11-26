@@ -27,6 +27,13 @@
  *     is not ours, the last of ours in the list is the send answered. Any
  *     OTHER open send of ours the list names was consumed by this turn too,
  *     and is reported ABSORBED.
+ *   - A send CONSUMED into a send's turn is that turn's from then on: a later
+ *     frame naming it alone (the fold took the echo over) is the consuming
+ *     send's turn going on, never its echo moving onto another send. Without
+ *     this, a prompt folded into the running turn at a tool boundary read, on
+ *     the turn's next frame, as the turn moving on, and the running turn was
+ *     concluded with no answer while it went on to answer (doom, 2026-11-24,
+ *     `de-opionize-pr-creation`, turn b2d76d07ac5146ef).
  *   - A uuid we never sent is an INVARIANT VIOLATION: it is recorded at ERROR
  *     every time a frame names it, and a frame naming nothing but such uuids
  *     is attributed to nothing. The ledger never guesses which send an
@@ -256,6 +263,8 @@ export class SendLedger {
   private readonly retired = new Map<string, Send>();
   /** A batch member's uuid -> the uuid of the batch's first send ({@link batched}). */
   private readonly batchedUnder = new Map<string, string>();
+  /** A consumed send's uuid -> the uuid of the send whose turn consumed it (see the file comment). */
+  private readonly consumedInto = new Map<string, string>();
   /** Remote prompts' uuids, oldest first, bounded by {@link FOREIGN_PROMPTS_REMEMBERED}. */
   private readonly foreignPrompts = new Set<string>();
   private running: VendorTurn = UNSTATED;
@@ -419,6 +428,7 @@ export class SendLedger {
         if (consumed === undefined) continue;
         if (absorbed.some((turn) => turn.kind === "send" && turn.send.uuid === uuid)) continue;
         absorbed.push({ kind: "send", send: consumed });
+        if (next.kind === "send") this.consumed(consumed, next.send);
       }
       if (next.kind === "send" && !next.retired && this.running.kind === "unstated") {
         for (const skipped of this.skippedBy(next.send, stamps.all)) absorbed.push({ kind: "send", send: skipped });
@@ -513,6 +523,7 @@ export class SendLedger {
         // its own turn will never come.
         this.open.delete(open.uuid);
         this.retire(open);
+        this.consumed(open, this.running.send);
         LOGGER.info(
           { turn_id: open.turnId, running_turn_id: this.running.send.turnId, client_uuid: open.uuid },
           "the vendor folded a peer send into the running turn; the peer send is concluded",
@@ -586,9 +597,11 @@ export class SendLedger {
     const ours = all.filter((uuid) => this.open.has(uuid) || this.retired.has(uuid));
     const stated = ours.includes(answers) ? answers : ours.at(-1);
     if (stated === undefined) return { kind: "unknown", uuids: unknown };
+    // A CONSUMED SEND IS THE CONSUMING SEND'S TURN, named beside it or not.
+    const host = this.consumedInto.get(stated);
     // A BATCH MEMBER ANSWERED BESIDE ITS FIRST SEND IS THE FIRST SEND'S TURN.
     const first = this.batchedUnder.get(stated);
-    const chosen = first !== undefined && ours.includes(first) ? first : stated;
+    const chosen = host ?? (first !== undefined && ours.includes(first) ? first : stated);
     const open = this.open.get(chosen);
     if (open !== undefined) return { kind: "send", send: open, retired: false };
     const retired = this.retired.get(chosen) as Send;
@@ -630,6 +643,20 @@ export class SendLedger {
     return skipped;
   }
 
+  /**
+   * `member` was consumed into `host`'s turn: a later frame naming `member` is
+   * `host`'s turn (see the file comment). A send consumed into its own turn
+   * records nothing.
+   */
+  private consumed(member: Send, host: Send): void {
+    if (member.uuid === host.uuid) return;
+    this.consumedInto.set(member.uuid, this.consumedInto.get(host.uuid) ?? host.uuid);
+    LOGGER.debug(
+      { turn_id: member.turnId, host_turn_id: host.turnId, client_uuid: member.uuid },
+      "a send was consumed into another send's turn; a later frame naming it is that turn's",
+    );
+  }
+
   /** The first top-level reply to `send` arrived: it is timed, once. */
   private repliedTo(send: Send): void {
     const sentAt = this.awaitingFirstReply.get(send.uuid);
@@ -651,10 +678,12 @@ export class SendLedger {
     }
   }
 
-  /** A send no echo can name any more leaves every batch it was in. */
+  /** A send no echo can name any more leaves every batch and consumption it was in. */
   private forgetBatch(uuid: string): void {
-    this.batchedUnder.delete(uuid);
-    for (const [member, first] of this.batchedUnder) if (first === uuid) this.batchedUnder.delete(member);
+    for (const links of [this.batchedUnder, this.consumedInto]) {
+      links.delete(uuid);
+      for (const [member, host] of links) if (host === uuid) links.delete(member);
+    }
   }
 }
 
