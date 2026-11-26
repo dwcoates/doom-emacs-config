@@ -1249,9 +1249,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err := p.Metrics.RegisterSessions(sessionsCensus); err != nil {
 		return nil, fmt.Errorf("agent-repld: %w", err)
 	}
-	if err := p.Metrics.RegisterPages(heldPages, sessionsCensus, func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-		_, found, err := p.DB.Session(ctx, ws)
-		return found, err
+	if err := p.Metrics.RegisterPages(heldPages, sessionsCensus, func(ctx context.Context) (map[ids.WorkspaceID]bool, error) {
+		sessions, err := wsm.SessionsByWorkspace(ctx, p.DB)
+		if err != nil {
+			return nil, err
+		}
+		recorded := make(map[ids.WorkspaceID]bool, len(sessions))
+		for ws := range sessions {
+			recorded[ws] = true
+		}
+		return recorded, nil
 	}); err != nil {
 		return nil, fmt.Errorf("agent-repld: %w", err)
 	}
