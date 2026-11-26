@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
 
@@ -148,6 +149,21 @@ func TestAnOpenChildsBubbleIsDrawnInItsParentsFeed(t *testing.T) {
 	if b.GetBorder().GetTone() != "red" || b.GetSummary().GetShortSummary().GetText() != "Fix the a" ||
 		b.GetSummary().GetLongSummary().GetMarkdown() == "" {
 		t.Fatalf("bubble = %v, want its red border and both summaries", b)
+	}
+}
+
+// THE CHILD'S HEAD DRAWS THE MERGE HEAD'S GLYPH: both carry the one glyph
+// name (vocab.MergeHeadGlyph), so the two heads cannot drift apart.
+func TestAChildsHeadCarriesTheMergeHeadGlyph(t *testing.T) {
+	// Arrange
+	f := newFixture()
+
+	// Act
+	f.t.SetRegistry(registry(child(childA, "fix-a", time.Minute)))
+
+	// Assert
+	if got := f.feed.bubble(childA).GetHead().GetGlyph().GetIcon(); got != vocab.MergeHeadGlyph {
+		t.Fatalf("the child's glyph = %q, want %q (vocab.MergeHeadGlyph)", got, vocab.MergeHeadGlyph)
 	}
 }
 

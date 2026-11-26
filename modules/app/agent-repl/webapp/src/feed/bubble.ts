@@ -77,6 +77,7 @@ import type {
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
 import { MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
+import { applyFrameTone } from "./bubble-frame.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import type { TailFollow } from "../scroll.js";
 import { queryAll } from "../dom.js";
@@ -333,6 +334,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     const state = head.getAttribute("data-state");
     if (state === null) el.removeAttribute("data-state");
     else el.setAttribute("data-state", state);
+    applyFrameTone(el, head);
   }
 
   /** Whether the reader may fold the bubble as its row now stands. */

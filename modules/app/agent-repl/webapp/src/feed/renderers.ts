@@ -41,6 +41,7 @@ import type {
   FeedBreadcrumb,
   FeedColdGate,
   FeedCommandPanel,
+  FeedChild,
   FeedDetachedSubagent,
   FeedCommandRefused,
   FeedFindings,
@@ -111,6 +112,8 @@ export interface RowRenderers {
   subagentHead(unit: FeedSubagent, rc: RowContext): HTMLElement;
   /** A detached subagent bubble's collapsed HEAD line: the same head, placed detached. */
   detachedSubagentHead(unit: FeedDetachedSubagent, rc: RowContext): HTMLElement;
+  /** A child workspace bubble's HEAD; its sub-feed is the child's own root feed. */
+  childHead(unit: FeedChild, rc: RowContext): HTMLElement;
   commandPanel(unit: FeedCommandPanel, rc: RowContext): HTMLElement;
   commandRefused(unit: FeedCommandRefused, rc: RowContext): HTMLElement;
   /** The merge bubble's body: the tab strip over its sub-feed's tab rows. */

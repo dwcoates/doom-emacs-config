@@ -381,11 +381,12 @@ A priority marks a workspace P0.5, P1, P2 or P3, highest first.
 
 A workspace created from another is its child. Every child is drawn in three places, and a child is never hidden.
 
-- **Each child is a bubble in its parent's feed.**
-  - The head shows the child's name in purple, the branch it lands on, how it stands (`open`, `merging`, `merged` with its version, `closed` or `removed`) and its runtime.
-  - Clicking the name selects the child. The bubble mirrors nothing of the child's turns.
-  - Its short summary shows under the head while the bubble is folded, and its long summary once you open it. The fold is the page's own: it starts folded and is not kept across a reload.
-  - A thin border in the child's status color shows what it is doing while it is open, the same color its sidebar row wears; a child that is not open has no border.
+- **Each child is a bubble in its parent's feed, like a subagent's.**
+  - The head shows the child's name in purple, the branch it lands on (a link to its pull request when it deploys through one), how it stands (`open`, `merging`, `merged` with its version, `closed` or `removed`) and its runtime.
+  - Clicking the name selects the child. Clicking anywhere else on the head opens or folds the bubble.
+  - Folded, the bubble shows the child's short summary under the head. Open, it shows the long summary and, beneath it, the child's own feed: its newest page, then live as the child works.
+  - The fold is the page's own: it starts folded and is not kept across a reload.
+  - The bubble's frame is drawn in the child's status color while it is open, the same color its sidebar row wears; a child that is not open has the plain frame.
   - A child you created yourself, from no workspace, has no bubble in any feed.
 - **The `⇄` chip in the expanded footer lists the open children.**
   - Each row reads the child's name in purple, its status as a word in its status color, and its short summary. Clicking a row selects the child.

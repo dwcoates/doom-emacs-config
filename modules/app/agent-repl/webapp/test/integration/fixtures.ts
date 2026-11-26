@@ -1261,7 +1261,7 @@ export const childRow = (overrides?: Partial<RowInit>): FeedRow =>
       case: "child",
       value: {
         head: {
-          glyph: { icon: "⇄" },
+          glyph: { icon: "merge" },
           name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
           target: { text: "~/.config/doom" },
           standing: { standing: { case: "open", value: {} } },

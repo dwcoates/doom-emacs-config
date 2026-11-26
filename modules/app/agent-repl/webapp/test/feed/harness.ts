@@ -7,6 +7,7 @@
  * the same four verbs the same way, and so a row fixture is built once from the
  * generated schemas rather than a dozen times by hand.
  */
+import { drawFeedChild } from "../../src/feed/child.js";
 import { branchLineInit } from "./branch-line.js";
 import type { EditorIngressEntry } from "../../src/held/editor-ingress.js";
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
@@ -864,6 +865,28 @@ export function mergeRow(
   });
 }
 
+/** A child workspace's bubble row, open, its frame in the child's red. */
+export function childRow(id: string): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    row: {
+      case: "child",
+      value: {
+        head: {
+          glyph: { icon: "merge" },
+          name: { text: "fix-flaky", select: { target: { id: "ws-child", dir: "/w/child" } } },
+          target: { text: "~/.config/doom" },
+          standing: { standing: { case: "open", value: {} } },
+          runtime: { startedAtMs: 0n },
+        },
+        summary: { shortSummary: { text: "Fix the flaky test" }, longSummary: { markdown: "- It fixes the test." } },
+        border: { tone: "red" },
+      },
+    },
+  });
+}
+
 /** A merge-tab row: only ever a top-level row of a merge bubble's own feed. */
 export function mergeTabRow(id: string, label = "queue"): FeedRow {
   return create(FeedRowSchema, {
@@ -984,6 +1007,9 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
     // they joined the registry, and its suites read what they draw.
     subagentHead: drawFeedSubagent,
     detachedSubagentHead: drawFeedDetachedSubagent,
+    // THE CHILD HEAD IS THE REAL ONE too: the feed drew a child's row itself
+    // before it became a bubble, and its suites read what it draws.
+    childHead: drawFeedChild,
     commandPanel: stub("commandPanel"),
     commandRefused: stub("commandRefused"),
     mergeBody: (mount) => {

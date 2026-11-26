@@ -44,6 +44,7 @@ import {
   harness,
   heldPromptItem,
   heldSection,
+  childRow,
   mergeRow,
   openSuccess,
   page,
@@ -720,6 +721,27 @@ describe("mountFeed: the bubble kinds", () => {
     await settle();
     // Assert
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+
+  it("draws a child's row as a bubble in the shared chrome, headed by the child head", async () => {
+    const h = rootOnly([childRow("c1")]);
+    const { host } = mount(h);
+    await settle();
+    const bubble = host.querySelector<HTMLElement>('[data-feed-row="c1"] .tool-card.bubble-fold');
+    expect([
+      bubble?.querySelector(".bubble-head .feed-child-name")?.textContent,
+      bubble?.getAttribute("data-frame-tone"),
+      bubble?.dataset.expanded,
+    ]).toEqual(["fix-flaky", "red", "false"]);
+  });
+
+  it("opens a child bubble's sub-feed by its row's own id on a click of its head", async () => {
+    const h = rootOnly([childRow("c1")]);
+    const { host } = mount(h);
+    await settle();
+    host.querySelector<HTMLElement>('[data-feed-row="c1"] .bubble-head')?.click();
+    await settle();
+    expect(h.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "c1"]);
   });
 
   it("opens an unfolded merge bubble's sub-feed by its own id", async () => {

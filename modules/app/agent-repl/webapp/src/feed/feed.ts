@@ -690,6 +690,9 @@ export function mountFeed(
     if (current.row.case === "shellHead") {
       return deps.renderers.shellHead(shellHeadOf(current), context);
     }
+    if (current.row.case === "child") {
+      return deps.renderers.childHead(current.row.value, context);
+    }
     if (unitCase(current) === "merge") {
       return deps.renderers.mergeHead(mergeOf(current), context);
     }
@@ -746,7 +749,9 @@ export function mountFeed(
     }
     // A subagent row ships no fold, so it starts collapsed and transfers
     // nothing but its head until the reader asks for more -- synchronous and
-    // detached alike, since the two are one bubble that moved placement.
+    // detached alike, since the two are one bubble that moved placement. A
+    // child's bubble ships none either: its sub-feed is the child's own root
+    // feed, opened on its row's FeedId the same way.
     return mountBubble({
       ...shared,
       body: defaultBubbleBody,

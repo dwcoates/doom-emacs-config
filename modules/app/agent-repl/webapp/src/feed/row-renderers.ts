@@ -7,6 +7,7 @@
  * this module imports the cards, so no card and the seam import each other in
  * a cycle (test/import-cycles.test.ts).
  */
+import { drawFeedChild } from "./child.js";
 import type { AppContext } from "../rpc/context.js";
 import { drawFeedCommandPanel } from "../panels/panels.js";
 import { drawFeedCommandRefused } from "../panels/refused.js";
@@ -76,6 +77,7 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     mergeHead: withCardQuestion(drawFeedMerge),
     subagentHead: withCardQuestion(drawFeedSubagent),
     detachedSubagentHead: withCardQuestion(drawFeedDetachedSubagent),
+    childHead: drawFeedChild,
     commandPanel: withCardQuestion(drawFeedCommandPanel),
     commandRefused: withCardQuestion(drawFeedCommandRefused),
     mergeBody: mergeBubbleBody,
