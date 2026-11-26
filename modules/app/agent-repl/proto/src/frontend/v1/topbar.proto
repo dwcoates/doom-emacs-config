@@ -13,15 +13,16 @@
 // band; the name line is a band below it, and is centered under the summary
 // text rather than under the strip. A workspace with no summary draws its
 // name in the summary's place on the top band. A hover on the summary shows
-// the workspace's long summary beneath it; a click on the name, underlined
-// while the workspace shows links, opens them.
+// the workspace's long summary beneath it, and a click on it drops the menu
+// of the workspace's children that are not open; a click on the name,
+// underlined while the workspace shows links, opens them.
 //
 //   │● work@…com  ☎  ᯤ        Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
 //   │                              fix-flaky-reconnect                              │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
-// options, the context chip's usage breakdown, the summary's long summary and
-// the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
+// options, the context chip's usage breakdown, the summary's long summary,
+// the summary's child menu and the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
 // never off-screen left or right.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
@@ -504,6 +505,72 @@ message TopbarTitle {
   // UNSET when no long summary stands (the title is the vendor's own
   // conversation title), and a hover then shows nothing.
   optional TopbarTitleDescription description = 4;
+  // The menu a CLICK on the summary drops: the workspace's children that are
+  // NOT open. PRESENT iff at least one such child exists, and the summary
+  // then takes a pointer cursor and a click; UNSET otherwise, and a click on
+  // the summary does nothing. The summary is never underlined either way.
+  optional TopbarTitleChildMenu child_menu = 5;
+}
+
+// The summary's click menu: one row per child of this workspace that is NOT
+// open (it landed, or it closed without landing), drawn with the name link
+// menu's look (frontend.v1.TopbarWorkspaceNameLinkMenu). The workspace's OPEN
+// children are the footer's children panel instead
+// (frontend.v1.FooterExpandedChildren), so every child is in exactly one of
+// the two. A child the daemon removed is in neither: there is nothing to
+// select.
+message TopbarTitleChildMenu {
+  // The rows, the child that stopped being open MOST RECENTLY FIRST, in the
+  // order drawn. At least one.
+  repeated TopbarTitleChildMenuItem items = 1;
+}
+
+// One row of the summary's child menu: the child's short summary as the row's
+// title, its name as the row's dim second line, and its standing as a badge
+// in the right margin. A click anywhere on the row selects the child and
+// closes the menu.
+message TopbarTitleChildMenuItem {
+  // The row's title: the child's short summary. UNSET when the child never
+  // set one; the row then draws its name as its only line.
+  optional TopbarTitleChildMenuItemTitle title = 1;
+  // The row's second line: the child's workspace name.
+  TopbarTitleChildMenuItemName name = 2;
+  // How the child stands, the row's badge.
+  TopbarTitleChildMenuItemBadge badge = 3;
+  // What a click on the row does.
+  TopbarTitleChildMenuItemSelect select = 4;
+}
+// The row's title element.
+message TopbarTitleChildMenuItemTitle {
+  // The child's short summary, drawn verbatim.
+  string text = 1;
+}
+// The row's name element.
+message TopbarTitleChildMenuItemName {
+  // The child's workspace name, drawn verbatim.
+  string text = 1;
+}
+// The row's badge. THE ARM IS THE STANDING the badge draws: the client draws
+// the arm's word and color.
+message TopbarTitleChildMenuItemBadge {
+  // Exactly one is set on every row the daemon publishes.
+  oneof standing {
+    // The child landed: "merged", in green.
+    TopbarTitleChildMenuItemBadgeMerged merged = 1;
+    // The child closed without landing: "closed", in the muted grey.
+    TopbarTitleChildMenuItemBadgeClosed closed = 2;
+  }
+}
+// The child landed.
+message TopbarTitleChildMenuItemBadgeMerged {}
+// The child closed without landing.
+message TopbarTitleChildMenuItemBadgeClosed {}
+// A click on the row selects the child: agentrepl.v1.SelectWorkspace with
+// `target`, which reopens a closed child, the same switch the sidebar row
+// makes.
+message TopbarTitleChildMenuItemSelect {
+  // The child, echoed verbatim on the click.
+  workspace.v1.WorkspaceRef target = 1;
 }
 
 // The popup a hover on the summary shows beneath it: the long summary the

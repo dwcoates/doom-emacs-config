@@ -275,3 +275,41 @@ next:
     draws, resolved from the one ladder.
 - **Consequences**: the footer resolver needs every child's roster status and
   summary, not just facts about its own workspace.
+
+### 4. The topbar summary's child menu
+
+- **What changed**: `frontend.v1.TopbarTitle` gains `child_menu` (tag 5),
+  `frontend.v1.TopbarTitleChildMenu`. It holds one
+  `frontend.v1.TopbarTitleChildMenuItem` per child that is NOT open. Each row
+  has:
+  - an optional title, the short summary
+  - the name
+  - a badge, merged or closed
+  - a select target
+- **Drawing**:
+
+  ```text
+  [summary, clickable only when child_menu is set]
+  ┌─ TopbarTitleChildMenu ────────────────────────────────┐
+  │ [TopbarTitleChildMenuItemTitle: short summary] [badge]│
+  │ [TopbarTitleChildMenuItemName: name, dim]             │
+  ├───────────────────────────────────────────────────────┤
+  │ ...                                                   │
+  └───────────────────────────────────────────────────────┘
+  ```
+
+- **Why**: the owner wants a click on the summary to drop a list in the same
+  look as the name's link menu, for every child that is not open, whether it
+  merged or closed unmerged. Each row's title is the child's short summary,
+  its second line is the child's name, and a click selects the child.
+- **Decisions**
+  - Rows are ordered by when the child stopped being open, most recent first,
+    like the link menu's newest first.
+  - A removed child is in neither the footer nor the menu, because there is
+    nothing to select. Only its feed bubble keeps it, standing `removed`.
+  - The badge is a oneof of merged and closed. The version stays on the feed
+    bubble alone.
+  - The summary is never underlined (owner ruling, 2026-11-25). Only the
+    cursor says it can be clicked, and only while the menu exists.
+- **Consequences**: the topbar resolver needs every child's standing, summary
+  and close time, keyed by parent.
