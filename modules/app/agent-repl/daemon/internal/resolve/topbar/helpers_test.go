@@ -33,6 +33,13 @@ func usage(read, written, unwritten, output, thinking uint64) *conversationv1.To
 	}
 }
 
+// provisionalUsage builds the stream plane's in-flight snapshot of a usage.
+func provisionalUsage(read, written, unwritten, output, thinking uint64) *conversationv1.TokenUsage {
+	u := usage(read, written, unwritten, output, thinking)
+	u.Provisional = true
+	return u
+}
+
 // otherWS is a second workspace, for the conditions that stand on every strip.
 const otherWS = ids.WorkspaceID("ws-2")
 

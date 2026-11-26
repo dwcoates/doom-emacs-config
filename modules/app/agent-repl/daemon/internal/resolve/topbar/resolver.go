@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/tokenusage"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
@@ -934,36 +935,28 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 }
 
 // observeUsage folds one unit's usage into the SESSION's totals, keyed by unit
-// so a re-report replaces rather than adds. It answers every contradiction
-// the report makes with what the session already holds, for its caller to
-// record.
+// so a re-report replaces rather than adds. What a re-report does is
+// tokenusage.Reconcile's decision: a settled usage supersedes a provisional
+// one, a late provisional one leaves the settled one standing, and only two
+// differing settled usages contradict. It answers every contradiction the
+// report makes, for its caller to record.
 func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.TokenUsage) []string {
 	if u == nil {
 		return nil
 	}
-	var contradictions []string
-	next := usageFingerprint{
-		read:      u.GetInputHits().GetRead(),
-		written:   u.GetInputMisses().GetWritten(),
-		unwritten: u.GetInputMisses().GetUnwritten(),
-		output:    u.GetOutputTokens(),
-		thinking:  u.GetOutputThinkingTokens(),
-	}
-	if next.thinking > next.output {
-		contradictions = append(contradictions, "it reports more thinking tokens than output tokens")
-	}
 	previous, held := s.counted[unit]
-	if held && previous == next {
-		return contradictions
+	decision := tokenusage.Reconcile(previous, u)
+	if !decision.Take {
+		return decision.Contradictions
 	}
+	next := fingerprintOf(u)
 	if held {
-		contradictions = append(contradictions, "it reported two different usages")
-		s.totals = subtractUsage(s.totals, previous)
+		s.totals = subtractUsage(s.totals, fingerprintOf(previous))
 		if model, ok := s.perModel[s.model]; ok {
-			model.figures = subtractUsage(model.figures, previous)
+			model.figures = subtractUsage(model.figures, fingerprintOf(previous))
 		}
 	}
-	s.counted[unit] = next
+	s.counted[unit] = u
 	s.totals = addUsage(s.totals, next)
 	model, ok := s.perModel[s.model]
 	if !ok {
@@ -971,7 +964,18 @@ func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.Token
 		s.perModel[s.model] = model
 	}
 	model.figures = addUsage(model.figures, next)
-	return contradictions
+	return decision.Contradictions
+}
+
+// fingerprintOf reads a usage report's figures for the session's arithmetic.
+func fingerprintOf(u *conversationv1.TokenUsage) usageFingerprint {
+	return usageFingerprint{
+		read:      u.GetInputHits().GetRead(),
+		written:   u.GetInputMisses().GetWritten(),
+		unwritten: u.GetInputMisses().GetUnwritten(),
+		output:    u.GetOutputTokens(),
+		thinking:  u.GetOutputThinkingTokens(),
+	}
 }
 
 // OnContextCut is the cut that discards the transcript the chip's figure was

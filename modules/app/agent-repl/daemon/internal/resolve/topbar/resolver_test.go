@@ -2021,6 +2021,43 @@ func TestAUsageContradictionIsRecordedAtWarn(t *testing.T) {
 	}
 }
 
+func TestAProvisionalUsageIsNoContradiction(t *testing.T) {
+	tests := []struct {
+		name       string
+		act        func(h *harness)
+		wantOutput int64
+	}{
+		{name: "a settled usage supersedes a differing provisional one", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", provisionalUsage(1, 2, 3, 4, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 50, 0)))
+		}, wantOutput: 50},
+		{name: "a provisional usage after a settled one leaves the settled one standing", act: func(h *harness) {
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", usage(1, 2, 3, 50, 0)))
+			h.r.OnActivity(testWS, cutAgent, responseSettled("u1", provisionalUsage(1, 2, 3, 4, 0)))
+		}, wantOutput: 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			for _, record := range h.log.Records() {
+				if record.Operation == "daemon.topbar.usage_contradiction" {
+					t.Fatalf("record = %+v, want no contradiction", record)
+				}
+			}
+			if got := rowByLabel(sections(t, h)[0], "output").GetTokens(); got != tt.wantOutput {
+				t.Fatalf("output = %d, want the settled %d alone", got, tt.wantOutput)
+			}
+		})
+	}
+}
+
 func TestAConsistentUsageRecordsNoContradiction(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
