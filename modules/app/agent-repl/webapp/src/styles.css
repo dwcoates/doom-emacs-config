@@ -8278,10 +8278,10 @@ bubble-body.bubble-body { display: block; }
 
 /* THE GATE'S VISUAL ANCESTOR IS THE REVIVAL GATE: its SOLID orange frame and
    its classes for every element inside. Its fill is NOT the revival gate's
-   yellow: it is ALWAYS THE FEED'S OWN GROUND, docked or not (owner request,
-   2026-10-28, superseding 2026-10-06's input-window color). */
+   yellow: it is ALWAYS THE COMPOSER'S GROUND, --sidebar-ground, docked or not
+   (owner request, 2026-11-25, superseding 2026-10-28's feed ground). */
 .cold-gate {
-  background: var(--bg);
+  background: var(--sidebar-ground);
   /* The frame -- the separator line when docked -- wears the token figure's
      heat (--cold-gate-heat, set on the card by cold-gate.ts). */
   border: 1px solid var(--cold-gate-heat, var(--revival-gate-border));
@@ -8391,13 +8391,13 @@ bubble-body.bubble-body { display: block; }
   padding-bottom: 1px;
 }
 #gate-dock[hidden] { display: none; }
-/* The docked card wears the feed's ground, as the card does everywhere
-   (owner request, 2026-10-28). Its controls are the card's own, and so
+/* The docked card wears the composer's ground, as the card does everywhere
+   (owner request, 2026-11-25). Its controls are the card's own, and so
    is its frame: a border AROUND the gate in the token figure's heat, not a
    rule between it and the rest of the page (owner, 2026-10-06). */
 #gate-dock > .cold-gate.cold-gate-docked,
 #webhost-gate > .cold-gate.cold-gate-docked {
-  background: var(--bg);
+  background: var(--sidebar-ground);
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px;
