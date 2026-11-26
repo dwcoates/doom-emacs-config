@@ -18270,7 +18270,7 @@ describe("the slash-command catalog", () => {
     return {
       ...query.contextUsage,
       skills: { totalSkills: 1, includedSkills: 1, tokens: 1, skillFrontmatter: [{ name: skill, source: "projectSettings", path: file, tokens: 1 }] },
-    } as ContextUsageLike;
+    };
   }
 
   it("restates the catalog with each skill's file once the context reading lands", async () => {

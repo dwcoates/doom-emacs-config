@@ -2315,7 +2315,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       cause = spawn?.cause ?? turnCause;
     }
     const retry = running.kind === "send" && ledger.retries(running.send.turnId);
-    ledger.countMessage(message as { message?: unknown; isApiErrorMessage?: unknown }, agent, cause, coldNowMs(), retry);
+    ledger.countMessage(message, agent, cause, coldNowMs(), retry);
     const content = (message.message as { content?: unknown } | undefined)?.content;
     if (!Array.isArray(content)) return;
     for (const block of content as readonly { type?: unknown; id?: unknown; name?: unknown; input?: unknown }[]) {
