@@ -15,8 +15,9 @@ diagnostics; the daemon persists those records into workspace `sidecar.log`.
 A MERGED WORKSPACE IS ROUTED THROUGH THE REGISTRY (2026-11-16, the roster's
 split into snapshot streams). A merged workspace is in no roster stream, so a
 directory the first push's streams do not carry is asked of
-`LocateWorkspace{At: dir}` ONCE, never retried, under `locateTimeout` (400ms,
-about 2.6x the 156ms max of the daemon's measured handler time), and its record
+`LocateWorkspace{At: dir}` ONCE, never retried, under `locateTimeout` (600ms,
+about 2.4x one in-budget hold of the daemon's state-database connection plus
+the sub-millisecond indexed read it answers from), and its record
 goes to the workspace the registry answers. A locate that fails (transport, no
 success arm, more than one workspace at the directory) is recorded at error as
 `workspace-locate-failed` (global, `path` and `rpc` keys) through the canonical
