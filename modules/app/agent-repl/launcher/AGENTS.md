@@ -148,6 +148,16 @@ Every record goes through `FileLogger`, the launcher's one logging path, into
 JSONL shape and timestamp (`logging-contract.md`; `LogTests` holds the
 timestamp to `proto/vocab/log-timestamp.json`).
 
+Every log call follows "Log sites" in `logging-contract.md`: `log.<level>(operation,
+"literal template with {named} placeholders", ["named": value])`. The template
+is a `StaticString`, so the compiler refuses anything but a literal; its
+placeholders are filled from the named values, which stay `context` fields,
+and every record carries `site` (`logSiteKey` over the runtime, the calling
+file and function, and the template) and `template`. Never interpolate a
+value into the template (`\(x)`) and never write one template twice in one
+function. `LogSiteTests` pins the rendering, the key (the contract's
+`074892b7d933` vector) and scans every call in `Sources/` for both rules.
+
 ## Testing
 
 `launcher/test.sh` (`swift build --build-tests`, then `swift test`) under

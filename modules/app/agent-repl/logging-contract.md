@@ -515,8 +515,17 @@ it to the local zone before persisting.
   banner exchange it accepted, posted or the platform refused
   (`launcher.server.accept`, `launcher.server.post`), and every click it
   reported (`launcher.clicks.click`, `launcher.clicks.advertisement`), and
-every Slack notification it watched and closed, or could not
-(`launcher.slack_notifications`). A
+  every Slack notification it watched and closed, or could not
+  (`launcher.slack_notifications`). Its logger follows "Log sites" like every
+  runtime: a call passes a `StaticString` template (the compiler accepts
+  nothing but a literal) and its named values, the logger renders `message`
+  from them, and every record carries `site` and `template`. The site's
+  function is the calling file's module-qualified name and the function
+  written in it (`ZettelLauncher/Clicks.report(_:)`), since Swift recovers no
+  enclosing type; the launcher's scan test (`LogSiteTests`) fails on a
+  non-literal template, a template that does not parse, and two calls of one
+  function writing one template. The daemon tallies `launcher.log` and its
+  warnings file like any other sink. A
   banner's refusal is ALSO recorded by the daemon against the banner's
   workspace, which owns that failure (`daemon.desktopnotify.launcher` for the
   daemon's side of the dial); the launcher's line is its own side of it.

@@ -176,7 +176,7 @@ public final class AccessibilityScreen: NotificationScreen {
         }
         let made = AXObserverCreate(pid, callback, &created)
         guard made == .success, let created else {
-            log.error(SlackOp.close, "watching Notification Center failed, so Slack notifications are not closed",
+            log.error(SlackOp.close, "creating the observer of Notification Center failed, so Slack notifications are not closed",
                       ["pid": pid, "cause": "\(AccessibilityError(call: "AXObserverCreate", code: made.rawValue))"])
             return
         }

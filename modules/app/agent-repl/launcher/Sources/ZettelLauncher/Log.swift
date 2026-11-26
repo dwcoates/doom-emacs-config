@@ -9,25 +9,151 @@ public enum LogLevel: String, Sendable {
 /// One structured record's operation-specific evidence.
 public typealias LogContext = [String: any Sendable]
 
+/// One record, rendered: what the canonical logger writes. The call that made
+/// it names a literal template and its named values (`Logger.log`); `message`
+/// is the template rendered from them, `site` the call's key.
+public struct LogEntry: Sendable {
+    public let level: LogLevel
+    public let operation: String
+    public let site: String
+    public let template: String
+    public let message: String
+    public let context: LogContext
+
+    public init(level: LogLevel, operation: String, site: String, template: String, message: String, context: LogContext) {
+        self.level = level
+        self.operation = operation
+        self.site = site
+        self.template = template
+        self.message = message
+        self.context = context
+    }
+}
+
 /// Where a record goes: the app's one canonical logging path.
 public protocol Logger: Sendable {
-    /// Records one structured line.
-    func log(_ level: LogLevel, _ operation: String, _ message: String, _ context: LogContext)
+    /// Takes one rendered record.
+    func write(_ entry: LogEntry)
 }
 
 extension Logger {
-    public func info(_ operation: String, _ message: String, _ context: LogContext = [:]) {
-        log(.info, operation, message, context)
+    /// Logs one record at `level`. THE TEMPLATE IS A STRING LITERAL (a
+    /// `StaticString` accepts nothing else): its `{name}` placeholders are
+    /// filled from `context`, which keeps every value as a field too
+    /// (logging-contract.md "Log sites"). The record's site is keyed by the
+    /// calling file's module-qualified name and function.
+    public func log(_ level: LogLevel, _ operation: String, _ template: StaticString, _ context: LogContext = [:],
+                    file: StaticString = #fileID, function: StaticString = #function) {
+        let text = template.description
+        let caller = logSiteCaller(file: file.description, function: function.description)
+        write(LogEntry(
+            level: level, operation: operation, site: logSiteKey(runtime: launcherRuntime, function: caller, template: text),
+            template: text, message: renderLogTemplate(text, context), context: context))
     }
-    public func debug(_ operation: String, _ message: String, _ context: LogContext = [:]) {
-        log(.debug, operation, message, context)
+    public func info(_ operation: String, _ template: StaticString, _ context: LogContext = [:],
+                     file: StaticString = #fileID, function: StaticString = #function) {
+        log(.info, operation, template, context, file: file, function: function)
     }
-    public func warn(_ operation: String, _ message: String, _ context: LogContext = [:]) {
-        log(.warn, operation, message, context)
+    public func debug(_ operation: String, _ template: StaticString, _ context: LogContext = [:],
+                      file: StaticString = #fileID, function: StaticString = #function) {
+        log(.debug, operation, template, context, file: file, function: function)
     }
-    public func error(_ operation: String, _ message: String, _ context: LogContext = [:]) {
-        log(.error, operation, message, context)
+    public func warn(_ operation: String, _ template: StaticString, _ context: LogContext = [:],
+                     file: StaticString = #fileID, function: StaticString = #function) {
+        log(.warn, operation, template, context, file: file, function: function)
     }
+    public func error(_ operation: String, _ template: StaticString, _ context: LogContext = [:],
+                      file: StaticString = #fileID, function: StaticString = #function) {
+        log(.error, operation, template, context, file: file, function: function)
+    }
+}
+
+/// The function a site is keyed by: the calling file's module-qualified name
+/// (`ZettelLauncher/Clicks`) and the function written in it. Swift recovers
+/// no enclosing type at compile time, so the file stands for it.
+public func logSiteCaller(file: String, function: String) -> String {
+    let stem = file.hasSuffix(".swift") ? String(file.dropLast(".swift".count)) : file
+    return "\(stem).\(function)"
+}
+
+/// A site's key: the first 12 hex characters of the sha256 of the runtime,
+/// the function and the template, joined by NUL bytes. Every runtime derives
+/// it identically (`Key("daemon", "pkg.F", "hello {name}")` is `074892b7d933`).
+public func logSiteKey(runtime: String, function: String, template: String) -> String {
+    let joined = Data([runtime, function, template].joined(separator: "\u{0}").utf8)
+    return String(SHA256.hash(data: joined).map { String(format: "%02x", $0) }.joined().prefix(12))
+}
+
+/// One piece of a parsed template.
+public enum LogTemplatePiece: Equatable, Sendable {
+    case literal(String)
+    case placeholder(String)
+}
+
+/// A template that does not parse: a defect of the call that wrote it.
+public struct LogTemplateError: Error, CustomStringConvertible, Equatable {
+    public let template: String
+    public let problem: String
+    public var description: String { "the log template \"\(template)\" \(problem)" }
+}
+
+/// Splits `template` into literal runs and `{name}` placeholders. A literal
+/// brace is written doubled (`{{`, `}}`); a placeholder is a lowercase
+/// identifier (`[a-z_][a-z0-9_]*`).
+public func parseLogTemplate(_ template: String) throws -> [LogTemplatePiece] {
+    let chars = Array(template)
+    var pieces: [LogTemplatePiece] = []
+    var run = ""
+    var i = 0
+    func isIdentifier(_ name: String) -> Bool {
+        guard let first = name.unicodeScalars.first, first == "_" || ("a"..."z").contains(first) else { return false }
+        return name.unicodeScalars.allSatisfy { $0 == "_" || ("a"..."z").contains($0) || ("0"..."9").contains($0) }
+    }
+    while i < chars.count {
+        let c = chars[i]
+        let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+        if c == "{" && next == "{" {
+            run.append("{"); i += 2
+        } else if c == "}" && next == "}" {
+            run.append("}"); i += 2
+        } else if c == "{" {
+            guard let close = chars[(i + 1)...].firstIndex(of: "}") else {
+                throw LogTemplateError(template: template, problem: "opens a placeholder that never closes (a literal brace is written {{)")
+            }
+            let name = String(chars[(i + 1)..<close])
+            guard isIdentifier(name) else {
+                throw LogTemplateError(template: template, problem: "names the placeholder {\(name)}, which is not a lowercase identifier (a literal brace is written {{)")
+            }
+            if !run.isEmpty { pieces.append(.literal(run)); run = "" }
+            pieces.append(.placeholder(name))
+            i = close + 1
+        } else if c == "}" {
+            throw LogTemplateError(template: template, problem: "has a lone closing brace (a literal brace is written }})")
+        } else {
+            run.append(c); i += 1
+        }
+    }
+    if !run.isEmpty { pieces.append(.literal(run)) }
+    return pieces
+}
+
+/// Renders `template` from `context`. A template that does not parse, or
+/// names a placeholder the context does not hold, is a defect of the call:
+/// it fails loudly rather than writing a record that disagrees with its
+/// fields.
+public func renderLogTemplate(_ template: String, _ context: LogContext) -> String {
+    let pieces: [LogTemplatePiece]
+    do { pieces = try parseLogTemplate(template) } catch { fatalError("\(error)") }
+    return pieces.map { piece in
+        switch piece {
+        case .literal(let text): return text
+        case .placeholder(let name):
+            guard let value = context[name] else {
+                fatalError("the log template \"\(template)\" names {\(name)}, which the record's values do not hold")
+            }
+            return String(describing: value)
+        }
+    }.joined()
 }
 
 /// The runtime name every record of this app carries.
@@ -52,17 +178,18 @@ public func logTimestamp(_ date: Date, zone: TimeZone = .current) -> String {
 
 /// Renders one record as the contract's JSONL object, without its newline.
 public func logLine(
-    level: LogLevel, operation: String, message: String, context: LogContext,
-    at date: Date, pid: Int32, zone: TimeZone = .current
+    _ entry: LogEntry, at date: Date, pid: Int32, zone: TimeZone = .current
 ) -> Data {
     let record: [String: Any] = [
         "timestamp": logTimestamp(date, zone: zone),
         "runtime": launcherRuntime,
-        "level": level.rawValue,
+        "level": entry.level.rawValue,
         "verbosity": "normal",
-        "operation": operation,
-        "message": message,
-        "context": context.mapValues { jsonValue($0) },
+        "operation": entry.operation,
+        "message": entry.message,
+        "site": entry.site,
+        "template": entry.template,
+        "context": entry.context.mapValues { jsonValue($0) },
         "pid": Int(pid),
     ]
     // Every value above is JSON-representable by construction (jsonValue), so
@@ -104,8 +231,8 @@ public final class FileLogger: Logger, @unchecked Sendable {
         self.pid = pid
     }
 
-    public func log(_ level: LogLevel, _ operation: String, _ message: String, _ context: LogContext) {
-        var line = logLine(level: level, operation: operation, message: message, context: context, at: Date(), pid: pid)
+    public func write(_ entry: LogEntry) {
+        var line = logLine(entry, at: Date(), pid: pid)
         line.append(0x0A)
         lock.lock()
         defer { lock.unlock() }

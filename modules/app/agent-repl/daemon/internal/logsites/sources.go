@@ -35,9 +35,9 @@ const warnings = `(\.warn)?`
 var stateLogFile = regexp.MustCompile(`^((daemon|thaw-guard)\.run|emacs\.central|agent-repl-[0-9a-f]+-(daemon|shim|webapp|sidecar|emacs)-[A-Za-z0-9]+)` + warnings + `\.log` + generation + `$`)
 
 // cacheLogFile matches every agent-repl service's own JSONL log under the
-// cache root's log directory: the store, the sidecar, zettel, the test
+// cache root's log directory: the store, the sidecar, zettel, the Zettel launcher, the test
 // service and the socket holders, each with its warnings file.
-var cacheLogFile = regexp.MustCompile(`^(shim-store|shim-claude-sidecar|zettel|tests|sockethold-[a-z]+)` + warnings + `\.log` + generation + `$`)
+var cacheLogFile = regexp.MustCompile(`^(shim-store|shim-claude-sidecar|zettel|launcher|tests|sockethold-[a-z]+)` + warnings + `\.log` + generation + `$`)
 
 // StateLogs is the state root's logs directory, as a Dir.
 func StateLogs(dir string) Dir { return Dir{Path: dir, Owned: stateLogFile.MatchString} }

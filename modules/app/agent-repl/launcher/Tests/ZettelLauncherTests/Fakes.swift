@@ -17,11 +17,11 @@ final class RecordingLogger: Logger, @unchecked Sendable {
     private let lock = NSLock()
     private var taken: [Record] = []
 
-    func log(_ level: LogLevel, _ operation: String, _ message: String, _ context: LogContext) {
+    func write(_ entry: LogEntry) {
         lock.lock()
         defer { lock.unlock() }
-        taken.append(Record(level: level, operation: operation, message: message, context: context.mapValues { "\($0)" }))
-        Task { [signals] in await signals.raise(message) }
+        taken.append(Record(level: entry.level, operation: entry.operation, message: entry.message, context: entry.context.mapValues { "\($0)" }))
+        Task { [signals] in await signals.raise(entry.message) }
     }
 
     var records: [Record] {

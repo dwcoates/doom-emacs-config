@@ -105,6 +105,12 @@ EOF
 cat >"$cache/agent-repl/log/zettel.log" <<'EOF'
 {"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"zettel","pid":60,"level":"info","verbosity":"normal","operation":"zettel.rpc.record_exchange","message":"zettel recorded","context":{}}
 EOF
+cat >"$cache/agent-repl/log/launcher.log" <<'EOF'
+{"timestamp":"2026-09-10T10:06:10.000000Z","runtime":"launcher","pid":62,"level":"info","verbosity":"normal","operation":"launcher.app","message":"launcher served","context":{},"site":"0123456789ab","template":"launcher served"}
+EOF
+cat >"$cache/agent-repl/log/launcher.warn.log" <<'EOF'
+{"timestamp":"2026-09-10T10:06:20.000000Z","runtime":"launcher","pid":62,"level":"error","verbosity":"normal","operation":"launcher.server.post","message":"launcher refused","context":{},"site":"ba9876543210","template":"launcher refused"}
+EOF
 emacs_global="$runtime_tmp/emacs-global.log"
 cat >"$emacs_global" <<'EOF'
 {"timestamp":"2026-09-10T10:00:15.000000Z","runtime":"emacs","pid":50,"level":"info","verbosity":"normal","operation":"emacs.ready","message":"emacs central","context":{}}
@@ -602,6 +608,28 @@ test_central_reads_the_zettel_log() {
         pass "--central --runtime zettel reads the zettel service's log"
     else
         fail "--central --runtime zettel reads the zettel service's log" "out: $out"
+    fi
+}
+
+test_central_reads_the_launcher_log() {
+    local out
+    out="$(run_logs --central --runtime launcher --json)"
+    if grep_in "$out" -q '"message":"launcher served"' && grep_in "$out" -q '"message":"launcher refused"' \
+        && ! grep_in "$out" -q '"runtime":"zettel"'; then
+        pass "--central --runtime launcher reads the launcher's log and its warnings file"
+    else
+        fail "--central --runtime launcher reads the launcher's log and its warnings file" "out: $out"
+    fi
+}
+
+test_the_launcher_log_is_read_by_all_and_harvest() {
+    local all harvest
+    all="$(run_logs --all --runtime launcher --json)"
+    harvest="$(run_logs --harvest 2026-09-10T10:00:00Z 2026-09-10T10:10:00Z)"
+    if grep_in "$all" -q '"message":"launcher served"' && grep_in "$harvest" -Eq 'central +- +error +launcher +launcher.server.post +launcher refused +1'; then
+        pass "--all and --harvest read the launcher's sink beside the other global sinks"
+    else
+        fail "--all and --harvest read the launcher's sink beside the other global sinks" "all: $all harvest: $harvest"
     fi
 }
 
@@ -1635,6 +1663,8 @@ test_messages_source_in_timeline
 test_messages_source_fields_and_level
 test_follow
 test_central_reads_the_zettel_log
+test_central_reads_the_launcher_log
+test_the_launcher_log_is_read_by_all_and_harvest
 test_central_reads_the_test_service_log
 test_a_warn_level_read_opens_only_warnings_files
 test_a_read_merges_a_log_and_its_warnings_file_in_time_order

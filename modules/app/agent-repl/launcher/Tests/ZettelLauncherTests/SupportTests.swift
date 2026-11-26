@@ -50,8 +50,9 @@ final class LogTests: XCTestCase {
 
     func testALineCarriesEveryRequiredField() throws {
         // Act
-        let line = logLine(level: .error, operation: "launcher.x", message: "m", context: ["post": UInt64(7), "cause": "c"],
-                           at: Date(timeIntervalSince1970: 0), pid: 9, zone: TimeZone(identifier: "UTC")!)
+        let entry = LogEntry(level: .error, operation: "launcher.x", site: "074892b7d933", template: "m", message: "m",
+                             context: ["post": UInt64(7), "cause": "c"])
+        let line = logLine(entry, at: Date(timeIntervalSince1970: 0), pid: 9, zone: TimeZone(identifier: "UTC")!)
 
         // Assert
         let object = try JSONSerialization.jsonObject(with: line) as! [String: Any]
@@ -60,6 +61,8 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(object["verbosity"] as? String, "normal")
         XCTAssertEqual(object["operation"] as? String, "launcher.x")
         XCTAssertEqual(object["message"] as? String, "m")
+        XCTAssertEqual(object["site"] as? String, "074892b7d933")
+        XCTAssertEqual(object["template"] as? String, "m")
         XCTAssertEqual(object["pid"] as? Int, 9)
         XCTAssertEqual(object["timestamp"] as? String, "1970-01-01T00:00:00.000000+00:00")
         let context = object["context"] as! [String: Any]
@@ -89,7 +92,7 @@ final class LogTests: XCTestCase {
         let logger = FileLogger(path: path, cap: 300)
 
         // Act
-        for n in 0..<12 { logger.info("launcher.x", "record \(n)") }
+        for n in 0..<12 { logger.info("launcher.x", "record {n}", ["n": n]) }
 
         // Assert
         let current = try String(contentsOf: path, encoding: .utf8)
