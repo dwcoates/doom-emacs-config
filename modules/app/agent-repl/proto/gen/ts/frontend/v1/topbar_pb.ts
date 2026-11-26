@@ -1315,7 +1315,9 @@ export const TopbarTitleSchema: GenMessage<TopbarTitle> = /*@__PURE__*/
  */
 export type TopbarTitleDescription = Message<"frontend.v1.TopbarTitleDescription"> & {
   /**
-   * The long summary, verbatim: one paragraph of two to four sentences.
+   * The long summary as MARKDOWN: a bulleted list, one "- " item per
+   * sentence of the agent's two to four, which the daemon splits (the agent
+   * writes plain sentences, never markdown).
    *
    * @generated from field: string text = 1;
    */

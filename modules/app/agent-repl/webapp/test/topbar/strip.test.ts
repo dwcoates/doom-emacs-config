@@ -352,7 +352,7 @@ function plainNamePaint(): Record<string, string> {
 }
 
 describe("drawTopbarTitle's long summary", () => {
-  const LONG = "The reconnect backoff retries too fast. Fix its schedule.";
+  const LONG = "- The reconnect backoff retries too fast.\n- Fix its schedule.";
   const described = () => create(TopbarTitleSchema, { text: "Fix the reconnect backoff", description: { text: LONG } });
   const hover = (el: Element, type: "pointerenter" | "pointerleave"): void => {
     el.dispatchEvent(new Event(type));
@@ -363,7 +363,8 @@ describe("drawTopbarTitle's long summary", () => {
     const title = drawTopbarTitle(described(), tc);
     host.append(title);
     hover(title, "pointerenter");
-    expect(openPanel(host)?.querySelector(".topbar-title-description")?.textContent).toBe(LONG);
+    const items = openPanel(host)?.querySelectorAll(".topbar-title-description li") ?? [];
+    expect([...items].map((li) => li.textContent)).toEqual(["The reconnect backoff retries too fast.", "Fix its schedule."]);
   });
 
   it("closes the long summary when the pointer leaves the summary", () => {
@@ -406,10 +407,10 @@ describe("drawTopbarTitle's long summary", () => {
     const first = drawTopbarTitle(described(), tc);
     host.append(first);
     hover(first, "pointerenter");
-    const later = drawTopbarTitle(create(TopbarTitleSchema, { text: "t", description: { text: "Later. Text." } }), tc);
+    const later = drawTopbarTitle(create(TopbarTitleSchema, { text: "t", description: { text: "- Later.\n- Text." } }), tc);
     first.replaceWith(later);
     tc.reveals.refresh();
-    expect(openPanel(host)?.textContent).toBe("Later. Text.");
+    expect([...(openPanel(host)?.querySelectorAll("li") ?? [])].map((li) => li.textContent)).toEqual(["Later.", "Text."]);
   });
 });
 

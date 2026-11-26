@@ -2655,7 +2655,9 @@ func (x *TopbarTitle) GetDescription() *TopbarTitleDescription {
 // the one-sentence title can.
 type TopbarTitleDescription struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The long summary, verbatim: one paragraph of two to four sentences.
+	// The long summary as MARKDOWN: a bulleted list, one "- " item per
+	// sentence of the agent's two to four, which the daemon splits (the agent
+	// writes plain sentences, never markdown).
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

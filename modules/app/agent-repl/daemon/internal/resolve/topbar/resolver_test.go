@@ -1263,7 +1263,7 @@ func TestTheTitleCarriesNoLinks(t *testing.T) {
 
 	// Assert
 	want := &frontendv1.TopbarTitle{Text: "Wire up the reconnect backoff",
-		Description: &frontendv1.TopbarTitleDescription{Text: "Fix the backoff. It retries too fast."}}
+		Description: &frontendv1.TopbarTitleDescription{Text: "- Fix the backoff.\n- It retries too fast."}}
 	if got := h.view(t).GetTitle(); !proto.Equal(got, want) {
 		t.Fatalf("title = %v, want %v", got, want)
 	}
@@ -1277,7 +1277,7 @@ func TestTheTitlesDescriptionIsTheLongSummary(t *testing.T) {
 	}{
 		{name: "a long summary is the description", arrange: func(h *harness) {
 			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Long: "Fix the backoff. It retries too fast.", Short: "Fix the backoff"})
-		}, want: &frontendv1.TopbarTitleDescription{Text: "Fix the backoff. It retries too fast."}},
+		}, want: &frontendv1.TopbarTitleDescription{Text: "- Fix the backoff.\n- It retries too fast."}},
 		{name: "a short summary alone has no description", arrange: func(h *harness) {
 			h.r.SetSummary(testWS, wsm.WorkspaceSummary{Short: "Fix the backoff"})
 		}},

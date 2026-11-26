@@ -8622,10 +8622,19 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   font-style: italic;
   color: var(--tool-title);
 }
-/* THE SUMMARY'S HOVER POPUP: the long summary, wrapped to a reading width
-   beneath the heading. */
+/* THE SUMMARY'S HOVER POPUP: the long summary as a bulleted list, in a box
+   half again as wide as the other reveals' 32rem (owner ruling, 2026-11-26).
+   The panel is shrink-to-fit, so it is never wider than its longest bullet
+   needs. */
+.topbar-reveal:has(.topbar-title-description) {
+  max-width: min(90vw, 48rem);
+}
+.topbar-title-description ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
 .topbar-title-description {
-  max-width: 32rem;
+  max-width: 48rem;
   padding: 0.5rem 0.7rem;
   color: var(--fg);
   line-height: 1.4;
