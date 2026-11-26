@@ -9,7 +9,9 @@
 ;;
 ;;   - the standing, as the daemon pushes it on WatchDaemon's
 ;;     `persistent_wifi' arm (`agent-repl-persistent-wifi-handle'), echoed
-;;     whenever it changes;
+;;     whenever it changes; while the daemon cannot reach the
+;;     persistent-wifi service the standing is that alone
+;;     (`:service-unreachable'), every other fact unset;
 ;;   - `agent-repl-persistent-wifi-mode-toggle' (`SPC j w'), which sends
 ;;     UpdatePersistentWifiMode{toggle} over the daemon-level connection and
 ;;     reports what the change left.
@@ -53,10 +55,12 @@ take far longer than an ordinary verb's deadline."
 (defvar agent-repl-persistent-wifi-state nil
   "The machine's persistent-wifi standing as the daemon last stated it.
 A decoded `PersistentWifiState' plist
-`(:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET)', each ONEOF nil when
-the daemon could not read (or, for the lid, has not yet heard) that fact,
-QUIET nil while the lid-closed quiet state does not stand; nil before the
-daemon has stated any.")
+`(:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET
+:service-unreachable UNREACHABLE)', each ONEOF nil when the daemon could
+not read (or, for the lid, has not yet heard) that fact, QUIET nil while
+the lid-closed quiet state does not stand, UNREACHABLE `(:detail TEXT)'
+while the daemon cannot reach the persistent-wifi service (every other
+fact then unset) and nil otherwise; nil before the daemon has stated any.")
 
 (defconst agent-repl-persistent-wifi-quiet-timer-keys '(:state-poll :stall-sampler)
   "The keyed timers the lid-closed quiet state pauses: the tab-bar repaint
@@ -125,13 +129,17 @@ Nil when the lid is not yet heard and no quiet state stands."
       (string-join (delq nil (list lid-words quiet-words)) ", "))))
 
 (defun agent-repl-persistent-wifi-describe (state)
-  "Return one line describing the decoded persistent-wifi STATE."
-  (string-join
-   (delq nil (list (agent-repl-persistent-wifi--mode-text (plist-get state :mode))
-                   (agent-repl-persistent-wifi--wifi-text (plist-get state :wifi))
-                   (agent-repl-persistent-wifi--lid-text (plist-get state :lid)
-                                                         (plist-get state :quiet))))
-   " · "))
+  "Return one line describing the decoded persistent-wifi STATE.
+A standing of an unreachable service is that line alone: the daemon sets
+no other fact then."
+  (if-let ((unreachable (plist-get state :service-unreachable)))
+      (format "persistent-wifi service unreachable: %s" (plist-get unreachable :detail))
+    (string-join
+     (delq nil (list (agent-repl-persistent-wifi--mode-text (plist-get state :mode))
+                     (agent-repl-persistent-wifi--wifi-text (plist-get state :wifi))
+                     (agent-repl-persistent-wifi--lid-text (plist-get state :lid)
+                                                           (plist-get state :quiet))))
+     " · ")))
 
 (defun agent-repl-persistent-wifi--hotspot-text (hotspot)
   "Return the words for the decoded HOTSPOT step outcome."
