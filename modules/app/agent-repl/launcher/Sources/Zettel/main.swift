@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var watcher: AdvertisementWatcher!
     var server: BannerServer!
     var screen: AccessibilityScreen!
-    var slackCloser: SlackNotificationCloser!
+    var closer: NotificationCloser!
     /// The one-instance lock, held for the life of the process.
     var lock: Int32 = -1
 
@@ -106,16 +106,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         log.info(Op.app, "the launcher serves banners on its held socket", ["holder": options.holder])
-        startClosingSlackNotifications()
+        startClosingNotifications()
     }
 
-    /// Closes each Slack notification after SlackNotificationSeconds on
-    /// screen (SlackNotifications.swift).
-    func startClosingSlackNotifications() {
+    /// Closes each Slack and Zettel notification after NotificationSeconds
+    /// on screen (NotificationCloser.swift).
+    func startClosingNotifications() {
         screen = AccessibilityScreen(log: log)
-        slackCloser = SlackNotificationCloser(screen: screen, scheduler: RunLoopDeadlines(),
-                                              duration: { slackNotificationDuration(UserDefaults.standard) }, log: log)
-        screen.onChange = { [slackCloser] in slackCloser!.screenChanged() }
+        closer = NotificationCloser(screen: screen, scheduler: RunLoopDeadlines(),
+                                    duration: { notificationDuration(UserDefaults.standard) }, log: log)
+        screen.onChange = { [closer] in closer!.screenChanged() }
         screen.start()
     }
 

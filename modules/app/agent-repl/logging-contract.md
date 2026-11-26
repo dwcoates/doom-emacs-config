@@ -515,8 +515,8 @@ it to the local zone before persisting.
   banner exchange it accepted, posted or the platform refused
   (`launcher.server.accept`, `launcher.server.post`), and every click it
   reported (`launcher.clicks.click`, `launcher.clicks.advertisement`), and
-  every Slack notification it watched and closed, or could not
-  (`launcher.slack_notifications`). Its logger follows "Log sites" like every
+  every Slack or Zettel notification it watched and closed, or could not
+  (`launcher.notification_closer`). Its logger follows "Log sites" like every
   runtime: a call passes a `StaticString` template (the compiler accepts
   nothing but a literal) and its named values, the logger renders `message`
   from them, and every record carries `site` and `template`. The site's
