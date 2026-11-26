@@ -13,15 +13,16 @@
 // band; the name line is a band below it, and is centered under the summary
 // text rather than under the strip. A workspace with no summary draws its
 // name in the summary's place on the top band. A hover on the summary shows
-// the workspace's long summary beneath it; a click on the name, underlined
-// while the workspace shows links, opens them.
+// the workspace's long summary beneath it, and a click on it drops the menu
+// of the workspace's children that are not open; a click on the name,
+// underlined while the workspace shows links, opens them.
 //
 //   │● work@…com  ☎  ᯤ        Fix the flaky reconnect backoff    haiku 4.5 ▾  142.3k│
 //   │                              fix-flaky-reconnect                              │
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
-// options, the context chip's usage breakdown, the summary's long summary and
-// the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
+// options, the context chip's usage breakdown, the summary's long summary,
+// the summary's child menu and the name's link menu) renders BELOW the strip and CLAMPS within the viewport —
 // never off-screen left or right.
 //
 // EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
@@ -62,7 +63,7 @@ import type { AgentEffortLevel, AgentModel, ModelOption } from "../../conversati
 import { file_conversation_v1_api } from "../../conversation/v1/api_pb";
 import type { WorkspaceNamePrefix } from "./workspace_name_prefix_pb";
 import { file_frontend_v1_workspace_name_prefix } from "./workspace_name_prefix_pb";
-import type { RepositoryRef } from "../../workspace/v1/workspace_pb";
+import type { RepositoryRef, WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -70,7 +71,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/topbar.proto.
  */
 export const file_frontend_v1_topbar: GenFile = /*@__PURE__*/
-  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIqkHCgpUb3BiYXJWaWV3EiwKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVIAIgBARI0CgxzZXNzaW9uX2xpbmUYAiABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uTGluZRI9Cg5tb2RlbF9zZWxlY3RvchgDIAEoCzIgLmZyb250ZW5kLnYxLlRvcGJhck1vZGVsU2VsZWN0b3JIAYgBARI1Cgxjb25uZWN0aXZpdHkYBCABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSLwoHY29udGV4dBgHIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhckNvbnRleHRDaGlwEisKB2FjY291bnQYCCABKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50EkwKFnBlcm1pc3Npb25fbW9kZV9waWNrZXIYCSABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlckgCiAEBEjoKD3BlcnNpc3RlbnRfd2lmaRgNIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpEj8KD2VmZm9ydF9zZWxlY3RvchgOIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9ySAOIAQESOAoOd29ya3NwYWNlX25hbWUYDyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lEjkKDHF1ZXVlX2J5cGFzcxgRIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSASIAQESOAoOcmVtb3RlX2NvbnRyb2wYECABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sEkMKEXByb2R1Y3Rpb25fY2hlY2tzGBIgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc0gFiAEBQggKBl90aXRsZUIRCg9fbW9kZWxfc2VsZWN0b3JCGQoXX3Blcm1pc3Npb25fbW9kZV9waWNrZXJCEgoQX2VmZm9ydF9zZWxlY3RvckIPCg1fcXVldWVfYnlwYXNzQhQKEl9wcm9kdWN0aW9uX2NoZWNrc0oECAUQBkoECAYQB0oECAoQC0oECAsQDEoECAwQDVIId2FybmluZ3NSCWZhc3RfbW9kZSL8AQoRVG9wYmFyUXVldWVCeXBhc3MSLgoCb24YASABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc09uSAASMAoDb2ZmGAIgASgLMiEuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NPZmZIABJFCg5oZWxkX2Vsc2V3aGVyZRgDIAEoCzIrLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSGVsZEVsc2V3aGVyZUgAEjYKB3Rvb2x0aXAYBCABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc1Rvb2x0aXBCBgoEbW9kZSIVChNUb3BiYXJRdWV1ZUJ5cGFzc09uIlQKFFRvcGJhclF1ZXVlQnlwYXNzT2ZmEjwKB29wdGlvbnMYASADKAsyKy5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRPcHRpb24ibgoeVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0T3B0aW9uEjYKB2NvbnRleHQYASABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHQSFAoMZGlzcGxheV9uYW1lGAIgASgJIuICChhUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHQSQgoJZnVsbF9tYWluGAEgASgLMi0uZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RnVsbE1haW5IABJMCg5jb21wYWN0ZWRfbWFpbhgCIAEoCzIyLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dENvbXBhY3RlZE1haW5IABJBCghleGlzdGluZxgDIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nSAASZgocZXhpc3RpbmdfcGx1c19jb21wYWN0ZWRfbWFpbhgEIAEoCzI+LmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nUGx1c0NvbXBhY3RlZE1haW5IAEIJCgdjb250ZXh0IiIKIFRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEZ1bGxNYWluIicKJVRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dENvbXBhY3RlZE1haW4iIgogVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmciMwoxVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmdQbHVzQ29tcGFjdGVkTWFpbiI4Ch5Ub3BiYXJRdWV1ZUJ5cGFzc0hlbGRFbHNld2hlcmUSFgoOd29ya3NwYWNlX25hbWUYASABKAkiKAoYVG9wYmFyUXVldWVCeXBhc3NUb29sdGlwEgwKBHRleHQYASABKAkixQEKE1RvcGJhclJlbW90ZUNvbnRyb2wSNAoCb24YASABKAsyJi5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sTW9kZU9uSAASNgoDb2ZmGAIgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUmVtb3RlQ29udHJvbE1vZGVPZmZIABI4Cgd0b29sdGlwGAMgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUmVtb3RlQ29udHJvbFRvb2x0aXBCBgoEbW9kZSIbChlUb3BiYXJSZW1vdGVDb250cm9sTW9kZU9uIhwKGlRvcGJhclJlbW90ZUNvbnRyb2xNb2RlT2ZmIioKGlRvcGJhclJlbW90ZUNvbnRyb2xUb29sdGlwEgwKBHRleHQYASABKAki1wQKFFRvcGJhclBlcnNpc3RlbnRXaWZpEjkKBmpvaW5lZBgBIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpSm9pbmVkSAASQAoKbm90X2pvaW5lZBgCIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTm90Sm9pbmVkSAASNQoCb24YAyABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPbkgBEjcKA29mZhgEIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjkKB3Rvb2x0aXAYBSABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaVRvb2x0aXASPAoIbGlkX29wZW4YBiABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaUxpZE9wZW5IAhJACgpsaWRfY2xvc2VkGAcgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhI4CgZub19saWQYCCABKAsyJi5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU5vTGlkSAISRgoNbGlkX3Vud2F0Y2hlZBgJIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTGlkVW53YXRjaGVkSAJCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZCIcChpUb3BiYXJQZXJzaXN0ZW50V2lmaUpvaW5lZCIfCh1Ub3BiYXJQZXJzaXN0ZW50V2lmaU5vdEpvaW5lZCIcChpUb3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtUb3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPZmYiHQobVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRPcGVuIh8KHVRvcGJhclBlcnNpc3RlbnRXaWZpTGlkQ2xvc2VkIhsKGVRvcGJhclBlcnNpc3RlbnRXaWZpTm9MaWQiIgogVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWQiKwobVG9wYmFyUGVyc2lzdGVudFdpZmlUb29sdGlwEgwKBHRleHQYASABKAkijgIKFlRvcGJhclByb2R1Y3Rpb25DaGVja3MSPQoHcnVubmluZxgBIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclByb2R1Y3Rpb25DaGVja3NSdW5uaW5nSAASOwoGcGF1c2VkGAIgASgLMikuZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1BhdXNlZEgAEi8KCnJlcG9zaXRvcnkYAyABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZhI7Cgd0b29sdGlwGAQgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1Rvb2x0aXBCCgoIc3RhbmRpbmciHwodVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1J1bm5pbmciHgocVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1BhdXNlZCItCh1Ub3BiYXJQcm9kdWN0aW9uQ2hlY2tzVG9vbHRpcBIMCgR0ZXh0GAEgASgJIpABChpUb3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlchI4CgdjdXJyZW50GAEgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVPcHRpb24SOAoHb3B0aW9ucxgCIAMoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uIkAKGlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uEgwKBG1vZGUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIoYBChFUb3BiYXJDb250ZXh0Q2hpcBIMCgR0ZXh0GAEgASgJEjIKCWJyZWFrZG93bhgCIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlldxITCgt3aW5kb3dfZmlsbBgDIAEoARIaChJzZXNzaW9uX3RvdGFsX3RleHQYBCABKAkimgIKDVRvcGJhckFjY291bnQSNwoJbG9nZ2VkX2luGAEgASgLMiIuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZEluSAASOQoKbG9nZ2VkX291dBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRPdXRIABIxCgdvcHRpb25zGAMgAygLMiAuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudE9wdGlvbhJFCg9zaWduX2luX3JlcXVlc3QYBCABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50U2lnbkluUmVxdWVzdEgBiAEBQgcKBXN0YXRlQhIKEF9zaWduX2luX3JlcXVlc3QiMAoaVG9wYmFyQWNjb3VudFNpZ25JblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCSImChVUb3BiYXJBY2NvdW50TG9nZ2VkSW4SDQoFZW1haWwYASABKAkiGAoWVG9wYmFyQWNjb3VudExvZ2dlZE91dCK3AQoTVG9wYmFyQWNjb3VudE9wdGlvbhISCgpjb25maWdfZGlyGAEgASgJEjcKCWxvZ2dlZF9pbhgCIAEoCzIiLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRJbkgAEjkKCmxvZ2dlZF9vdXQYAyABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkT3V0SAASDwoHY3VycmVudBgEIAEoCEIHCgVzdGF0ZSKDAQoLVG9wYmFyVGl0bGUSDAoEdGV4dBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgEIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlRGVzY3JpcHRpb25IAIgBAUIOCgxfZGVzY3JpcHRpb25KBAgCEANKBAgDEARSBGxpbmtSBWxpbmtzIiYKFlRvcGJhclRpdGxlRGVzY3JpcHRpb24SDAoEdGV4dBgBIAEoCSKVAQoYVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtzEjYKBnNpbmdsZRgBIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rSAASOAoEbWVudRgCIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rTWVudUgAQgcKBW9wZW5zIjUKF1RvcGJhcldvcmtzcGFjZU5hbWVMaW5rEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCSJaChtUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnUSOwoFaXRlbXMYASADKAsyLC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnVJdGVtIuEBCh9Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnVJdGVtEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCRINCgVvd25lZBgDIAEoCBI2CgRpY29uGAQgASgOMiguZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtJY29uEj0KBWJhZGdlGAUgASgLMikuZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZUgAiAEBEhIKCnN1YnNjcmliZWQYBiABKAhCCAoGX2JhZGdlIq0CChxUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlEj0KBG9wZW4YASABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlT3BlbkgAEj8KBWRyYWZ0GAIgASgLMi4uZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZURyYWZ0SAASQQoGbWVyZ2VkGAMgASgLMi8uZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU1lcmdlZEgAEkEKBmNsb3NlZBgEIAEoCzIvLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VDbG9zZWRIAEIHCgVzdGF0ZSIiCiBUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlT3BlbiIjCiFUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlRHJhZnQiJAoiVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU1lcmdlZCIkCiJUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlQ2xvc2VkIqoBChNUb3BiYXJXb3Jrc3BhY2VOYW1lEgwKBHRleHQYASABKAkSNQoGcHJlZml4GAIgASgLMiAuZnJvbnRlbmQudjEuV29ya3NwYWNlTmFtZVByZWZpeEgAiAEBEjkKBWxpbmtzGAMgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtzSAGIAQFCCQoHX3ByZWZpeEIICgZfbGlua3MiIQoRVG9wYmFyU2Vzc2lvbkxpbmUSDAoEdGV4dBgBIAEoCSK6AQoTVG9wYmFyTW9kZWxTZWxlY3RvchIzCghzZWxlY3RlZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Nb2RlbE9wdGlvbkgAiAEBEi0KB29wdGlvbnMYAiADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SMgoNZGVmYXVsdF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsQgsKCV9zZWxlY3RlZCKnAQoUVG9wYmFyRWZmb3J0U2VsZWN0b3ISPwoJc3VwcG9ydGVkGAEgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0U2VsZWN0b3JTdXBwb3J0ZWRIABJDCgt1bnN1cHBvcnRlZBgCIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9yVW5zdXBwb3J0ZWRIAEIJCgdzdXBwb3J0IoMBCh1Ub3BiYXJFZmZvcnRTZWxlY3RvclN1cHBvcnRlZBIwCgdjdXJyZW50GAEgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0T3B0aW9uEjAKB29wdGlvbnMYAiADKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRPcHRpb24iIQofVG9wYmFyRWZmb3J0U2VsZWN0b3JVbnN1cHBvcnRlZCJcChJUb3BiYXJFZmZvcnRPcHRpb24SMAoFbGV2ZWwYASABKA4yIS5jb252ZXJzYXRpb24udjEuQWdlbnRFZmZvcnRMZXZlbBIUCgxkaXNwbGF5X25hbWUYAiABKAkihwEKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJEjkKB3Nlc3Npb24YBCABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBZ2VudFJlcGxTZXNzaW9uSACIAQFCCgoIX3Nlc3Npb24i2wEKFlRvcGJhckFnZW50UmVwbFNlc3Npb24SFQoNc3RhcnRlZF9hdF9tcxgBIAEoAxI1CgVsb2dpbhgCIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25CZWdhbkxvZ2luSAASQgoMZWRpdG9yX3N0YXJ0GAMgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyU2Vzc2lvbkJlZ2FuRWRpdG9yU3RhcnRIAEIHCgViZWdhbkoECAQQBUoECAUQBlIOYnl0ZXNfcmVjZWl2ZWRSCmJ5dGVzX3NlbnQiGQoXVG9wYmFyU2Vzc2lvbkJlZ2FuTG9naW4iHwodVG9wYmFyU2Vzc2lvbkJlZ2FuRWRpdG9yU3RhcnQiSgoSVG9rZW5CcmVha2Rvd25WaWV3EjQKCHNlY3Rpb25zGAEgAygLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25TZWN0aW9uInoKFVRva2VuQnJlYWtkb3duU2VjdGlvbhIzCgdoZWFkaW5nGAEgASgLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25IZWFkaW5nEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyIlChVUb2tlbkJyZWFrZG93bkhlYWRpbmcSDAoEdGV4dBgBIAEoCSKFAQoRVG9rZW5CcmVha2Rvd25Sb3cSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDEhsKDnNoYXJlX3Blcm1pbGxlGAMgASgFSACIAQESEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIRCg9fc2hhcmVfcGVybWlsbGUq+gEKG1RvcGJhcldvcmtzcGFjZU5hbWVMaW5rSWNvbhIvCitUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX1VOU1BFQ0lGSUVEEAASKgomVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9HSVRIVUIQARIpCiVUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX1NMQUNLEAISJwojVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9HTlMQAxIqCiZUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX05PVElPThAEQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_api, file_frontend_v1_workspace_name_prefix, file_workspace_v1_workspace]);
+  fileDesc("Chhmcm9udGVuZC92MS90b3BiYXIucHJvdG8SC2Zyb250ZW5kLnYxIqkHCgpUb3BiYXJWaWV3EiwKBXRpdGxlGAEgASgLMhguZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVIAIgBARI0CgxzZXNzaW9uX2xpbmUYAiABKAsyHi5mcm9udGVuZC52MS5Ub3BiYXJTZXNzaW9uTGluZRI9Cg5tb2RlbF9zZWxlY3RvchgDIAEoCzIgLmZyb250ZW5kLnYxLlRvcGJhck1vZGVsU2VsZWN0b3JIAYgBARI1Cgxjb25uZWN0aXZpdHkYBCABKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJDb25uZWN0aXZpdHkSLwoHY29udGV4dBgHIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhckNvbnRleHRDaGlwEisKB2FjY291bnQYCCABKAsyGi5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50EkwKFnBlcm1pc3Npb25fbW9kZV9waWNrZXIYCSABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlckgCiAEBEjoKD3BlcnNpc3RlbnRfd2lmaRgNIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpEj8KD2VmZm9ydF9zZWxlY3RvchgOIAEoCzIhLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9ySAOIAQESOAoOd29ya3NwYWNlX25hbWUYDyABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lEjkKDHF1ZXVlX2J5cGFzcxgRIAEoCzIeLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSASIAQESOAoOcmVtb3RlX2NvbnRyb2wYECABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sEkMKEXByb2R1Y3Rpb25fY2hlY2tzGBIgASgLMiMuZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc0gFiAEBQggKBl90aXRsZUIRCg9fbW9kZWxfc2VsZWN0b3JCGQoXX3Blcm1pc3Npb25fbW9kZV9waWNrZXJCEgoQX2VmZm9ydF9zZWxlY3RvckIPCg1fcXVldWVfYnlwYXNzQhQKEl9wcm9kdWN0aW9uX2NoZWNrc0oECAUQBkoECAYQB0oECAoQC0oECAsQDEoECAwQDVIId2FybmluZ3NSCWZhc3RfbW9kZSL8AQoRVG9wYmFyUXVldWVCeXBhc3MSLgoCb24YASABKAsyIC5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc09uSAASMAoDb2ZmGAIgASgLMiEuZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NPZmZIABJFCg5oZWxkX2Vsc2V3aGVyZRgDIAEoCzIrLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzSGVsZEVsc2V3aGVyZUgAEjYKB3Rvb2x0aXAYBCABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc1Rvb2x0aXBCBgoEbW9kZSIVChNUb3BiYXJRdWV1ZUJ5cGFzc09uIlQKFFRvcGJhclF1ZXVlQnlwYXNzT2ZmEjwKB29wdGlvbnMYASADKAsyKy5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRPcHRpb24ibgoeVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0T3B0aW9uEjYKB2NvbnRleHQYASABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHQSFAoMZGlzcGxheV9uYW1lGAIgASgJIuICChhUb3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHQSQgoJZnVsbF9tYWluGAEgASgLMi0uZnJvbnRlbmQudjEuVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RnVsbE1haW5IABJMCg5jb21wYWN0ZWRfbWFpbhgCIAEoCzIyLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dENvbXBhY3RlZE1haW5IABJBCghleGlzdGluZxgDIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nSAASZgocZXhpc3RpbmdfcGx1c19jb21wYWN0ZWRfbWFpbhgEIAEoCzI+LmZyb250ZW5kLnYxLlRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEV4aXN0aW5nUGx1c0NvbXBhY3RlZE1haW5IAEIJCgdjb250ZXh0IiIKIFRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dEZ1bGxNYWluIicKJVRvcGJhclF1ZXVlQnlwYXNzQ29udGV4dENvbXBhY3RlZE1haW4iIgogVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmciMwoxVG9wYmFyUXVldWVCeXBhc3NDb250ZXh0RXhpc3RpbmdQbHVzQ29tcGFjdGVkTWFpbiI4Ch5Ub3BiYXJRdWV1ZUJ5cGFzc0hlbGRFbHNld2hlcmUSFgoOd29ya3NwYWNlX25hbWUYASABKAkiKAoYVG9wYmFyUXVldWVCeXBhc3NUb29sdGlwEgwKBHRleHQYASABKAkixQEKE1RvcGJhclJlbW90ZUNvbnRyb2wSNAoCb24YASABKAsyJi5mcm9udGVuZC52MS5Ub3BiYXJSZW1vdGVDb250cm9sTW9kZU9uSAASNgoDb2ZmGAIgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUmVtb3RlQ29udHJvbE1vZGVPZmZIABI4Cgd0b29sdGlwGAMgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUmVtb3RlQ29udHJvbFRvb2x0aXBCBgoEbW9kZSIbChlUb3BiYXJSZW1vdGVDb250cm9sTW9kZU9uIhwKGlRvcGJhclJlbW90ZUNvbnRyb2xNb2RlT2ZmIioKGlRvcGJhclJlbW90ZUNvbnRyb2xUb29sdGlwEgwKBHRleHQYASABKAki1wQKFFRvcGJhclBlcnNpc3RlbnRXaWZpEjkKBmpvaW5lZBgBIAEoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpSm9pbmVkSAASQAoKbm90X2pvaW5lZBgCIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTm90Sm9pbmVkSAASNQoCb24YAyABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPbkgBEjcKA29mZhgEIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjkKB3Rvb2x0aXAYBSABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaVRvb2x0aXASPAoIbGlkX29wZW4YBiABKAsyKC5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaUxpZE9wZW5IAhJACgpsaWRfY2xvc2VkGAcgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhI4CgZub19saWQYCCABKAsyJi5mcm9udGVuZC52MS5Ub3BiYXJQZXJzaXN0ZW50V2lmaU5vTGlkSAISRgoNbGlkX3Vud2F0Y2hlZBgJIAEoCzItLmZyb250ZW5kLnYxLlRvcGJhclBlcnNpc3RlbnRXaWZpTGlkVW53YXRjaGVkSAJCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZCIcChpUb3BiYXJQZXJzaXN0ZW50V2lmaUpvaW5lZCIfCh1Ub3BiYXJQZXJzaXN0ZW50V2lmaU5vdEpvaW5lZCIcChpUb3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtUb3BiYXJQZXJzaXN0ZW50V2lmaU1vZGVPZmYiHQobVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRPcGVuIh8KHVRvcGJhclBlcnNpc3RlbnRXaWZpTGlkQ2xvc2VkIhsKGVRvcGJhclBlcnNpc3RlbnRXaWZpTm9MaWQiIgogVG9wYmFyUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWQiKwobVG9wYmFyUGVyc2lzdGVudFdpZmlUb29sdGlwEgwKBHRleHQYASABKAkijgIKFlRvcGJhclByb2R1Y3Rpb25DaGVja3MSPQoHcnVubmluZxgBIAEoCzIqLmZyb250ZW5kLnYxLlRvcGJhclByb2R1Y3Rpb25DaGVja3NSdW5uaW5nSAASOwoGcGF1c2VkGAIgASgLMikuZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1BhdXNlZEgAEi8KCnJlcG9zaXRvcnkYAyABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZhI7Cgd0b29sdGlwGAQgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1Rvb2x0aXBCCgoIc3RhbmRpbmciHwodVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1J1bm5pbmciHgocVG9wYmFyUHJvZHVjdGlvbkNoZWNrc1BhdXNlZCItCh1Ub3BiYXJQcm9kdWN0aW9uQ2hlY2tzVG9vbHRpcBIMCgR0ZXh0GAEgASgJIpABChpUb3BiYXJQZXJtaXNzaW9uTW9kZVBpY2tlchI4CgdjdXJyZW50GAEgASgLMicuZnJvbnRlbmQudjEuVG9wYmFyUGVybWlzc2lvbk1vZGVPcHRpb24SOAoHb3B0aW9ucxgCIAMoCzInLmZyb250ZW5kLnYxLlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uIkAKGlRvcGJhclBlcm1pc3Npb25Nb2RlT3B0aW9uEgwKBG1vZGUYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIoYBChFUb3BiYXJDb250ZXh0Q2hpcBIMCgR0ZXh0GAEgASgJEjIKCWJyZWFrZG93bhgCIAEoCzIfLmZyb250ZW5kLnYxLlRva2VuQnJlYWtkb3duVmlldxITCgt3aW5kb3dfZmlsbBgDIAEoARIaChJzZXNzaW9uX3RvdGFsX3RleHQYBCABKAkimgIKDVRvcGJhckFjY291bnQSNwoJbG9nZ2VkX2luGAEgASgLMiIuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudExvZ2dlZEluSAASOQoKbG9nZ2VkX291dBgCIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRPdXRIABIxCgdvcHRpb25zGAMgAygLMiAuZnJvbnRlbmQudjEuVG9wYmFyQWNjb3VudE9wdGlvbhJFCg9zaWduX2luX3JlcXVlc3QYBCABKAsyJy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50U2lnbkluUmVxdWVzdEgBiAEBQgcKBXN0YXRlQhIKEF9zaWduX2luX3JlcXVlc3QiMAoaVG9wYmFyQWNjb3VudFNpZ25JblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCSImChVUb3BiYXJBY2NvdW50TG9nZ2VkSW4SDQoFZW1haWwYASABKAkiGAoWVG9wYmFyQWNjb3VudExvZ2dlZE91dCK3AQoTVG9wYmFyQWNjb3VudE9wdGlvbhISCgpjb25maWdfZGlyGAEgASgJEjcKCWxvZ2dlZF9pbhgCIAEoCzIiLmZyb250ZW5kLnYxLlRvcGJhckFjY291bnRMb2dnZWRJbkgAEjkKCmxvZ2dlZF9vdXQYAyABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBY2NvdW50TG9nZ2VkT3V0SAASDwoHY3VycmVudBgEIAEoCEIHCgVzdGF0ZSLOAQoLVG9wYmFyVGl0bGUSDAoEdGV4dBgBIAEoCRI9CgtkZXNjcmlwdGlvbhgEIAEoCzIjLmZyb250ZW5kLnYxLlRvcGJhclRpdGxlRGVzY3JpcHRpb25IAIgBARI6CgpjaGlsZF9tZW51GAUgASgLMiEuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVDaGlsZE1lbnVIAYgBAUIOCgxfZGVzY3JpcHRpb25CDQoLX2NoaWxkX21lbnVKBAgCEANKBAgDEARSBGxpbmtSBWxpbmtzIkwKFFRvcGJhclRpdGxlQ2hpbGRNZW51EjQKBWl0ZW1zGAEgAygLMiUuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVDaGlsZE1lbnVJdGVtIpUCChhUb3BiYXJUaXRsZUNoaWxkTWVudUl0ZW0SPgoFdGl0bGUYASABKAsyKi5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUNoaWxkTWVudUl0ZW1UaXRsZUgAiAEBEjcKBG5hbWUYAiABKAsyKS5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUNoaWxkTWVudUl0ZW1OYW1lEjkKBWJhZGdlGAMgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVDaGlsZE1lbnVJdGVtQmFkZ2USOwoGc2VsZWN0GAQgASgLMisuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVDaGlsZE1lbnVJdGVtU2VsZWN0QggKBl90aXRsZSItCh1Ub3BiYXJUaXRsZUNoaWxkTWVudUl0ZW1UaXRsZRIMCgR0ZXh0GAEgASgJIiwKHFRvcGJhclRpdGxlQ2hpbGRNZW51SXRlbU5hbWUSDAoEdGV4dBgBIAEoCSKzAQodVG9wYmFyVGl0bGVDaGlsZE1lbnVJdGVtQmFkZ2USQgoGbWVyZ2VkGAEgASgLMjAuZnJvbnRlbmQudjEuVG9wYmFyVGl0bGVDaGlsZE1lbnVJdGVtQmFkZ2VNZXJnZWRIABJCCgZjbG9zZWQYAiABKAsyMC5mcm9udGVuZC52MS5Ub3BiYXJUaXRsZUNoaWxkTWVudUl0ZW1CYWRnZUNsb3NlZEgAQgoKCHN0YW5kaW5nIiUKI1RvcGJhclRpdGxlQ2hpbGRNZW51SXRlbUJhZGdlTWVyZ2VkIiUKI1RvcGJhclRpdGxlQ2hpbGRNZW51SXRlbUJhZGdlQ2xvc2VkIkwKHlRvcGJhclRpdGxlQ2hpbGRNZW51SXRlbVNlbGVjdBIqCgZ0YXJnZXQYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIiYKFlRvcGJhclRpdGxlRGVzY3JpcHRpb24SDAoEdGV4dBgBIAEoCSKVAQoYVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtzEjYKBnNpbmdsZRgBIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rSAASOAoEbWVudRgCIAEoCzIoLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rTWVudUgAQgcKBW9wZW5zIjUKF1RvcGJhcldvcmtzcGFjZU5hbWVMaW5rEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCSJaChtUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnUSOwoFaXRlbXMYASADKAsyLC5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnVJdGVtIuEBCh9Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua01lbnVJdGVtEg0KBWxhYmVsGAEgASgJEgsKA3VybBgCIAEoCRINCgVvd25lZBgDIAEoCBI2CgRpY29uGAQgASgOMiguZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtJY29uEj0KBWJhZGdlGAUgASgLMikuZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZUgAiAEBEhIKCnN1YnNjcmliZWQYBiABKAhCCAoGX2JhZGdlIq0CChxUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlEj0KBG9wZW4YASABKAsyLS5mcm9udGVuZC52MS5Ub3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlT3BlbkgAEj8KBWRyYWZ0GAIgASgLMi4uZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZURyYWZ0SAASQQoGbWVyZ2VkGAMgASgLMi8uZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU1lcmdlZEgAEkEKBmNsb3NlZBgEIAEoCzIvLmZyb250ZW5kLnYxLlRvcGJhcldvcmtzcGFjZU5hbWVMaW5rQmFkZ2VDbG9zZWRIAEIHCgVzdGF0ZSIiCiBUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlT3BlbiIjCiFUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlRHJhZnQiJAoiVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtCYWRnZU1lcmdlZCIkCiJUb3BiYXJXb3Jrc3BhY2VOYW1lTGlua0JhZGdlQ2xvc2VkIqoBChNUb3BiYXJXb3Jrc3BhY2VOYW1lEgwKBHRleHQYASABKAkSNQoGcHJlZml4GAIgASgLMiAuZnJvbnRlbmQudjEuV29ya3NwYWNlTmFtZVByZWZpeEgAiAEBEjkKBWxpbmtzGAMgASgLMiUuZnJvbnRlbmQudjEuVG9wYmFyV29ya3NwYWNlTmFtZUxpbmtzSAGIAQFCCQoHX3ByZWZpeEIICgZfbGlua3MiIQoRVG9wYmFyU2Vzc2lvbkxpbmUSDAoEdGV4dBgBIAEoCSK6AQoTVG9wYmFyTW9kZWxTZWxlY3RvchIzCghzZWxlY3RlZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5Nb2RlbE9wdGlvbkgAiAEBEi0KB29wdGlvbnMYAiADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SMgoNZGVmYXVsdF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsQgsKCV9zZWxlY3RlZCKnAQoUVG9wYmFyRWZmb3J0U2VsZWN0b3ISPwoJc3VwcG9ydGVkGAEgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0U2VsZWN0b3JTdXBwb3J0ZWRIABJDCgt1bnN1cHBvcnRlZBgCIAEoCzIsLmZyb250ZW5kLnYxLlRvcGJhckVmZm9ydFNlbGVjdG9yVW5zdXBwb3J0ZWRIAEIJCgdzdXBwb3J0IoMBCh1Ub3BiYXJFZmZvcnRTZWxlY3RvclN1cHBvcnRlZBIwCgdjdXJyZW50GAEgASgLMh8uZnJvbnRlbmQudjEuVG9wYmFyRWZmb3J0T3B0aW9uEjAKB29wdGlvbnMYAiADKAsyHy5mcm9udGVuZC52MS5Ub3BiYXJFZmZvcnRPcHRpb24iIQofVG9wYmFyRWZmb3J0U2VsZWN0b3JVbnN1cHBvcnRlZCJcChJUb3BiYXJFZmZvcnRPcHRpb24SMAoFbGV2ZWwYASABKA4yIS5jb252ZXJzYXRpb24udjEuQWdlbnRFZmZvcnRMZXZlbBIUCgxkaXNwbGF5X25hbWUYAiABKAkihwEKElRvcGJhckNvbm5lY3Rpdml0eRIMCgR0b25lGAEgASgJEg0KBWdseXBoGAIgASgJEg0KBXRpdGxlGAMgASgJEjkKB3Nlc3Npb24YBCABKAsyIy5mcm9udGVuZC52MS5Ub3BiYXJBZ2VudFJlcGxTZXNzaW9uSACIAQFCCgoIX3Nlc3Npb24i2wEKFlRvcGJhckFnZW50UmVwbFNlc3Npb24SFQoNc3RhcnRlZF9hdF9tcxgBIAEoAxI1CgVsb2dpbhgCIAEoCzIkLmZyb250ZW5kLnYxLlRvcGJhclNlc3Npb25CZWdhbkxvZ2luSAASQgoMZWRpdG9yX3N0YXJ0GAMgASgLMiouZnJvbnRlbmQudjEuVG9wYmFyU2Vzc2lvbkJlZ2FuRWRpdG9yU3RhcnRIAEIHCgViZWdhbkoECAQQBUoECAUQBlIOYnl0ZXNfcmVjZWl2ZWRSCmJ5dGVzX3NlbnQiGQoXVG9wYmFyU2Vzc2lvbkJlZ2FuTG9naW4iHwodVG9wYmFyU2Vzc2lvbkJlZ2FuRWRpdG9yU3RhcnQiSgoSVG9rZW5CcmVha2Rvd25WaWV3EjQKCHNlY3Rpb25zGAEgAygLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25TZWN0aW9uInoKFVRva2VuQnJlYWtkb3duU2VjdGlvbhIzCgdoZWFkaW5nGAEgASgLMiIuZnJvbnRlbmQudjEuVG9rZW5CcmVha2Rvd25IZWFkaW5nEiwKBHJvd3MYAiADKAsyHi5mcm9udGVuZC52MS5Ub2tlbkJyZWFrZG93blJvdyIlChVUb2tlbkJyZWFrZG93bkhlYWRpbmcSDAoEdGV4dBgBIAEoCSKFAQoRVG9rZW5CcmVha2Rvd25Sb3cSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDEhsKDnNoYXJlX3Blcm1pbGxlGAMgASgFSACIAQESEgoKZW1waGFzaXplZBgEIAEoCBINCgVkZXB0aBgFIAEoBUIRCg9fc2hhcmVfcGVybWlsbGUq+gEKG1RvcGJhcldvcmtzcGFjZU5hbWVMaW5rSWNvbhIvCitUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX1VOU1BFQ0lGSUVEEAASKgomVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9HSVRIVUIQARIpCiVUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX1NMQUNLEAISJwojVE9QQkFSX1dPUktTUEFDRV9OQU1FX0xJTktfSUNPTl9HTlMQAxIqCiZUT1BCQVJfV09SS1NQQUNFX05BTUVfTElOS19JQ09OX05PVElPThAEQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_api, file_frontend_v1_workspace_name_prefix, file_workspace_v1_workspace]);
 
 /**
  * One workspace's topbar, resolved completely by the daemon. The client
@@ -1296,6 +1297,16 @@ export type TopbarTitle = Message<"frontend.v1.TopbarTitle"> & {
    * @generated from field: optional frontend.v1.TopbarTitleDescription description = 4;
    */
   description?: TopbarTitleDescription | undefined;
+
+  /**
+   * The menu a CLICK on the summary drops: the workspace's children that are
+   * NOT open. PRESENT iff at least one such child exists, and the summary
+   * then takes a pointer cursor and a click; UNSET otherwise, and a click on
+   * the summary does nothing. The summary is never underlined either way.
+   *
+   * @generated from field: optional frontend.v1.TopbarTitleChildMenu child_menu = 5;
+   */
+  childMenu?: TopbarTitleChildMenu | undefined;
 };
 
 /**
@@ -1304,6 +1315,213 @@ export type TopbarTitle = Message<"frontend.v1.TopbarTitle"> & {
  */
 export const TopbarTitleSchema: GenMessage<TopbarTitle> = /*@__PURE__*/
   messageDesc(file_frontend_v1_topbar, 38);
+
+/**
+ * The summary's click menu: one row per child of this workspace that is NOT
+ * open (it landed, or it closed without landing), drawn with the name link
+ * menu's look (frontend.v1.TopbarWorkspaceNameLinkMenu). The workspace's OPEN
+ * children are the footer's children panel instead
+ * (frontend.v1.FooterExpandedChildren), so every child is in exactly one of
+ * the two. A child the daemon removed is in neither: there is nothing to
+ * select.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenu
+ */
+export type TopbarTitleChildMenu = Message<"frontend.v1.TopbarTitleChildMenu"> & {
+  /**
+   * The rows, the child that stopped being open MOST RECENTLY FIRST, in the
+   * order drawn. At least one.
+   *
+   * @generated from field: repeated frontend.v1.TopbarTitleChildMenuItem items = 1;
+   */
+  items: TopbarTitleChildMenuItem[];
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenu.
+ * Use `create(TopbarTitleChildMenuSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuSchema: GenMessage<TopbarTitleChildMenu> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 39);
+
+/**
+ * One row of the summary's child menu: the child's short summary as the row's
+ * title, its name as the row's dim second line, and its standing as a badge
+ * in the right margin. A click anywhere on the row selects the child and
+ * closes the menu.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItem
+ */
+export type TopbarTitleChildMenuItem = Message<"frontend.v1.TopbarTitleChildMenuItem"> & {
+  /**
+   * The row's title: the child's short summary. UNSET when the child never
+   * set one; the row then draws its name as its only line.
+   *
+   * @generated from field: optional frontend.v1.TopbarTitleChildMenuItemTitle title = 1;
+   */
+  title?: TopbarTitleChildMenuItemTitle | undefined;
+
+  /**
+   * The row's second line: the child's workspace name.
+   *
+   * @generated from field: frontend.v1.TopbarTitleChildMenuItemName name = 2;
+   */
+  name?: TopbarTitleChildMenuItemName | undefined;
+
+  /**
+   * How the child stands, the row's badge.
+   *
+   * @generated from field: frontend.v1.TopbarTitleChildMenuItemBadge badge = 3;
+   */
+  badge?: TopbarTitleChildMenuItemBadge | undefined;
+
+  /**
+   * What a click on the row does.
+   *
+   * @generated from field: frontend.v1.TopbarTitleChildMenuItemSelect select = 4;
+   */
+  select?: TopbarTitleChildMenuItemSelect | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItem.
+ * Use `create(TopbarTitleChildMenuItemSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemSchema: GenMessage<TopbarTitleChildMenuItem> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 40);
+
+/**
+ * The row's title element.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemTitle
+ */
+export type TopbarTitleChildMenuItemTitle = Message<"frontend.v1.TopbarTitleChildMenuItemTitle"> & {
+  /**
+   * The child's short summary, drawn verbatim.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemTitle.
+ * Use `create(TopbarTitleChildMenuItemTitleSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemTitleSchema: GenMessage<TopbarTitleChildMenuItemTitle> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 41);
+
+/**
+ * The row's name element.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemName
+ */
+export type TopbarTitleChildMenuItemName = Message<"frontend.v1.TopbarTitleChildMenuItemName"> & {
+  /**
+   * The child's workspace name, drawn verbatim.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemName.
+ * Use `create(TopbarTitleChildMenuItemNameSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemNameSchema: GenMessage<TopbarTitleChildMenuItemName> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 42);
+
+/**
+ * The row's badge. THE ARM IS THE STANDING the badge draws: the client draws
+ * the arm's word and color.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemBadge
+ */
+export type TopbarTitleChildMenuItemBadge = Message<"frontend.v1.TopbarTitleChildMenuItemBadge"> & {
+  /**
+   * Exactly one is set on every row the daemon publishes.
+   *
+   * @generated from oneof frontend.v1.TopbarTitleChildMenuItemBadge.standing
+   */
+  standing: {
+    /**
+     * The child landed: "merged", in green.
+     *
+     * @generated from field: frontend.v1.TopbarTitleChildMenuItemBadgeMerged merged = 1;
+     */
+    value: TopbarTitleChildMenuItemBadgeMerged;
+    case: "merged";
+  } | {
+    /**
+     * The child closed without landing: "closed", in the muted grey.
+     *
+     * @generated from field: frontend.v1.TopbarTitleChildMenuItemBadgeClosed closed = 2;
+     */
+    value: TopbarTitleChildMenuItemBadgeClosed;
+    case: "closed";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemBadge.
+ * Use `create(TopbarTitleChildMenuItemBadgeSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemBadgeSchema: GenMessage<TopbarTitleChildMenuItemBadge> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 43);
+
+/**
+ * The child landed.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemBadgeMerged
+ */
+export type TopbarTitleChildMenuItemBadgeMerged = Message<"frontend.v1.TopbarTitleChildMenuItemBadgeMerged"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemBadgeMerged.
+ * Use `create(TopbarTitleChildMenuItemBadgeMergedSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemBadgeMergedSchema: GenMessage<TopbarTitleChildMenuItemBadgeMerged> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 44);
+
+/**
+ * The child closed without landing.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemBadgeClosed
+ */
+export type TopbarTitleChildMenuItemBadgeClosed = Message<"frontend.v1.TopbarTitleChildMenuItemBadgeClosed"> & {
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemBadgeClosed.
+ * Use `create(TopbarTitleChildMenuItemBadgeClosedSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemBadgeClosedSchema: GenMessage<TopbarTitleChildMenuItemBadgeClosed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 45);
+
+/**
+ * A click on the row selects the child: agentrepl.v1.SelectWorkspace with
+ * `target`, which reopens a closed child, the same switch the sidebar row
+ * makes.
+ *
+ * @generated from message frontend.v1.TopbarTitleChildMenuItemSelect
+ */
+export type TopbarTitleChildMenuItemSelect = Message<"frontend.v1.TopbarTitleChildMenuItemSelect"> & {
+  /**
+   * The child, echoed verbatim on the click.
+   *
+   * @generated from field: workspace.v1.WorkspaceRef target = 1;
+   */
+  target?: WorkspaceRef | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.TopbarTitleChildMenuItemSelect.
+ * Use `create(TopbarTitleChildMenuItemSelectSchema)` to create a new message.
+ */
+export const TopbarTitleChildMenuItemSelectSchema: GenMessage<TopbarTitleChildMenuItemSelect> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_topbar, 46);
 
 /**
  * The popup a hover on the summary shows beneath it: the long summary the
@@ -1329,7 +1547,7 @@ export type TopbarTitleDescription = Message<"frontend.v1.TopbarTitleDescription
  * Use `create(TopbarTitleDescriptionSchema)` to create a new message.
  */
 export const TopbarTitleDescriptionSchema: GenMessage<TopbarTitleDescription> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 39);
+  messageDesc(file_frontend_v1_topbar, 47);
 
 /**
  * The workspace's shown links: the workspace's name is drawn underlined, and
@@ -1368,7 +1586,7 @@ export type TopbarWorkspaceNameLinks = Message<"frontend.v1.TopbarWorkspaceNameL
  * Use `create(TopbarWorkspaceNameLinksSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinksSchema: GenMessage<TopbarWorkspaceNameLinks> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 40);
+  messageDesc(file_frontend_v1_topbar, 48);
 
 /**
  * The one shown link a click opens directly, through OpenExternal (the Chrome
@@ -1400,7 +1618,7 @@ export type TopbarWorkspaceNameLink = Message<"frontend.v1.TopbarWorkspaceNameLi
  * Use `create(TopbarWorkspaceNameLinkSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkSchema: GenMessage<TopbarWorkspaceNameLink> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 41);
+  messageDesc(file_frontend_v1_topbar, 49);
 
 /**
  * The menu a click on the workspace's name drops beneath the heading: one row per
@@ -1423,7 +1641,7 @@ export type TopbarWorkspaceNameLinkMenu = Message<"frontend.v1.TopbarWorkspaceNa
  * Use `create(TopbarWorkspaceNameLinkMenuSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkMenuSchema: GenMessage<TopbarWorkspaceNameLinkMenu> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 42);
+  messageDesc(file_frontend_v1_topbar, 50);
 
 /**
  * One row of the name's link menu: the label drawn as a link, which a pick
@@ -1496,7 +1714,7 @@ export type TopbarWorkspaceNameLinkMenuItem = Message<"frontend.v1.TopbarWorkspa
  * Use `create(TopbarWorkspaceNameLinkMenuItemSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkMenuItemSchema: GenMessage<TopbarWorkspaceNameLinkMenuItem> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 43);
+  messageDesc(file_frontend_v1_topbar, 51);
 
 /**
  * A menu row's pull request badge. THE ARM IS THE STATE the badge draws, in
@@ -1553,7 +1771,7 @@ export type TopbarWorkspaceNameLinkBadge = Message<"frontend.v1.TopbarWorkspaceN
  * Use `create(TopbarWorkspaceNameLinkBadgeSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkBadgeSchema: GenMessage<TopbarWorkspaceNameLinkBadge> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 44);
+  messageDesc(file_frontend_v1_topbar, 52);
 
 /**
  * The pull request is open. DELIBERATELY EMPTY: the arm is the state.
@@ -1568,7 +1786,7 @@ export type TopbarWorkspaceNameLinkBadgeOpen = Message<"frontend.v1.TopbarWorksp
  * Use `create(TopbarWorkspaceNameLinkBadgeOpenSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkBadgeOpenSchema: GenMessage<TopbarWorkspaceNameLinkBadgeOpen> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 45);
+  messageDesc(file_frontend_v1_topbar, 53);
 
 /**
  * The pull request is a draft. DELIBERATELY EMPTY: the arm is the state.
@@ -1583,7 +1801,7 @@ export type TopbarWorkspaceNameLinkBadgeDraft = Message<"frontend.v1.TopbarWorks
  * Use `create(TopbarWorkspaceNameLinkBadgeDraftSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkBadgeDraftSchema: GenMessage<TopbarWorkspaceNameLinkBadgeDraft> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 46);
+  messageDesc(file_frontend_v1_topbar, 54);
 
 /**
  * The pull request merged. DELIBERATELY EMPTY: the arm is the state.
@@ -1598,7 +1816,7 @@ export type TopbarWorkspaceNameLinkBadgeMerged = Message<"frontend.v1.TopbarWork
  * Use `create(TopbarWorkspaceNameLinkBadgeMergedSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkBadgeMergedSchema: GenMessage<TopbarWorkspaceNameLinkBadgeMerged> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 47);
+  messageDesc(file_frontend_v1_topbar, 55);
 
 /**
  * The pull request closed unmerged. DELIBERATELY EMPTY: the arm is the state.
@@ -1613,7 +1831,7 @@ export type TopbarWorkspaceNameLinkBadgeClosed = Message<"frontend.v1.TopbarWork
  * Use `create(TopbarWorkspaceNameLinkBadgeClosedSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameLinkBadgeClosedSchema: GenMessage<TopbarWorkspaceNameLinkBadgeClosed> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 48);
+  messageDesc(file_frontend_v1_topbar, 56);
 
 /**
  * The workspace's name as the registry holds it: drawn on the heading's
@@ -1658,7 +1876,7 @@ export type TopbarWorkspaceName = Message<"frontend.v1.TopbarWorkspaceName"> & {
  * Use `create(TopbarWorkspaceNameSchema)` to create a new message.
  */
 export const TopbarWorkspaceNameSchema: GenMessage<TopbarWorkspaceName> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 49);
+  messageDesc(file_frontend_v1_topbar, 57);
 
 /**
  * The session identity line, shown in the hover/expanded state.
@@ -1679,7 +1897,7 @@ export type TopbarSessionLine = Message<"frontend.v1.TopbarSessionLine"> & {
  * Use `create(TopbarSessionLineSchema)` to create a new message.
  */
 export const TopbarSessionLineSchema: GenMessage<TopbarSessionLine> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 50);
+  messageDesc(file_frontend_v1_topbar, 58);
 
 /**
  * The model selector: what is selected, and what may be.
@@ -1722,7 +1940,7 @@ export type TopbarModelSelector = Message<"frontend.v1.TopbarModelSelector"> & {
  * Use `create(TopbarModelSelectorSchema)` to create a new message.
  */
 export const TopbarModelSelectorSchema: GenMessage<TopbarModelSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 51);
+  messageDesc(file_frontend_v1_topbar, 59);
 
 /**
  * THE EFFORT SELECTOR: the reasoning effort the workspace's session runs at,
@@ -1766,7 +1984,7 @@ export type TopbarEffortSelector = Message<"frontend.v1.TopbarEffortSelector"> &
  * Use `create(TopbarEffortSelectorSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSchema: GenMessage<TopbarEffortSelector> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 52);
+  messageDesc(file_frontend_v1_topbar, 60);
 
 /**
  * The effort in effect and the levels the selected model accepts.
@@ -1796,7 +2014,7 @@ export type TopbarEffortSelectorSupported = Message<"frontend.v1.TopbarEffortSel
  * Use `create(TopbarEffortSelectorSupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorSupportedSchema: GenMessage<TopbarEffortSelectorSupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 53);
+  messageDesc(file_frontend_v1_topbar, 61);
 
 /**
  * The selected model takes no effort level.
@@ -1811,7 +2029,7 @@ export type TopbarEffortSelectorUnsupported = Message<"frontend.v1.TopbarEffortS
  * Use `create(TopbarEffortSelectorUnsupportedSchema)` to create a new message.
  */
 export const TopbarEffortSelectorUnsupportedSchema: GenMessage<TopbarEffortSelectorUnsupported> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 54);
+  messageDesc(file_frontend_v1_topbar, 62);
 
 /**
  * One effort level the selector offers.
@@ -1839,7 +2057,7 @@ export type TopbarEffortOption = Message<"frontend.v1.TopbarEffortOption"> & {
  * Use `create(TopbarEffortOptionSchema)` to create a new message.
  */
 export const TopbarEffortOptionSchema: GenMessage<TopbarEffortOption> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 55);
+  messageDesc(file_frontend_v1_topbar, 63);
 
 /**
  * The connectivity indicator, fully resolved: a literal glyph, a literal
@@ -1891,7 +2109,7 @@ export type TopbarConnectivity = Message<"frontend.v1.TopbarConnectivity"> & {
  * Use `create(TopbarConnectivitySchema)` to create a new message.
  */
 export const TopbarConnectivitySchema: GenMessage<TopbarConnectivity> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 56);
+  messageDesc(file_frontend_v1_topbar, 64);
 
 /**
  * agent-repl's session: since the LATER of the last login made through
@@ -1940,7 +2158,7 @@ export type TopbarAgentReplSession = Message<"frontend.v1.TopbarAgentReplSession
  * Use `create(TopbarAgentReplSessionSchema)` to create a new message.
  */
 export const TopbarAgentReplSessionSchema: GenMessage<TopbarAgentReplSession> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 57);
+  messageDesc(file_frontend_v1_topbar, 65);
 
 /**
  * A login made through agent-repl began the session.
@@ -1955,7 +2173,7 @@ export type TopbarSessionBeganLogin = Message<"frontend.v1.TopbarSessionBeganLog
  * Use `create(TopbarSessionBeganLoginSchema)` to create a new message.
  */
 export const TopbarSessionBeganLoginSchema: GenMessage<TopbarSessionBeganLogin> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 58);
+  messageDesc(file_frontend_v1_topbar, 66);
 
 /**
  * This Emacs starting began the session.
@@ -1970,7 +2188,7 @@ export type TopbarSessionBeganEditorStart = Message<"frontend.v1.TopbarSessionBe
  * Use `create(TopbarSessionBeganEditorStartSchema)` to create a new message.
  */
 export const TopbarSessionBeganEditorStartSchema: GenMessage<TopbarSessionBeganEditorStart> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 59);
+  messageDesc(file_frontend_v1_topbar, 67);
 
 /**
  * The token-breakdown menu, fully resolved. Sections and rows arrive in
@@ -1995,7 +2213,7 @@ export type TokenBreakdownView = Message<"frontend.v1.TokenBreakdownView"> & {
  * Use `create(TokenBreakdownViewSchema)` to create a new message.
  */
 export const TokenBreakdownViewSchema: GenMessage<TokenBreakdownView> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 60);
+  messageDesc(file_frontend_v1_topbar, 68);
 
 /**
  * One titled section of the breakdown menu.
@@ -2023,7 +2241,7 @@ export type TokenBreakdownSection = Message<"frontend.v1.TokenBreakdownSection">
  * Use `create(TokenBreakdownSectionSchema)` to create a new message.
  */
 export const TokenBreakdownSectionSchema: GenMessage<TokenBreakdownSection> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 61);
+  messageDesc(file_frontend_v1_topbar, 69);
 
 /**
  * A section's heading.
@@ -2044,7 +2262,7 @@ export type TokenBreakdownHeading = Message<"frontend.v1.TokenBreakdownHeading">
  * Use `create(TokenBreakdownHeadingSchema)` to create a new message.
  */
 export const TokenBreakdownHeadingSchema: GenMessage<TokenBreakdownHeading> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 62);
+  messageDesc(file_frontend_v1_topbar, 70);
 
 /**
  * One row of the breakdown menu — the row IS the element, and these are its
@@ -2098,7 +2316,7 @@ export type TokenBreakdownRow = Message<"frontend.v1.TokenBreakdownRow"> & {
  * Use `create(TokenBreakdownRowSchema)` to create a new message.
  */
 export const TokenBreakdownRowSchema: GenMessage<TokenBreakdownRow> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_topbar, 63);
+  messageDesc(file_frontend_v1_topbar, 71);
 
 /**
  * The service icon a menu row draws before its label, decided by the daemon

@@ -1129,8 +1129,8 @@ func (*UpdateMergeQueueMoveTo_Behind) isUpdateMergeQueueMoveTo_Place() {}
 // waiting place is `index_out_of_range`. A refused move changes nothing.
 type UpdateMergeQueueMove struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whose waiting merge to move: the workspace landing its own branch, or an
-	// async merge's merge workspace. The command line resolves the name
+	// Whose waiting merge to move: the workspace landing its own branch. The
+	// command line resolves the name
 	// `merge-queue status` lists the merge under to this ref.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHERE IT GOES. THE ARM IS THE PLACE. Never unset.
@@ -3175,12 +3175,10 @@ func (x *UpdateMergeQueueMoveBlockedByAdmitted) GetBlocker() *UpdateMergeQueueMo
 // The entry a one-place move cannot pass.
 type UpdateMergeQueueMoveBlocker struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace the entry's merge runs in: a merge workspace for an async
-	// merge.
+	// The workspace the entry's merge runs in, landing its own branch.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The name `merge-queue status` lists the merge under (an async merge's own
-	// name, otherwise its workspace's), so the refusal names it as the user
-	// reads it.
+	// The name `merge-queue status` lists the merge under, its workspace's,
+	// so the refusal names it as the user reads it.
 	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

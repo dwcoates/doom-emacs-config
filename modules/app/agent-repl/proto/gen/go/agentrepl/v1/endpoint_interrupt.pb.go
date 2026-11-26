@@ -157,11 +157,9 @@ type InterruptRequest_AllAgents struct {
 }
 
 type InterruptRequest_MergeTab struct {
-	// An AGENTIC merge tab's work (pick, pre-prompt, conflicts, fixes,
+	// An AGENTIC merge tab's work (pre-prompt, conflicts, fixes,
 	// post-prompt), by the tab row's FeedId exactly as the feed served it. It
-	// stops the turn that tab draws: for an ASYNC merge the merge workspace's
-	// turn, which also reveals the merge workspace in the tab bar and the
-	// sidebar; for a SYNC merge the requesting workspace's own turn. The
+	// stops the turn that tab draws: the merging workspace's own turn. The
 	// merge then goes on as its step decides, exactly as if the agent's turn
 	// had ended on its own.
 	MergeTab *v11.FeedId `protobuf:"bytes,6,opt,name=merge_tab,json=mergeTab,proto3,oneof"`

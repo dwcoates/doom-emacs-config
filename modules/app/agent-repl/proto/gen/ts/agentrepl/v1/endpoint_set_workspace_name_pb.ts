@@ -578,7 +578,7 @@ export const SetWorkspaceNameNotYetAdoptedSchema: GenMessage<SetWorkspaceNameNot
  * The name is already held. Names and branches are one namespace: a
  * workspace's name is refused when any OTHER registered workspace, open or
  * closed, of any repository, has it as its name or as its branch, because a
- * create or an async merge given that name would make it a branch. The
+ * create given that name would make it a branch. The
  * renamed workspace's own name and branch are never held against it, so a
  * workspace can always be renamed back to its branch.
  *
@@ -607,9 +607,8 @@ export type SetWorkspaceNameTaken = Message<"agentrepl.v1.SetWorkspaceNameTaken"
     case: "workspace";
   } | {
     /**
-     * No workspace holds it yet, but one is about to: a pending async merge
-     * has reserved it for the merge workspace it will create, or a create
-     * in flight has claimed it.
+     * No workspace holds it yet, but one is about to: a create in flight has
+     * claimed it.
      *
      * @generated from field: agentrepl.v1.SetWorkspaceNameTakenPending pending = 3;
      */

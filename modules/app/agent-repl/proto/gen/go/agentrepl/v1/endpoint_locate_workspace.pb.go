@@ -4,9 +4,8 @@
 // called from.
 //
 // THE REGISTRY ANSWERS, NOT THE ROSTER. The roster draws what the sidebar
-// shows, and it leaves out workspaces an agent still works in: a hidden
-// merge workspace (an async merge's, whose fixing turn must rerun its failing
-// tests), and any open workspace the sidebar does not draw. A caller resolved
+// shows, and it leaves out workspaces an agent still works in: any open
+// workspace the sidebar does not draw, such as one folded away. A caller resolved
 // off the roster was refused "inside no workspace the daemon serves" from its
 // own worktree (2026-10-25 to 2026-11-14). A workspace is located when it is
 // open, backlogged ones included, or when the roster draws it (a recently merged

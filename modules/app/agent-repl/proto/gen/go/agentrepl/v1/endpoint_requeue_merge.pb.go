@@ -6,10 +6,9 @@
 // could not resume it, a hide at its cold gate -- leaves the merge's request
 // standing OFF ITS QUEUE with the cause it left for: its branch, its version
 // increment and changelog line, its deploy hooks and its cleanup flags all
-// kept, and an async merge's merge workspace kept open under its name.
-// RequeueMerge puts that same request back in line: the same workspace (for
-// an async merge, the same merge workspace), the same branch, the same
-// values, at the placement this request names. Nothing is asked for again and
+// kept. RequeueMerge puts that same request back in line: the same
+// workspace, the same branch, the same values, at the placement this request
+// names. Nothing is asked for again and
 // no workspace is created. Ending a request without landing it is
 // DiscardMerge.
 
@@ -40,24 +39,13 @@ const (
 
 type RequeueMergeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The workspace whose merge off its queue goes back in line: the workspace
-	// landing its own branch, or an async merge's merge workspace. The command
-	// line resolves the name `merge-queue status` lists the merge under
+	// The workspace whose merge off its queue goes back in line, landing its
+	// own branch. The command line resolves the name `merge-queue status` lists the merge under
 	// (agentrepl.v1.MergeQueueStatusOffQueue.name) to this ref.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// Where the merge joins its queue. REQUIRED: no placement is implied, as
 	// for every merge put in line.
 	Placement *MergeQueuePlacement `protobuf:"bytes,2,opt,name=placement,proto3" json:"placement,omitempty"`
-	// The version increment and changelog line of a merge whose request
-	// records none BECAUSE ITS VALUES WERE LOST: a request adopted from a merge
-	// workspace left open before requests were kept
-	// (agentrepl.v1.MergeQueueStatusOffQueueCause.adopted). Such a request
-	// landing on a versioned repository's main branch is refused as
-	// `version_increment_required` without one. A request that recorded its
-	// own values keeps them: supplying one for it is refused as
-	// `version_already_recorded`, so a requeue never silently changes what a
-	// merge was asked to land as. UNSET for every other requeue.
-	Version *MergeWorkspaceVersionIncrement `protobuf:"bytes,3,opt,name=version,proto3,oneof" json:"version,omitempty"`
 	// WHO ASKED. REQUIRED: the user (the sidebar) or a workspace's agent
 	// (`agent-repld merge-queue requeue`).
 	Requester *WorkspaceRequester `protobuf:"bytes,4,opt,name=requester,proto3" json:"requester,omitempty"`
@@ -115,13 +103,6 @@ func (x *RequeueMergeRequest) GetWorkspace() *v1.WorkspaceRef {
 func (x *RequeueMergeRequest) GetPlacement() *MergeQueuePlacement {
 	if x != nil {
 		return x.Placement
-	}
-	return nil
-}
-
-func (x *RequeueMergeRequest) GetVersion() *MergeWorkspaceVersionIncrement {
-	if x != nil {
-		return x.Version
 	}
 	return nil
 }
@@ -283,9 +264,6 @@ type RequeueMergeError struct {
 	//	*RequeueMergeError_StillQueued
 	//	*RequeueMergeError_BranchGone
 	//	*RequeueMergeError_AlreadyLanded
-	//	*RequeueMergeError_VersionIncrementRequired
-	//	*RequeueMergeError_VersionIncrementUnexpected
-	//	*RequeueMergeError_VersionAlreadyRecorded
 	//	*RequeueMergeError_PlacementBehindNotInLine
 	//	*RequeueMergeError_WorkspaceClosed
 	//	*RequeueMergeError_NotInCatalog
@@ -386,33 +364,6 @@ func (x *RequeueMergeError) GetAlreadyLanded() *RequeueMergeAlreadyLanded {
 	return nil
 }
 
-func (x *RequeueMergeError) GetVersionIncrementRequired() *MergeWorkspaceVersionIncrementRequired {
-	if x != nil {
-		if x, ok := x.Cause.(*RequeueMergeError_VersionIncrementRequired); ok {
-			return x.VersionIncrementRequired
-		}
-	}
-	return nil
-}
-
-func (x *RequeueMergeError) GetVersionIncrementUnexpected() *MergeWorkspaceVersionIncrementUnexpected {
-	if x != nil {
-		if x, ok := x.Cause.(*RequeueMergeError_VersionIncrementUnexpected); ok {
-			return x.VersionIncrementUnexpected
-		}
-	}
-	return nil
-}
-
-func (x *RequeueMergeError) GetVersionAlreadyRecorded() *RequeueMergeVersionAlreadyRecorded {
-	if x != nil {
-		if x, ok := x.Cause.(*RequeueMergeError_VersionAlreadyRecorded); ok {
-			return x.VersionAlreadyRecorded
-		}
-	}
-	return nil
-}
-
 func (x *RequeueMergeError) GetPlacementBehindNotInLine() *MergeQueuePlacementBehindNotInLine {
 	if x != nil {
 		if x, ok := x.Cause.(*RequeueMergeError_PlacementBehindNotInLine); ok {
@@ -487,23 +438,6 @@ type RequeueMergeError_AlreadyLanded struct {
 	AlreadyLanded *RequeueMergeAlreadyLanded `protobuf:"bytes,6,opt,name=already_landed,json=alreadyLanded,proto3,oneof"`
 }
 
-type RequeueMergeError_VersionIncrementRequired struct {
-	// The request lost its values (it was adopted) and lands on a versioned
-	// repository's main branch, so it needs `version`.
-	VersionIncrementRequired *MergeWorkspaceVersionIncrementRequired `protobuf:"bytes,7,opt,name=version_increment_required,json=versionIncrementRequired,proto3,oneof"`
-}
-
-type RequeueMergeError_VersionIncrementUnexpected struct {
-	// `version` was given where the request lands on no versioned main
-	// branch.
-	VersionIncrementUnexpected *MergeWorkspaceVersionIncrementUnexpected `protobuf:"bytes,8,opt,name=version_increment_unexpected,json=versionIncrementUnexpected,proto3,oneof"`
-}
-
-type RequeueMergeError_VersionAlreadyRecorded struct {
-	// `version` was given for a request that recorded its own.
-	VersionAlreadyRecorded *RequeueMergeVersionAlreadyRecorded `protobuf:"bytes,9,opt,name=version_already_recorded,json=versionAlreadyRecorded,proto3,oneof"`
-}
-
 type RequeueMergeError_PlacementBehindNotInLine struct {
 	// `placement` asked to go behind a merge not in the queue.
 	PlacementBehindNotInLine *MergeQueuePlacementBehindNotInLine `protobuf:"bytes,10,opt,name=placement_behind_not_in_line,json=placementBehindNotInLine,proto3,oneof"`
@@ -543,12 +477,6 @@ func (*RequeueMergeError_StillQueued) isRequeueMergeError_Cause() {}
 func (*RequeueMergeError_BranchGone) isRequeueMergeError_Cause() {}
 
 func (*RequeueMergeError_AlreadyLanded) isRequeueMergeError_Cause() {}
-
-func (*RequeueMergeError_VersionIncrementRequired) isRequeueMergeError_Cause() {}
-
-func (*RequeueMergeError_VersionIncrementUnexpected) isRequeueMergeError_Cause() {}
-
-func (*RequeueMergeError_VersionAlreadyRecorded) isRequeueMergeError_Cause() {}
 
 func (*RequeueMergeError_PlacementBehindNotInLine) isRequeueMergeError_Cause() {}
 
@@ -796,43 +724,6 @@ func (*RequeueMergeAlreadyLanded) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{9}
 }
 
-// The request recorded its own version increment.
-type RequeueMergeVersionAlreadyRecorded struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RequeueMergeVersionAlreadyRecorded) Reset() {
-	*x = RequeueMergeVersionAlreadyRecorded{}
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RequeueMergeVersionAlreadyRecorded) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RequeueMergeVersionAlreadyRecorded) ProtoMessage() {}
-
-func (x *RequeueMergeVersionAlreadyRecorded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RequeueMergeVersionAlreadyRecorded.ProtoReflect.Descriptor instead.
-func (*RequeueMergeVersionAlreadyRecorded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{10}
-}
-
 // The workspace is closed. No fields: the arm is the fact.
 type RequeueMergeWorkspaceClosed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -842,7 +733,7 @@ type RequeueMergeWorkspaceClosed struct {
 
 func (x *RequeueMergeWorkspaceClosed) Reset() {
 	*x = RequeueMergeWorkspaceClosed{}
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -854,7 +745,7 @@ func (x *RequeueMergeWorkspaceClosed) String() string {
 func (*RequeueMergeWorkspaceClosed) ProtoMessage() {}
 
 func (x *RequeueMergeWorkspaceClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -867,7 +758,7 @@ func (x *RequeueMergeWorkspaceClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequeueMergeWorkspaceClosed.ProtoReflect.Descriptor instead.
 func (*RequeueMergeWorkspaceClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{10}
 }
 
 // The model is not in the login's catalog. No fields: the catalog is the
@@ -880,7 +771,7 @@ type RequeueMergeNotInCatalog struct {
 
 func (x *RequeueMergeNotInCatalog) Reset() {
 	*x = RequeueMergeNotInCatalog{}
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +783,7 @@ func (x *RequeueMergeNotInCatalog) String() string {
 func (*RequeueMergeNotInCatalog) ProtoMessage() {}
 
 func (x *RequeueMergeNotInCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +796,7 @@ func (x *RequeueMergeNotInCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequeueMergeNotInCatalog.ProtoReflect.Descriptor instead.
 func (*RequeueMergeNotInCatalog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{11}
 }
 
 // The workspace is parked at its cold gate. No fields: the gate is the
@@ -918,7 +809,7 @@ type RequeueMergeColdGated struct {
 
 func (x *RequeueMergeColdGated) Reset() {
 	*x = RequeueMergeColdGated{}
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -930,7 +821,7 @@ func (x *RequeueMergeColdGated) String() string {
 func (*RequeueMergeColdGated) ProtoMessage() {}
 
 func (x *RequeueMergeColdGated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -943,30 +834,27 @@ func (x *RequeueMergeColdGated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequeueMergeColdGated.ProtoReflect.Descriptor instead.
 func (*RequeueMergeColdGated) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{12}
 }
 
 var File_agentrepl_v1_endpoint_requeue_merge_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_requeue_merge.proto\x12\fagentrepl.v1\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1cworkspace/v1/workspace.proto\"\xeb\x02\n" +
+	")agentrepl/v1/endpoint_requeue_merge.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_topology.proto\x1a\x19conversation/v1/api.proto\x1a\x1cworkspace/v1/workspace.proto\"\xa1\x02\n" +
 	"\x13RequeueMergeRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12?\n" +
-	"\tplacement\x18\x02 \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12K\n" +
-	"\aversion\x18\x03 \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x00R\aversion\x88\x01\x01\x12>\n" +
+	"\tplacement\x18\x02 \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12>\n" +
 	"\trequester\x18\x04 \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x126\n" +
-	"\x05model\x18\x05 \x01(\v2\x1b.conversation.v1.AgentModelH\x01R\x05model\x88\x01\x01B\n" +
-	"\n" +
-	"\b_versionB\b\n" +
-	"\x06_model\"\x98\x01\n" +
+	"\x05model\x18\x05 \x01(\v2\x1b.conversation.v1.AgentModelH\x00R\x05model\x88\x01\x01B\b\n" +
+	"\x06_modelJ\x04\b\x03\x10\x04R\aversion\"\x98\x01\n" +
 	"\x14RequeueMergeResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.RequeueMergeSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.RequeueMergeErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"C\n" +
 	"\x13RequeueMergeSuccess\x12\x1f\n" +
 	"\bposition\x18\x01 \x01(\rH\x00R\bposition\x88\x01\x01B\v\n" +
-	"\t_position\"\xd7\t\n" +
+	"\t_position\"\xdd\a\n" +
 	"\x11RequeueMergeError\x12Y\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.RequeueMergeUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.RequeueMergeWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12M\n" +
@@ -974,17 +862,15 @@ const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\fstill_queued\x18\x04 \x01(\v2%.agentrepl.v1.RequeueMergeStillQueuedH\x00R\vstillQueued\x12G\n" +
 	"\vbranch_gone\x18\x05 \x01(\v2$.agentrepl.v1.RequeueMergeBranchGoneH\x00R\n" +
 	"branchGone\x12P\n" +
-	"\x0ealready_landed\x18\x06 \x01(\v2'.agentrepl.v1.RequeueMergeAlreadyLandedH\x00R\ralreadyLanded\x12t\n" +
-	"\x1aversion_increment_required\x18\a \x01(\v24.agentrepl.v1.MergeWorkspaceVersionIncrementRequiredH\x00R\x18versionIncrementRequired\x12z\n" +
-	"\x1cversion_increment_unexpected\x18\b \x01(\v26.agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedH\x00R\x1aversionIncrementUnexpected\x12l\n" +
-	"\x18version_already_recorded\x18\t \x01(\v20.agentrepl.v1.RequeueMergeVersionAlreadyRecordedH\x00R\x16versionAlreadyRecorded\x12r\n" +
+	"\x0ealready_landed\x18\x06 \x01(\v2'.agentrepl.v1.RequeueMergeAlreadyLandedH\x00R\ralreadyLanded\x12r\n" +
 	"\x1cplacement_behind_not_in_line\x18\n" +
 	" \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLine\x12V\n" +
 	"\x10workspace_closed\x18\v \x01(\v2).agentrepl.v1.RequeueMergeWorkspaceClosedH\x00R\x0fworkspaceClosed\x12N\n" +
 	"\x0enot_in_catalog\x18\f \x01(\v2&.agentrepl.v1.RequeueMergeNotInCatalogH\x00R\fnotInCatalog\x12D\n" +
 	"\n" +
 	"cold_gated\x18\r \x01(\v2#.agentrepl.v1.RequeueMergeColdGatedH\x00R\tcoldGatedB\a\n" +
-	"\x05cause\"\x1e\n" +
+	"\x05causeJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"R\x1aversion_increment_requiredR\x1cversion_increment_unexpectedR\x18version_already_recorded\"\x1e\n" +
 	"\x1cRequeueMergeUnknownWorkspace\"E\n" +
 	" RequeueMergeWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"\x1a\n" +
@@ -992,8 +878,7 @@ const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\x17RequeueMergeStillQueued\"0\n" +
 	"\x16RequeueMergeBranchGone\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\"\x1b\n" +
-	"\x19RequeueMergeAlreadyLanded\"$\n" +
-	"\"RequeueMergeVersionAlreadyRecorded\"\x1d\n" +
+	"\x19RequeueMergeAlreadyLanded\"\x1d\n" +
 	"\x1bRequeueMergeWorkspaceClosed\"\x1a\n" +
 	"\x18RequeueMergeNotInCatalog\"\x17\n" +
 	"\x15RequeueMergeColdGatedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1010,57 +895,49 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_endpoint_requeue_merge_proto_goTypes = []any{
-	(*RequeueMergeRequest)(nil),                      // 0: agentrepl.v1.RequeueMergeRequest
-	(*RequeueMergeResponse)(nil),                     // 1: agentrepl.v1.RequeueMergeResponse
-	(*RequeueMergeSuccess)(nil),                      // 2: agentrepl.v1.RequeueMergeSuccess
-	(*RequeueMergeError)(nil),                        // 3: agentrepl.v1.RequeueMergeError
-	(*RequeueMergeUnknownWorkspace)(nil),             // 4: agentrepl.v1.RequeueMergeUnknownWorkspace
-	(*RequeueMergeWorkspaceRefMismatch)(nil),         // 5: agentrepl.v1.RequeueMergeWorkspaceRefMismatch
-	(*RequeueMergeUnknownMerge)(nil),                 // 6: agentrepl.v1.RequeueMergeUnknownMerge
-	(*RequeueMergeStillQueued)(nil),                  // 7: agentrepl.v1.RequeueMergeStillQueued
-	(*RequeueMergeBranchGone)(nil),                   // 8: agentrepl.v1.RequeueMergeBranchGone
-	(*RequeueMergeAlreadyLanded)(nil),                // 9: agentrepl.v1.RequeueMergeAlreadyLanded
-	(*RequeueMergeVersionAlreadyRecorded)(nil),       // 10: agentrepl.v1.RequeueMergeVersionAlreadyRecorded
-	(*RequeueMergeWorkspaceClosed)(nil),              // 11: agentrepl.v1.RequeueMergeWorkspaceClosed
-	(*RequeueMergeNotInCatalog)(nil),                 // 12: agentrepl.v1.RequeueMergeNotInCatalog
-	(*RequeueMergeColdGated)(nil),                    // 13: agentrepl.v1.RequeueMergeColdGated
-	(*v1.WorkspaceRef)(nil),                          // 14: workspace.v1.WorkspaceRef
-	(*MergeQueuePlacement)(nil),                      // 15: agentrepl.v1.MergeQueuePlacement
-	(*MergeWorkspaceVersionIncrement)(nil),           // 16: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*WorkspaceRequester)(nil),                       // 17: agentrepl.v1.WorkspaceRequester
-	(*v11.AgentModel)(nil),                           // 18: conversation.v1.AgentModel
-	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 19: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 20: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*MergeQueuePlacementBehindNotInLine)(nil),       // 21: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*RequeueMergeRequest)(nil),                // 0: agentrepl.v1.RequeueMergeRequest
+	(*RequeueMergeResponse)(nil),               // 1: agentrepl.v1.RequeueMergeResponse
+	(*RequeueMergeSuccess)(nil),                // 2: agentrepl.v1.RequeueMergeSuccess
+	(*RequeueMergeError)(nil),                  // 3: agentrepl.v1.RequeueMergeError
+	(*RequeueMergeUnknownWorkspace)(nil),       // 4: agentrepl.v1.RequeueMergeUnknownWorkspace
+	(*RequeueMergeWorkspaceRefMismatch)(nil),   // 5: agentrepl.v1.RequeueMergeWorkspaceRefMismatch
+	(*RequeueMergeUnknownMerge)(nil),           // 6: agentrepl.v1.RequeueMergeUnknownMerge
+	(*RequeueMergeStillQueued)(nil),            // 7: agentrepl.v1.RequeueMergeStillQueued
+	(*RequeueMergeBranchGone)(nil),             // 8: agentrepl.v1.RequeueMergeBranchGone
+	(*RequeueMergeAlreadyLanded)(nil),          // 9: agentrepl.v1.RequeueMergeAlreadyLanded
+	(*RequeueMergeWorkspaceClosed)(nil),        // 10: agentrepl.v1.RequeueMergeWorkspaceClosed
+	(*RequeueMergeNotInCatalog)(nil),           // 11: agentrepl.v1.RequeueMergeNotInCatalog
+	(*RequeueMergeColdGated)(nil),              // 12: agentrepl.v1.RequeueMergeColdGated
+	(*v1.WorkspaceRef)(nil),                    // 13: workspace.v1.WorkspaceRef
+	(*MergeQueuePlacement)(nil),                // 14: agentrepl.v1.MergeQueuePlacement
+	(*WorkspaceRequester)(nil),                 // 15: agentrepl.v1.WorkspaceRequester
+	(*v11.AgentModel)(nil),                     // 16: conversation.v1.AgentModel
+	(*MergeQueuePlacementBehindNotInLine)(nil), // 17: agentrepl.v1.MergeQueuePlacementBehindNotInLine
 }
 var file_agentrepl_v1_endpoint_requeue_merge_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.RequeueMergeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.RequeueMergeRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
-	16, // 2: agentrepl.v1.RequeueMergeRequest.version:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	17, // 3: agentrepl.v1.RequeueMergeRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
-	18, // 4: agentrepl.v1.RequeueMergeRequest.model:type_name -> conversation.v1.AgentModel
-	2,  // 5: agentrepl.v1.RequeueMergeResponse.success:type_name -> agentrepl.v1.RequeueMergeSuccess
-	3,  // 6: agentrepl.v1.RequeueMergeResponse.error:type_name -> agentrepl.v1.RequeueMergeError
-	4,  // 7: agentrepl.v1.RequeueMergeError.unknown_workspace:type_name -> agentrepl.v1.RequeueMergeUnknownWorkspace
-	5,  // 8: agentrepl.v1.RequeueMergeError.workspace_ref_mismatch:type_name -> agentrepl.v1.RequeueMergeWorkspaceRefMismatch
-	6,  // 9: agentrepl.v1.RequeueMergeError.unknown_merge:type_name -> agentrepl.v1.RequeueMergeUnknownMerge
-	7,  // 10: agentrepl.v1.RequeueMergeError.still_queued:type_name -> agentrepl.v1.RequeueMergeStillQueued
-	8,  // 11: agentrepl.v1.RequeueMergeError.branch_gone:type_name -> agentrepl.v1.RequeueMergeBranchGone
-	9,  // 12: agentrepl.v1.RequeueMergeError.already_landed:type_name -> agentrepl.v1.RequeueMergeAlreadyLanded
-	19, // 13: agentrepl.v1.RequeueMergeError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	20, // 14: agentrepl.v1.RequeueMergeError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	10, // 15: agentrepl.v1.RequeueMergeError.version_already_recorded:type_name -> agentrepl.v1.RequeueMergeVersionAlreadyRecorded
-	21, // 16: agentrepl.v1.RequeueMergeError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
-	11, // 17: agentrepl.v1.RequeueMergeError.workspace_closed:type_name -> agentrepl.v1.RequeueMergeWorkspaceClosed
-	12, // 18: agentrepl.v1.RequeueMergeError.not_in_catalog:type_name -> agentrepl.v1.RequeueMergeNotInCatalog
-	13, // 19: agentrepl.v1.RequeueMergeError.cold_gated:type_name -> agentrepl.v1.RequeueMergeColdGated
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	13, // 0: agentrepl.v1.RequeueMergeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 1: agentrepl.v1.RequeueMergeRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	15, // 2: agentrepl.v1.RequeueMergeRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	16, // 3: agentrepl.v1.RequeueMergeRequest.model:type_name -> conversation.v1.AgentModel
+	2,  // 4: agentrepl.v1.RequeueMergeResponse.success:type_name -> agentrepl.v1.RequeueMergeSuccess
+	3,  // 5: agentrepl.v1.RequeueMergeResponse.error:type_name -> agentrepl.v1.RequeueMergeError
+	4,  // 6: agentrepl.v1.RequeueMergeError.unknown_workspace:type_name -> agentrepl.v1.RequeueMergeUnknownWorkspace
+	5,  // 7: agentrepl.v1.RequeueMergeError.workspace_ref_mismatch:type_name -> agentrepl.v1.RequeueMergeWorkspaceRefMismatch
+	6,  // 8: agentrepl.v1.RequeueMergeError.unknown_merge:type_name -> agentrepl.v1.RequeueMergeUnknownMerge
+	7,  // 9: agentrepl.v1.RequeueMergeError.still_queued:type_name -> agentrepl.v1.RequeueMergeStillQueued
+	8,  // 10: agentrepl.v1.RequeueMergeError.branch_gone:type_name -> agentrepl.v1.RequeueMergeBranchGone
+	9,  // 11: agentrepl.v1.RequeueMergeError.already_landed:type_name -> agentrepl.v1.RequeueMergeAlreadyLanded
+	17, // 12: agentrepl.v1.RequeueMergeError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	10, // 13: agentrepl.v1.RequeueMergeError.workspace_closed:type_name -> agentrepl.v1.RequeueMergeWorkspaceClosed
+	11, // 14: agentrepl.v1.RequeueMergeError.not_in_catalog:type_name -> agentrepl.v1.RequeueMergeNotInCatalog
+	12, // 15: agentrepl.v1.RequeueMergeError.cold_gated:type_name -> agentrepl.v1.RequeueMergeColdGated
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_requeue_merge_proto_init() }
@@ -1068,7 +945,6 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_init() {
 	if File_agentrepl_v1_endpoint_requeue_merge_proto != nil {
 		return
 	}
-	file_agentrepl_v1_merge_version_increment_proto_init()
 	file_agentrepl_v1_workspace_topology_proto_init()
 	file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[1].OneofWrappers = []any{
@@ -1083,9 +959,6 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_init() {
 		(*RequeueMergeError_StillQueued)(nil),
 		(*RequeueMergeError_BranchGone)(nil),
 		(*RequeueMergeError_AlreadyLanded)(nil),
-		(*RequeueMergeError_VersionIncrementRequired)(nil),
-		(*RequeueMergeError_VersionIncrementUnexpected)(nil),
-		(*RequeueMergeError_VersionAlreadyRecorded)(nil),
 		(*RequeueMergeError_PlacementBehindNotInLine)(nil),
 		(*RequeueMergeError_WorkspaceClosed)(nil),
 		(*RequeueMergeError_NotInCatalog)(nil),
@@ -1097,7 +970,7 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc), len(file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -135,12 +135,11 @@ const (
 	// arrival (see the enum's header): it joins a running turn without
 	// interrupting it.
 	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
-	// The daemon's report to a workspace's session that a merge it asked for
-	// has ended: an ASYNC merge (agentrepl.v1.CreateWorkspaceAsyncMerge) that landed
-	// or failed, or a ONE-SHOT (agentrepl.v1.MergeWorkspaceOneShot) that
-	// failed — a one-shot that lands closes the workspace and is not reported.
-	// It says that the branch landed, or what failed and where the user
-	// finishes it. Delivered on arrival (see the enum's header): it joins a
+	// The daemon's report to a workspace's session that its own ONE-SHOT merge
+	// (agentrepl.v1.MergeWorkspaceOneShot) failed: what failed and where the
+	// user finishes it. A one-shot that lands closes the workspace and is not
+	// reported to it; its parent is told instead, as a child's one update
+	// (agentrepl.v1.WorkspaceRelationshipChild). Delivered on arrival (see the enum's header): it joins a
 	// running turn rather than waiting for its end. The feed draws it as the
 	// FeedRow.merge_handback marker, never as a prompt bubble: the words are
 	// the daemon's, and the merge itself is read in its bubble.
@@ -152,20 +151,11 @@ const (
 	// on arrival (see the enum's header): it joins a running turn and wakes
 	// an idle agent. Drawn as an ordinary prompt bubble.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED PromptOrigin = 32
-	// The daemon's resolving brief: the first turn of an ASYNC merge workspace
-	// whose request carries an instruction
-	// (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction). It carries the requesting
-	// agent's instruction, wrapped in the brief that tells the merge agent its
-	// worktree is on the merge's branch and has it prepare that branch as the
-	// instruction says. The turn is the merge's own: its rows draw under the
-	// bubble's resolving tab (frontend.v1.FeedMergeTabResolving), and the merge
-	// joins the queue once it ends.
-	PromptOrigin_PROMPT_ORIGIN_MERGE_PICK PromptOrigin = 33
-	// The daemon's `/compact` of a requester whose ASYNC merge landed and asked
-	// to compact after it
-	// (agentrepl.v1.CreateWorkspaceAsyncMerge.compact_after).
-	// Submitted through the prompt queue right after the landed handback, so it
-	// runs behind the handback's turn. It is a context cut like any `/compact`:
+	// The daemon's `/compact` of a requester whose ONE-SHOT child landed and
+	// was created to compact it afterwards
+	// (agentrepl.v1.CreateWorkspaceOneShot.compact_requester_after).
+	// Submitted through the prompt queue right after the requester is told of
+	// the landing, so it runs behind that notice's turn. It is a context cut like any `/compact`:
 	// no prompt bubble, and the compaction's status, footer and separator drawn
 	// as for one the user typed.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER PromptOrigin = 34
@@ -178,9 +168,7 @@ const (
 	// failure's cause, and asks the agent to analyze the failure without
 	// changing anything until the user answers. Delivered on arrival (see the
 	// enum's header): it joins a running turn and wakes an idle agent. Drawn
-	// as an ordinary prompt bubble. A merge's own
-	// workspace (the hidden one an async merge runs in) is not reported here:
-	// the merge queue hands its failure back to the requester.
+	// as an ordinary prompt bubble.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED PromptOrigin = 35
 	// The daemon's notice to a workspace's session that a merge queue it
 	// subscribed to changed (agentrepl.v1.UpdateMergeQueueSubscribe): it names
@@ -354,7 +342,6 @@ var (
 		30: "PROMPT_ORIGIN_LINK_UNRESOLVED",
 		31: "PROMPT_ORIGIN_MERGE_HANDBACK",
 		32: "PROMPT_ORIGIN_WORKSPACE_RETARGETED",
-		33: "PROMPT_ORIGIN_MERGE_PICK",
 		34: "PROMPT_ORIGIN_MERGE_COMPACT_AFTER",
 		35: "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED",
 		36: "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE",
@@ -411,7 +398,6 @@ var (
 		"PROMPT_ORIGIN_LINK_UNRESOLVED":             30,
 		"PROMPT_ORIGIN_MERGE_HANDBACK":              31,
 		"PROMPT_ORIGIN_WORKSPACE_RETARGETED":        32,
-		"PROMPT_ORIGIN_MERGE_PICK":                  33,
 		"PROMPT_ORIGIN_MERGE_COMPACT_AFTER":         34,
 		"PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED":     35,
 		"PROMPT_ORIGIN_MERGE_QUEUE_NOTICE":          36,
@@ -468,7 +454,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xfb\x12\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xf7\x12\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
@@ -502,8 +488,7 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1d\x1a\x04\x98\xa6\x1d\t\x12'\n" +
 	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1e\x1a\x04\x98\xa6\x1d\x06\x12&\n" +
 	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1f\x1a\x04\x98\xa6\x1d\x05\x12,\n" +
-	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x1a\x04\x98\xa6\x1d\x06\x12\"\n" +
-	"\x18PROMPT_ORIGIN_MERGE_PICK\x10!\x1a\x04\x98\xa6\x1d\x05\x12+\n" +
+	"\"PROMPT_ORIGIN_WORKSPACE_RETARGETED\x10 \x1a\x04\x98\xa6\x1d\x06\x12+\n" +
 	"!PROMPT_ORIGIN_MERGE_COMPACT_AFTER\x10\"\x1a\x04\x98\xa6\x1d\b\x12/\n" +
 	"%PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED\x10#\x1a\x04\x98\xa6\x1d\x06\x12*\n" +
 	" PROMPT_ORIGIN_MERGE_QUEUE_NOTICE\x10$\x1a\x04\x98\xa6\x1d\x05\x12$\n" +
@@ -525,7 +510,7 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x1a\x04\x98\xa6\x1d\x05\x122\n" +
 	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06\x12+\n" +
 	"!PROMPT_ORIGIN_SLACK_THREAD_NOTICE\x106\x1a\x04\x98\xa6\x1d\x06\x12,\n" +
-	"\"PROMPT_ORIGIN_PRODUCTION_MEDIATION\x107\x1a\x04\x98\xa6\x1d\x06B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\"PROMPT_ORIGIN_PRODUCTION_MEDIATION\x107\x1a\x04\x98\xa6\x1d\x06\"\x04\b!\x10!*\x18PROMPT_ORIGIN_MERGE_PICKB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once
