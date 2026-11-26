@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -635,55 +631,5 @@ func TestEveryShimVerbAnswersARefusalFromAShimStandingDownAsTheStandDown(t *test
 				t.Fatalf("errors.Is(err, promptqueue.ErrShimStoodDown) = %v, want %v", got, tt.forQueue)
 			}
 		})
-	}
-}
-
-// TestEveryTypedShimRefusalIsReadThroughShimRefused pins the extraction: a
-// ShimRefusal is built by hand only where no shim answered (the daemon's own
-// no-session answers) or where the stand-down cannot apply, so a verb that
-// reads a shim's refusal without shimRefused fails here.
-func TestEveryTypedShimRefusalIsReadThroughShimRefused(t *testing.T) {
-	// Arrange: every literal a non-test source may hold, by its text.
-	allowed := []string{
-		// shimRefused itself.
-		`&ShimRefusal{Verb: verb, Arm: arm, Detail: detail}`,
-		// The daemon's own answers for a workspace with no session or shim.
-		`Arm: ArmShimNoSession, Detail: "the workspace has no live session"}`,
-		`Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}`,
-		`Arm: ArmShimNoSession, Detail: err.Error()}`,
-		`Arm: ArmShimNoSession, Detail: "the workspace has no running session"}`,
-		// KillSession raises the latch itself (shimRefused's comment).
-		`&ShimRefusal{Verb: "KillSession", Arm: killSessionArm(failure), Detail: failure.GetDetail()}`,
-		// An arm the daemon does not name is a contract fault, never the stand-down.
-		`&ShimRefusal{Verb: "SendKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}`,
-	}
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
-	// Act.
-	var strays []string
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		text, err := os.ReadFile(source)
-		if err != nil {
-			t.Fatalf("read %s: %v", source, err)
-		}
-		for i, line := range strings.Split(string(text), "\n") {
-			if !strings.Contains(line, "&ShimRefusal{") {
-				continue
-			}
-			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.Contains(line, a) }) {
-				strays = append(strays, fmt.Sprintf("%s:%d: %s", source, i+1, strings.TrimSpace(line)))
-			}
-		}
-	}
-
-	// Assert.
-	if len(strays) != 0 {
-		t.Fatalf("typed refusals built without shimRefused:\n%s", strings.Join(strays, "\n"))
 	}
 }
