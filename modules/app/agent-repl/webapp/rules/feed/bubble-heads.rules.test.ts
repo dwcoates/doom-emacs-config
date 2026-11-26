@@ -12,22 +12,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { codeUnder, srcDir } from "../files-under.js";
-import { codeOf } from "../../test/source-text.js";
-
-/** The text of the function NAME declared in CODE at any depth, through its closing brace at the declaration's own indent. */
-function nestedFunction(code: string, name: string): string {
-  const start = code.indexOf(`function ${name}(`);
-  if (start < 0) throw new Error(`the code declares no function ${name}`);
-  const lineStart = code.lastIndexOf("\n", start) + 1;
-  const indent = code.slice(lineStart, start).match(/^\s*/)?.[0] ?? "";
-  const end = code.indexOf(`\n${indent}}\n`, start);
-  if (end < 0) throw new Error(`the function ${name} has no closing brace at its own indent`);
-  return code.slice(start, end);
-}
+import { codeOf, functionBody } from "../../test/source-text.js";
 
 /** The bubble chrome's head: feed.ts's bubbleHead, the one caller of a head renderer. */
 function chromeHead(): string {
-  return nestedFunction(codeOf(readFileSync(path.join(srcDir, "feed", "feed.ts"), "utf8")), "bubbleHead");
+  return functionBody(codeOf(readFileSync(path.join(srcDir, "feed", "feed.ts"), "utf8")), "bubbleHead");
 }
 
 /** The row renderers that draw a bubble's head: RowRenderers' `*Head` members. */
@@ -48,7 +37,7 @@ describe("every bubble head is drawn inside the bubble chrome", () => {
     const heads = headRenderers();
     const call = new RegExp(`\\.(${heads.join("|")})\\(`);
     const offenders = [...codeUnder(srcDir)].flatMap(([file, code]) => {
-      const scanned = file === path.join("feed", "feed.ts") ? code.replace(nestedFunction(code, "bubbleHead"), "") : code;
+      const scanned = file === path.join("feed", "feed.ts") ? code.replace(functionBody(code, "bubbleHead"), "") : code;
       return call.test(scanned) ? [file] : [];
     });
     expect(offenders).toEqual([]);
