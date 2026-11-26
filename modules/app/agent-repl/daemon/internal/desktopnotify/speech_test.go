@@ -600,9 +600,8 @@ func TestEveryKindOfBannerIsReadAloud(t *testing.T) {
 			endings := fakeEndings{"t1": {Answer: "done"}}
 			NewTurnBanners(TurnDeps{Endings: endings, Poster: n, Summaries: &fakeSummaries{}, Log: dlog.NewTestLogger()}).OnTurnEnded("ws1", "t1", wsm.CloseCompleted)
 		}},
-		{name: "a merge put in line", raise: func(n *Notifier) { NewMergeBanners(n).Queued("ws1", "the branch") }},
-		{name: "a merge resolved", raise: func(n *Notifier) { NewMergeBanners(n).Resolved("ws1", MergeLanded, "landed") }},
-		{name: "a deploy mediated", raise: func(n *Notifier) { NewMergeBanners(n).Mediated("ws1", "escalated") }},
+		{name: "a merge failed", raise: func(n *Notifier) { NewMergeBanners(n, dlog.NewTestLogger()).Resolved("ws1", MergeFailed, "failed") }},
+		{name: "a deploy mediated", raise: func(n *Notifier) { NewMergeBanners(n, dlog.NewTestLogger()).Mediated("ws1", "escalated") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1741,7 +1741,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:            feedResolver,
 		Footer:          footerResolver,
 		Sidebar:         sidebarResolver,
-		Banners:         desktopnotify.NewMergeBanners(notifier),
+		Banners:         desktopnotify.NewMergeBanners(notifier, log),
 		PromptsDir:      paths.PromptsDir,
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
 		StateDir:        p.Layout.Dir(),

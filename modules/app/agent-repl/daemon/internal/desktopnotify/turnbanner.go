@@ -21,10 +21,12 @@ type Endings interface {
 	TakeTurnEnding(ws ids.WorkspaceID, turn ids.TurnID) (feed.TurnEnding, bool)
 }
 
-// Poster raises one banner, which rings its chime the instant it is made
-// (Notifier.Post).
+// Poster raises one banner, which rings its chime the instant it is made:
+// Post only while Emacs is unfocused (Notifier.Post), PostRegardlessOfFocus
+// whether or not it is (Notifier.PostRegardlessOfFocus).
 type Poster interface {
 	Post(ws ids.WorkspaceID, kind string, compose Compose) Decision
+	PostRegardlessOfFocus(ws ids.WorkspaceID, kind string, compose Compose) Decision
 }
 
 // Summaries writes a completed turn's body (Summarizer.Summarize).

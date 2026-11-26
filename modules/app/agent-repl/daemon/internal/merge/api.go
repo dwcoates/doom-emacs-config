@@ -561,12 +561,11 @@ type Names interface {
 }
 
 // Banners raises the merge queue's desktop banners
-// (desktopnotify.MergeBanners). A MERGE RAISES EXACTLY TWO: Queued as it is
-// put in line, and Resolved as it leaves the queue for good. Nothing between
-// -- admission, a repair turn, the test gate, a detached merge's handback --
-// raises one.
+// (desktopnotify.MergeBanners). A MERGE REPORTS EXACTLY ONE: Resolved as it
+// leaves the queue for good, which raises a banner only when it did not land.
+// Nothing before it -- being put in line, admission, a repair turn, the test
+// gate, a detached merge's handback -- raises one.
 type Banners interface {
-	Queued(ws ids.WorkspaceID, label string)
 	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
 	// Mediated posts the notification of an escalated deploy, whose click
 	// opens escalation workspace WS.

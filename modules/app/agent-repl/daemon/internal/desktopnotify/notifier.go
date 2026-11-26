@@ -160,8 +160,23 @@ func (d Decision) String() string {
 // all, and again once the banner is composed, so focus gained meanwhile still
 // suppresses it.
 func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) Decision {
-	log := n.deps.Log.With(bannerContext(ws, dlog.Context{"kind": kind}))
-	if n.deps.Focus.Focused() {
+	return n.post(ws, kind, compose, true)
+}
+
+// PostRegardlessOfFocus raises one banner for ws whether or not Emacs is
+// focused, ringing its chime exactly as Post does: for the banners the user
+// wants to see even while working in Emacs (a deploy put before them, a
+// comment someone else left). A banner made while Emacs is focused is not
+// held, so it never steers a later return to Emacs.
+func (n *Notifier) PostRegardlessOfFocus(ws ids.WorkspaceID, kind string, compose Compose) Decision {
+	return n.post(ws, kind, compose, false)
+}
+
+// post is Post and PostRegardlessOfFocus: heedFocus is whether a focused
+// Emacs suppresses the banner.
+func (n *Notifier) post(ws ids.WorkspaceID, kind string, compose Compose, heedFocus bool) Decision {
+	log := n.deps.Log.With(bannerContext(ws, dlog.Context{"kind": kind, "heed_focus": heedFocus}))
+	if heedFocus && n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs is focused; no desktop banner", nil)
 		return EditorFocused
 	}
@@ -171,7 +186,7 @@ func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) Decisi
 		})
 		return NoProgram
 	}
-	if !n.spawn(func() { n.show(ws, log, compose) }) {
+	if !n.spawn(func() { n.show(ws, log, compose, heedFocus) }) {
 		log.Info(opPost, "the daemon is standing down; no desktop banner", nil)
 		return StandingDown
 	}
@@ -272,8 +287,9 @@ func titledByName(body string) Compose {
 }
 
 // show composes and posts one banner, rings its chime the instant it is made,
-// holds it for a focus gain's claim, and relays its click.
-func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
+// holds it for a focus gain's claim when Emacs is unfocused as it is made,
+// and relays its click. heedFocus is whether a focused Emacs suppresses it.
+func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose, heedFocus bool) {
 	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {
 	case standdown.CutShort(n.ctx, err):
@@ -284,14 +300,14 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		return
 	}
 	banner := compose(n.ctx, workspace.Name)
-	if n.deps.Focus.Focused() {
+	if heedFocus && n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs was focused while the banner was composed; no desktop banner", nil)
 		return
 	}
 	log.Info(opPost, "posting a desktop banner", dlog.Context{
 		"program": n.deps.Backend.Program(), "title": banner.Title,
 	})
-	made := false
+	made, held := false, false
 	var seq uint64
 	target := Target{ID: ws, Dir: workspace.Dir}
 	outcome, err := n.deps.Backend.Post(n.ctx, target, banner, func() {
@@ -302,9 +318,15 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		log.Debug(opPost, "the desktop banner is made; ringing its chime", nil)
 		n.ring(log)
 		n.speak(banner, log)
-		seq = n.hold(target, log)
+		// A banner made while Emacs is focused (PostRegardlessOfFocus) was
+		// seen from Emacs, so it steers no later return to it.
+		if n.deps.Focus.Focused() {
+			log.Debug(opClaim, "Emacs is focused; the banner is not held for a focus claim", nil)
+			return
+		}
+		seq, held = n.hold(target, log), true
 	})
-	if made {
+	if held {
 		n.settle(ws, seq, err == nil && outcome == Handed, log)
 	}
 	var silenced *SilencedError

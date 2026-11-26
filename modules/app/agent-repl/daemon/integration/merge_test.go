@@ -195,7 +195,7 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 
 // TestALandedMergeIsSeenByEveryObserver lands one clean one-shot merge and
 // reads it from every place a landing shows: the feed's success row, the
-// footer, the roster, the desktop banners and the removed worktree.
+// footer, the roster, the absence of a desktop banner and the removed worktree.
 //
 // ONE ACT, SEVERAL OBSERVERS (AGENTS.md "A case may share an expensive
 // fixture, never a slice another case reads"): each observation is its own
@@ -233,8 +233,8 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 	d.AwaitLandingDeployed()
-	d.AwaitLogRecord(d.RunLogPath(), "the landed merge's banner", func(r harness.LogRecord) bool {
-		return bannerSettled(r) && r.Context["kind"] == "merge_resolved"
+	d.AwaitLogRecord(d.RunLogPath(), "the landed merge's resolution, which raises no banner", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.merge_banner" && r.Message == "a landed merge raises no desktop banner"
 	})
 
 	// Assert
@@ -260,7 +260,7 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 			})
 		})
 	})
-	t.Run("only the queued and landed banners rose", func(t *testing.T) {
+	t.Run("no merge banner rose", func(t *testing.T) {
 		var merges [][]string
 		for _, words := range f.d.PostedBanners() {
 			banner := [][]string{words}
@@ -269,8 +269,8 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 				merges = append(merges, words)
 			}
 		}
-		if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀") || !bannerCarrying(merges[1:], "🎉", "Merged into main") {
-			t.Errorf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
+		if len(merges) != 0 {
+			t.Errorf("merge banners %q, want none: a landed merge raises no banner", merges)
 		}
 	})
 

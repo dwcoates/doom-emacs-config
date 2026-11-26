@@ -2,48 +2,36 @@ package desktopnotify
 
 import (
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
-func newMergeBanners() (*MergeBanners, *fakePoster) {
+func newMergeBanners() (*MergeBanners, *fakePoster, *dlog.TestLogger) {
 	poster := &fakePoster{}
-	return NewMergeBanners(poster), poster
+	log := dlog.NewTestLogger()
+	return NewMergeBanners(poster, log), poster, log
 }
 
-func TestMergeBannersQueuedPostsTheQueuedBanner(t *testing.T) {
-	// Arrange
-	m, poster := newMergeBanners()
-
-	// Act
-	m.Queued("ws1", "feature → master")
-
-	// Assert
-	want := Banner{Title: "🔀 my-ws", Body: "feature → master"}
-	if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindMergeQueued || poster.workspaces[0] != "ws1" {
-		t.Fatalf("posted %+v (kinds %v, workspaces %v), want %+v as %s for ws1", poster.banners, poster.kinds, poster.workspaces, want, KindMergeQueued)
-	}
-}
-
-func TestMergeBannersResolvedPostsEachEnd(t *testing.T) {
+func TestMergeBannersResolvedPostsEachEndThatDidNotLand(t *testing.T) {
 	cases := []struct {
 		name      string
 		end       MergeEnd
 		wantTitle string
 	}{
-		{name: "landed", end: MergeLanded, wantTitle: "🎉 my-ws"},
 		{name: "failed", end: MergeFailed, wantTitle: "❌ my-ws"},
 		{name: "abandoned", end: MergeAbandoned, wantTitle: "⛔ my-ws"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			m, poster := newMergeBanners()
+			m, poster, _ := newMergeBanners()
 
 			// Act
 			m.Resolved("ws1", tc.end, "the summary")
 
 			// Assert
 			want := Banner{Title: tc.wantTitle, Body: "the summary"}
-			if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindMergeResolved || poster.workspaces[0] != "ws1" {
+			if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindMergeResolved || poster.workspaces[0] != "ws1" || poster.regardless[0] {
 				t.Fatalf("posted %+v (kinds %v), want %+v as %s", poster.banners, poster.kinds, want, KindMergeResolved)
 			}
 		})
@@ -52,7 +40,7 @@ func TestMergeBannersResolvedPostsEachEnd(t *testing.T) {
 
 func TestMergeBannersResolvedPanicsOnAnUnknownEnd(t *testing.T) {
 	// Arrange
-	m, poster := newMergeBanners()
+	m, poster, _ := newMergeBanners()
 
 	// Assert
 	defer func() {
@@ -68,16 +56,44 @@ func TestMergeBannersResolvedPanicsOnAnUnknownEnd(t *testing.T) {
 	m.Resolved("ws1", MergeEnd(99), "the summary")
 }
 
-func TestNewMergeBannersRefusesAMissingPoster(t *testing.T) {
-	// Assert
-	defer func() {
-		if recover() == nil {
-			t.Fatal("NewMergeBanners accepted a missing poster")
-		}
-	}()
+func TestMergeBannersResolvedRaisesNothingForALandedMerge(t *testing.T) {
+	// Arrange
+	m, poster, log := newMergeBanners()
 
 	// Act
-	NewMergeBanners(nil)
+	m.Resolved("ws1", MergeLanded, "the summary")
+
+	// Assert
+	if len(poster.banners) != 0 {
+		t.Fatalf("posted %+v for a landed merge, want nothing", poster.banners)
+	}
+	if r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Message: "a landed merge raises no desktop banner"}); !ok || r.Context["workspace"] != "ws1" {
+		t.Fatalf("record = %+v (found=%v), want the landed merge's silence recorded for ws1", r, ok)
+	}
+}
+
+func TestNewMergeBannersRefusesAMissingCollaborator(t *testing.T) {
+	cases := []struct {
+		name   string
+		poster Poster
+		log    dlog.Logger
+	}{
+		{name: "no poster", log: dlog.NewTestLogger()},
+		{name: "no logger", poster: &fakePoster{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Assert
+			defer func() {
+				if recover() == nil {
+					t.Fatal("NewMergeBanners accepted a missing collaborator")
+				}
+			}()
+
+			// Act
+			NewMergeBanners(tc.poster, tc.log)
+		})
+	}
 }
 
 func TestMergeEndString(t *testing.T) {
@@ -105,15 +121,15 @@ func TestMergeEndString(t *testing.T) {
 
 func TestMergeBannersMediatedPostsTheMediatorsBanner(t *testing.T) {
 	// Arrange
-	m, poster := newMergeBanners()
+	m, poster, _ := newMergeBanners()
 
 	// Act
 	m.Mediated("ws1", "the deploy's page boots regressed")
 
 	// Assert
 	want := Banner{Title: "🩺 my-ws", Body: "the deploy's page boots regressed"}
-	if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindDeployMediated || poster.workspaces[0] != "ws1" {
-		t.Fatalf("posted %+v (kinds %v, workspaces %v), want %+v as %s for ws1", poster.banners, poster.kinds, poster.workspaces, want, KindDeployMediated)
+	if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindDeployMediated || poster.workspaces[0] != "ws1" || !poster.regardless[0] {
+		t.Fatalf("posted %+v (kinds %v, workspaces %v, regardless %v), want %+v as %s for ws1, regardless of focus", poster.banners, poster.kinds, poster.workspaces, poster.regardless, want, KindDeployMediated)
 	}
 }
 

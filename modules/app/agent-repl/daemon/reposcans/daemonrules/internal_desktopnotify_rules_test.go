@@ -71,7 +71,7 @@ func TestSpeechHasOneChokePoint(t *testing.T) {
 func TestEveryEventTitleIsComposedByEventTitle(t *testing.T) {
 	sourcescan.InPackage(t, internalDesktopnotifyDir)
 	titled := regexp.MustCompile(`Title: (.+?), Body`)
-	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|MergeQueuedTitle\(name\)|DeployMediatedTitle\(name\)|CommentTitle\(name\))$`)
+	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|DeployMediatedTitle\(name\)|CommentTitle\(name\))$`)
 	// Arrange / Act
 	seen := 0
 	for _, file := range sourcescan.Production(t, internalDesktopnotifyDir) {

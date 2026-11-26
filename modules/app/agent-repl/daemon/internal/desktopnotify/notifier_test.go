@@ -314,7 +314,7 @@ func TestNotifierPanicsOnAnUnknownOutcome(t *testing.T) {
 	}()
 
 	// Act
-	f.notifier.show("ws1", f.log, titledBy)
+	f.notifier.show("ws1", f.log, titledBy, true)
 }
 
 func TestNotifierRelaysNoClickForADismissal(t *testing.T) {
@@ -557,6 +557,43 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 	}
 }
 
+func TestNotifierPostsRegardlessOfFocusWhileEmacsIsFocused(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
+
+	// Act
+	got := f.notifier.PostRegardlessOfFocus("ws1", KindDeployMediated, titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got != Dispatched || len(f.backend.banners()) != 1 {
+		t.Fatalf("PostRegardlessOfFocus = %v with %d banners posted, want Dispatched and one banner", got, len(f.backend.banners()))
+	}
+	if played := f.chime.played(); played != 1 {
+		t.Fatalf("played %d chimes, want the made banner's one", played)
+	}
+}
+
+func TestNotifierHoldsNoBannerMadeWhileEmacsIsFocused(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
+	f.backend.outcome = Handed
+
+	// Act
+	f.notifier.PostRegardlessOfFocus("ws1", KindPullRequestComment, titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if claim := f.notifier.Claim(); claim.Held {
+		t.Fatalf("Claim = %+v, want none: the banner was seen from Emacs", claim)
+	}
+	if _, ok := hasRecord(f.log, "debug", "Emacs is focused; the banner is not held for a focus claim"); !ok {
+		t.Fatal("no record that the banner made while Emacs was focused was not held")
+	}
+}
+
 func TestNotifierWarnsNamingTheFocusThatSilencesABanner(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
@@ -588,7 +625,7 @@ func TestNotifierPanicsOnABannerMadeTwice(t *testing.T) {
 	}()
 
 	// Act
-	f.notifier.show("ws1", f.log, titledBy)
+	f.notifier.show("ws1", f.log, titledBy, true)
 }
 
 func TestNotifierRecordsAFailedChime(t *testing.T) {
