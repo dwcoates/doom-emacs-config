@@ -301,7 +301,7 @@ quiet state, not the switch.
     and a radio restart when that does not take; that is the owner's own
     request, not the failover.
 
-### 12. Only known networks in sight, at once; the hotspot left after a minute (2026-11-14, no wire change)
+### 12. Only known networks in sight, at once; the hotspot left after a minute (2026-11-14, no wire change; its known-network step SUPERSEDED by section 13)
 
 - WHAT: with the lid closed and the mode on, a Wi-Fi interface joined to
   nothing is answered AT ONCE, with no grace: a saved network that a scan sees
@@ -346,3 +346,20 @@ quiet state, not the switch.
     scans once when the quiet state begins joined, to learn whether that is
     the hotspot, and not at all otherwise.
   - Supersedes section 11's saved-network walk and the 20s grace.
+
+### 13. The failover joins only the hotspot; saved networks are macOS's (2026-11-26, no wire change)
+
+- WHAT: with the lid closed and the mode on, a Wi-Fi interface joined to
+  nothing is answered by joining the configured hotspot, and nothing else.
+  The failover's known-network step (`joinVisibleKnown`) and the
+  `AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN` setting that turned it off are
+  removed (owner ruling, 2026-11-26).
+- WHY: macOS's own auto-join rejoined saved networks with the lid closed
+  (2026-11-26 13:06:52 and 13:08:12, `airportd` `Joining network` on
+  `trigger=assoc_failure`), while the daemon's rejoin of them raced it. The
+  owner had run with the step turned off since 2026-11-20.
+- Consequences:
+  - The attempt's survey (section 12's scan and the hotspot's sighting,
+    Bluetooth, the lid, the display and the power) is unchanged.
+  - Every hotspot join keeps its one record (`hotspotJoinRecord`).
+

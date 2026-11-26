@@ -142,16 +142,17 @@ func TestAScanLeavesNoAnswerFileBehind(t *testing.T) {
 	}
 }
 
-func TestVisibleKnown(t *testing.T) {
+func TestSightingMatchesEitherApostrophe(t *testing.T) {
 	// Arrange
-	scan := inSight("", "Cafe", "Stranger", "Home’s")
+	scan := inSight("", "Cafe", "Home’s")
 
 	// Act
-	got := visibleKnown([]string{"Home's", "Office", "Cafe"}, scan)
+	seen, ok := scan.sighting("Home's")
+	_, strangerSeen := scan.sighting("Stranger")
 
-	// Assert: preference order, apostrophes matched as macOS names them.
-	if strings.Join(got, ",") != "Home's,Cafe" {
-		t.Fatalf("visibleKnown = %v, want the known networks in sight in preference order", got)
+	// Assert: apostrophes matched as macOS names them, and the sighting as seen.
+	if !ok || seen.SSID != "Home’s" || seen.RSSI != -41 || strangerSeen {
+		t.Fatalf("sighting = (%+v, %v), stranger %v, want the curly sighting and no stranger", seen, ok, strangerSeen)
 	}
 }
 

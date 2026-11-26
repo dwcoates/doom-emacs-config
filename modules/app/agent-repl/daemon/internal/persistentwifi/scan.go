@@ -66,12 +66,6 @@ type visibleNetwork struct {
 // authorized reports whether the scan could name networks.
 func (s wifiScan) authorized() bool { return s.Authorization == "authorized" }
 
-// sees reports whether the scan saw a network named NAME.
-func (s wifiScan) sees(name string) bool {
-	_, ok := s.sighting(name)
-	return ok
-}
-
 // sighting answers the scan's network named NAME (sameNetwork), and whether
 // the scan saw one.
 func (s wifiScan) sighting(name string) (visibleNetwork, bool) {
