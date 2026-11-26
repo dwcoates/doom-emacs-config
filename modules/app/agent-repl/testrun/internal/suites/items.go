@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // ItemLinePrefix opens every per-item timing line a chunk prints:
@@ -12,8 +14,9 @@ import (
 //
 // The ERT driver (testrun/ert/driver.el) prints one per test file, and
 // bin/lib-test-split.sh one per harness group. ParseItemLines is the one
-// reader of that line, so the two producers are held to one contract.
-const ItemLinePrefix = "TESTRUN-ITEM"
+// reader of its timing, so the two producers are held to one contract
+// (testtimes.ParseERT reads only which file an ERT result belongs to).
+const ItemLinePrefix = testtimes.ItemMarker
 
 // ParseItemLines reads a chunk's item timing lines and insists on exactly one
 // for every item the chunk was given. A line that opens with the prefix but

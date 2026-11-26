@@ -66,6 +66,12 @@ type Spec struct {
 	// then passes under one digest is known to have failed for no change of
 	// what it ran.
 	InputsDigest string
+	// MemberDigests are a batch's files' own reuse keys (reuse.Confine), each
+	// file's digest of the inputs it reads, whichever batch runs it. A test of
+	// a batch is under its file's digest (testtimes.Test.File), every other
+	// confined unit's test under InputsDigest. Nil for a unit that is no
+	// batch, or runs unconfined.
+	MemberDigests map[string]string
 	// Phases is the file the unit's harness appends the CPU of its phases to
 	// (testenv.PhasesOut), which the runner reads into Result.Phases when the
 	// unit ends. "" for a unit whose harness records none.

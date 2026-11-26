@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -153,8 +154,8 @@ type RaceFindingRef struct {
 // String names the finding as briefs and records do: "suite/test".
 func (r RaceFindingRef) String() string { return r.Suite + "/" + r.Test }
 
-// GateTestFailure is one test that failed in a merge gate, under the inputs
-// digest its unit ran on.
+// GateTestFailure is one test that failed in a merge gate, under the digest
+// of the inputs it read.
 type GateTestFailure struct {
 	Ref          RaceFindingRef
 	InputsDigest string
@@ -167,7 +168,7 @@ type GateTestFailure struct {
 	Artifacts string
 }
 
-// TestPass is one test that passed, under the inputs digest its unit ran on.
+// TestPass is one test that passed, under the digest of the inputs it read.
 type TestPass struct {
 	Ref          RaceFindingRef
 	InputsDigest string
@@ -204,6 +205,29 @@ type Promotion struct {
 	New bool
 	// Reopened is a finding whose fix had deployed: the fix did not end it.
 	Reopened bool
+}
+
+// UnmatchedPass is a pass that promoted nothing while candidates of its test
+// stand under other digests: the test failed in a gate on inputs this pass
+// did not run, so no race is proven, and the mismatch is what to look at
+// when a race a rerun proved goes unrecorded.
+type UnmatchedPass struct {
+	Pass TestPass
+	// CandidateDigests are the digests its test's candidates failed under,
+	// sorted.
+	CandidateDigests []string
+	// Merges are the merges those candidates failed in, sorted.
+	Merges []string
+}
+
+// RacePromotions is what one PromoteRaces did.
+type RacePromotions struct {
+	// Promoted are the findings the passes made or updated, in the order of
+	// the passes.
+	Promoted []Promotion
+	// Unmatched are the passes that matched no candidate of their test,
+	// in the order of the passes.
+	Unmatched []UnmatchedPass
 }
 
 // validRef refuses a reference naming no suite or no test.
@@ -258,13 +282,15 @@ func (s *store) RecordGateFailures(ctx context.Context, repo RepoKey, failures [
 // under the digest it failed under: each such candidate is a recurrence of
 // its test's race finding, made when the repository holds none and opened
 // again when its fix had deployed, and the candidate is forgotten. It
-// answers every finding a pass promoted, in the order of PASSES.
-func (s *store) PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPass) ([]Promotion, error) {
+// answers every finding a pass promoted, and every pass that promoted nothing
+// while candidates of its test stand under other digests, in the order of
+// PASSES.
+func (s *store) PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPass) (RacePromotions, error) {
 	const op = "daemon.wsm.promote_races"
 	fields := dlog.Context{"repo": string(repo), "passes": len(passes)}
 	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		return nil, err
+		return RacePromotions{}, err
 	}
 	for _, p := range passes {
 		if err := validRef(p.Ref); err != nil || p.InputsDigest == "" {
@@ -272,18 +298,25 @@ func (s *store) PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPas
 				err = fmt.Errorf("wsm: the pass of %s names its digest", p.Ref)
 			}
 			s.log.Error(op, "refused a pass that does not name its test and digest", withError(fields, err))
-			return nil, err
+			return RacePromotions{}, err
 		}
 	}
-	var out []Promotion
+	var out RacePromotions
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		out = nil
+		out = RacePromotions{}
 		for _, p := range passes {
 			promoted, err := promoteRace(ctx, tx, string(key), p)
 			if err != nil {
 				return err
 			}
 			if promoted == nil {
+				unmatched, err := unmatchedPass(ctx, tx, string(key), p)
+				if err != nil {
+					return err
+				}
+				if unmatched != nil {
+					out.Unmatched = append(out.Unmatched, *unmatched)
+				}
 				continue
 			}
 			finding, found, err := raceFindingIn(ctx, tx, string(key), p.Ref)
@@ -294,11 +327,37 @@ func (s *store) PromoteRaces(ctx context.Context, repo RepoKey, passes []TestPas
 				return fmt.Errorf("wsm: the promoted race finding %s is gone", p.Ref)
 			}
 			promoted.Finding = finding
-			out = append(out, *promoted)
+			out.Promoted = append(out.Promoted, *promoted)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// unmatchedPass answers P as unmatched when candidates of its test stand in
+// REPO, all under other digests (promoteRace found none under its own), and
+// nil when its test has none.
+func unmatchedPass(ctx context.Context, tx *sql.Tx, repo string, p TestPass) (*UnmatchedPass, error) {
+	type candidate struct{ digest, merge string }
+	candidates, err := listRows(ctx, tx, `SELECT inputs_digest, merge_name FROM queue_gate_failures WHERE repo_key = ? AND suite = ? AND test = ? ORDER BY inputs_digest, merge_name`,
+		func(r interface{ Scan(...any) error }) (candidate, error) {
+			var c candidate
+			return c, r.Scan(&c.digest, &c.merge)
+		}, repo, p.Ref.Suite, p.Ref.Test)
+	if err != nil || len(candidates) == 0 {
+		return nil, err
+	}
+	out := &UnmatchedPass{Pass: p}
+	for _, c := range candidates {
+		if !slices.Contains(out.CandidateDigests, c.digest) {
+			out.CandidateDigests = append(out.CandidateDigests, c.digest)
+		}
+		if !slices.Contains(out.Merges, c.merge) {
+			out.Merges = append(out.Merges, c.merge)
+		}
+	}
+	slices.Sort(out.Merges)
+	return out, nil
 }
 
 // promoteRace promotes P's candidates in REPO, answering nil when P passed

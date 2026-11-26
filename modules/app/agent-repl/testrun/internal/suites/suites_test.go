@@ -1467,7 +1467,7 @@ func TestEveryChunkKindReadsItsTestTimes(t *testing.T) {
 		{kind: "go", chunk: goSplit.Chunk("m:p#00", []string{"TestA"}), out: "--- PASS: TestA (2.5s)\n",
 			want: testtimes.Test{Suite: "m", Name: "p.TestA", Outcome: testtimes.Pass, Seconds: 2.5}},
 		{kind: "vitest", chunk: vitestChunk,
-			want: testtimes.Test{Suite: "webapp", Name: "a.test.ts > x", Outcome: testtimes.Pass, Seconds: 2.5}},
+			want: testtimes.Test{Suite: "webapp", Name: "a.test.ts > x", Outcome: testtimes.Pass, File: "a.test.ts", Seconds: 2.5}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {

@@ -444,7 +444,7 @@ func (f *fakeDB) RecordGateFailures(ctx context.Context, repo wsm.RepoKey, failu
 	return f.checks.RecordGateFailures(ctx, repo, failures)
 }
 
-func (f *fakeDB) PromoteRaces(ctx context.Context, repo wsm.RepoKey, passes []wsm.TestPass) ([]wsm.Promotion, error) {
+func (f *fakeDB) PromoteRaces(ctx context.Context, repo wsm.RepoKey, passes []wsm.TestPass) (wsm.RacePromotions, error) {
 	return f.checks.PromoteRaces(ctx, repo, passes)
 }
 

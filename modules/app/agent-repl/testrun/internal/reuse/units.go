@@ -621,14 +621,18 @@ func Confine(self string, v SuiteVerdict, u suites.Units) suites.Units {
 	}
 	owner, infra := specOwners(v.SuiteUnits, u)
 	// confinement is one spec's profile and the digest of the inputs it
-	// pins: a keyed unit's own, none for infra, which no test of its own
-	// runs in.
-	type confinement struct{ profile, digest string }
+	// pins: a keyed unit's own, and a keyed batch's each member's, none for
+	// infra, which no test of its own runs in.
+	type confinement struct {
+		profile, digest string
+		members         map[string]string
+	}
 	confinementOf := func(id string) confinement {
 		if i, ok := owner[id]; ok {
 			c := confinement{profile: v.Units[i].Profile}
 			if c.profile != "" && v.Units[i].Keyed {
 				c.digest = v.Units[i].Key.Digest
+				c.members = MemberDigests(v.Units[i])
 			}
 			return c
 		}
@@ -642,7 +646,7 @@ func Confine(self string, v SuiteVerdict, u suites.Units) suites.Units {
 			return sp
 		}
 		sp.Argv = ConfineCommand(self, c.profile, sp.Env, sp.Argv)
-		sp.InputsDigest = c.digest
+		sp.InputsDigest, sp.MemberDigests = c.digest, c.members
 		return sp
 	}
 	out := suites.Units{Programs: u.Programs}
@@ -658,6 +662,20 @@ func Confine(self string, v SuiteVerdict, u suites.Units) suites.Units {
 			}
 		}
 		out.Splits = append(out.Splits, sp)
+	}
+	return out
+}
+
+// MemberDigests are a keyed batch's members' own digests by file, each the
+// key of what that file reads whichever batch runs it (decideBatch); nil for
+// a unit that is no batch.
+func MemberDigests(v UnitVerdict) map[string]string {
+	if v.Members == nil {
+		return nil
+	}
+	out := make(map[string]string, len(v.Members))
+	for _, m := range v.Members {
+		out[m.File] = m.Key.Digest
 	}
 	return out
 }

@@ -3,6 +3,7 @@ package reuse
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -565,6 +566,60 @@ func TestConfineStampsOnlyAConfinedKeyedUnitsSpecsWithItsDigest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.spec.InputsDigest != tc.want {
 				t.Fatalf("InputsDigest = %q, want %q", tc.spec.InputsDigest, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfineStampsAKeyedBatchsSpecsWithEachMembersOwnDigest(t *testing.T) {
+	// Arrange
+	su, u := infraUnits()
+	batch := []MemberVerdict{{File: "a.test.ts", Key: Key{Digest: "ma"}}, {File: "b.test.ts", Key: Key{Digest: "mb"}, Reused: &Record{}}}
+	v := SuiteVerdict{SuiteUnits: su, Confined: true, EnvelopeProfile: "/p/s.sb", Units: []UnitVerdict{
+		{Unit: su.Units[0], Keyed: true, Profile: "/p/a.sb", Key: Key{Digest: "aaaa"}, Members: batch},
+		{Unit: su.Units[1], Profile: "/p/b.sb", Key: Key{Digest: "bbbb"}, Members: batch},
+	}}
+
+	// Act
+	got := Confine("/bin/testrun", v, u)
+
+	// Assert
+	cases := []struct {
+		name string
+		spec run.Spec
+		want map[string]string
+	}{
+		{name: "a keyed batch's chunk carries every member's digest", spec: got.Splits[0].Chunk("s/a#00", nil), want: map[string]string{"a.test.ts": "ma", "b.test.ts": "mb"}},
+		{name: "an unkeyed batch's chunk carries none", spec: got.Splits[1].Chunk("s/b#00", nil), want: nil},
+		{name: "infra under the envelope carries none", spec: got.Atomic[0], want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !maps.Equal(tc.spec.MemberDigests, tc.want) || (tc.want == nil) != (tc.spec.MemberDigests == nil) {
+				t.Fatalf("MemberDigests = %v, want %v", tc.spec.MemberDigests, tc.want)
+			}
+		})
+	}
+}
+
+func TestMemberDigests(t *testing.T) {
+	cases := []struct {
+		name string
+		v    UnitVerdict
+		want map[string]string
+	}{
+		{name: "a unit that is no batch has none", v: UnitVerdict{Key: Key{Digest: "u"}}, want: nil},
+		{name: "a batch's members each keep their own digest, reused or not", v: UnitVerdict{Key: Key{Digest: "u"}, Members: []MemberVerdict{
+			{File: "x.el", Key: Key{Digest: "dx"}}, {File: "y.el", Key: Key{Digest: "dy"}, Reused: &Record{}}}}, want: map[string]string{"x.el": "dx", "y.el": "dy"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := MemberDigests(tc.v)
+
+			// Assert
+			if !maps.Equal(got, tc.want) || (tc.want == nil) != (got == nil) {
+				t.Fatalf("MemberDigests = %v, want %v", got, tc.want)
 			}
 		})
 	}

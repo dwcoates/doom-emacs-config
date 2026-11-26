@@ -32,7 +32,94 @@ func promote(t *testing.T, s *store, repo RepoKey, digest string) []Promotion {
 	if err != nil {
 		t.Fatalf("PromoteRaces: %v", err)
 	}
-	return got
+	return got.Promoted
+}
+
+func TestAPassThatMatchesNoCandidateOfItsTestIsAnsweredUnmatched(t *testing.T) {
+	other := RaceFindingRef{Suite: "daemon", Test: "TestOther"}
+	tests := []struct {
+		name          string
+		failures      []GateTestFailure
+		passDigest    string
+		wantUnmatched []UnmatchedPass
+	}{
+		{name: "candidates under other digests answer the pass with their digests and merges",
+			failures:   []GateTestFailure{failedIn("merge-b", "d2", instant), failedIn("merge-a", "d1", instant), failedIn("merge-c", "d1", instant)},
+			passDigest: "d3",
+			wantUnmatched: []UnmatchedPass{{Pass: TestPass{Ref: raceTest, InputsDigest: "d3"},
+				CandidateDigests: []string{"d1", "d2"}, Merges: []string{"merge-a", "merge-b", "merge-c"}}}},
+		{name: "a pass that promotes is not unmatched",
+			failures: []GateTestFailure{failedIn("merge-a", "d1", instant), failedIn("merge-b", "d2", instant)}, passDigest: "d1"},
+		{name: "a test with no candidate is not unmatched", passDigest: "d1"},
+		{name: "another test's candidate leaves the pass alone",
+			failures: []GateTestFailure{{Ref: other, InputsDigest: "d1", Merge: "merge-a", FailedAt: instant}}, passDigest: "d2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			if len(tt.failures) > 0 {
+				recordFailures(t, s, repo, tt.failures...)
+			}
+
+			// Act
+			got, err := s.PromoteRaces(context.Background(), repo, []TestPass{{Ref: raceTest, InputsDigest: tt.passDigest}})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PromoteRaces: %v", err)
+			}
+			if !slices.EqualFunc(got.Unmatched, tt.wantUnmatched, func(a, b UnmatchedPass) bool {
+				return a.Pass == b.Pass && slices.Equal(a.CandidateDigests, b.CandidateDigests) && slices.Equal(a.Merges, b.Merges)
+			}) {
+				t.Fatalf("Unmatched = %+v, want %+v", got.Unmatched, tt.wantUnmatched)
+			}
+		})
+	}
+}
+
+func TestUnpromotedGateFailuresAnswersTheMergesFailuresNoPassPromoted(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repo RepoKey)
+		want    []RaceFindingRef
+	}{
+		{name: "a failure still a candidate is unpromoted",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				recordFailures(t, s, repo, failedIn("merge-a", "d1", instant))
+			},
+			want: []RaceFindingRef{raceTest}},
+		{name: "a failure a pass promoted is not",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				recordFailures(t, s, repo, failedIn("merge-a", "d1", instant))
+				promote(t, s, repo, "d1")
+			}},
+		{name: "a failure never recorded is unpromoted",
+			arrange: func(*testing.T, *store, RepoKey) {}, want: []RaceFindingRef{raceTest}},
+		{name: "a finding promoted from another merge leaves this merge's failure unpromoted",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				recordFailures(t, s, repo, failedIn("merge-b", "d1", instant))
+				promote(t, s, repo, "d1")
+			},
+			want: []RaceFindingRef{raceTest}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			tt.arrange(t, s, repo)
+
+			// Act
+			got, err := s.UnpromotedGateFailures(context.Background(), repo, "merge-a", []TestPass{{Ref: raceTest, InputsDigest: "d1"}})
+
+			// Assert
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Fatalf("UnpromotedGateFailures = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
 }
 
 func TestAPassUnderAFailuresDigestPromotesItToARaceFinding(t *testing.T) {

@@ -8,6 +8,7 @@
 package events
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -85,13 +86,32 @@ func UnitEndedOf(res run.Result, output []byte) *testrunv1.TestRunUnitEnded {
 		ended.InputsDigest = &res.Spec.InputsDigest
 	}
 	for _, t := range res.Tests {
-		ended.Tests = append(ended.Tests, testResultOf(t))
+		ended.Tests = append(ended.Tests, testResultOf(t, TestDigest(res.Spec, t)))
 	}
 	return ended
 }
 
-func testResultOf(t testtimes.Test) *testrunv1.TestRunTestResult {
+// TestDigest is the digest of the inputs test T of the unit SPEC reads
+// (testrun.v1.TestRunTestResult.inputs_digest): its file's own in a batch,
+// whichever batch runs it, the unit's in any other confined unit. "" for a
+// test of an unconfined unit, and for a batch's test whose file the run
+// cannot name.
+func TestDigest(spec run.Spec, t testtimes.Test) string {
+	if spec.MemberDigests != nil {
+		digest, member := spec.MemberDigests[t.File]
+		if t.File != "" && !member {
+			panic(fmt.Sprintf("events: %s's test %s names the file %s, which is no member of its batch", spec.ID, t.Name, t.File))
+		}
+		return digest
+	}
+	return spec.InputsDigest
+}
+
+func testResultOf(t testtimes.Test, digest string) *testrunv1.TestRunTestResult {
 	r := &testrunv1.TestRunTestResult{Name: t.Name, WallMs: int64(t.Seconds * 1000)}
+	if digest != "" {
+		r.InputsDigest = &digest
+	}
 	switch t.Outcome {
 	case testtimes.Pass:
 		r.Outcome = &testrunv1.TestRunTestResult_Passed{Passed: &testrunv1.TestRunTestPassed{}}

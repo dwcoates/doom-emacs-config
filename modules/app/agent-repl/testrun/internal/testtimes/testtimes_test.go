@@ -167,6 +167,35 @@ func TestParseERTReadsEveryResultLine(t *testing.T) {
 	}
 }
 
+func TestParseERTGivesEachTestTheFileWhoseItemLineFollowsIt(t *testing.T) {
+	// Arrange: the driver runs each file's tests, then ends the file with its
+	// item line; the last file crashed before its line.
+	out := []byte(strings.Join([]string{
+		"   passed  1/2  agent-repl-test-a (0.000231 sec)",
+		"   FAILED  2/2  agent-repl-test-b (0.000100 sec)",
+		ItemMarker + " test-x.el 0.500000",
+		"   passed  1/1  agent-repl-test-c (0.000010 sec)",
+		ItemMarker + " test-y.el 0.250000",
+		"   passed  1/1  agent-repl-test-d (0.000010 sec)",
+	}, "\n"))
+
+	// Act
+	got, err := ParseERT("elisp", out)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ParseERT: %v", err)
+	}
+	files := map[string]string{}
+	for _, tt := range got {
+		files[tt.Name] = tt.File
+	}
+	want := map[string]string{"agent-repl-test-a": "test-x.el", "agent-repl-test-b": "test-x.el", "agent-repl-test-c": "test-y.el", "agent-repl-test-d": ""}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("files = %v, want %v", files, want)
+	}
+}
+
 func TestParseERTGivesEachTestTheStartTheDriverWrote(t *testing.T) {
 	// Arrange: the driver writes six decimals.
 	out := []byte(strings.Join([]string{
@@ -192,7 +221,7 @@ func writeTests(t *testing.T, content string) string {
 	return path
 }
 
-func TestParseVitestNamesEachTestByItsFileAndSuites(t *testing.T) {
+func TestParseVitestNamesEachTestByItsFileAndSuitesAndKeepsItsFile(t *testing.T) {
 	// Arrange
 	path := writeTests(t, `[{"file":"/pkg/test/a.test.ts","name":"suite > case","state":"pass","seconds":0.012},
 		{"file":"/pkg/test/a.test.ts","name":"other","state":"todo","seconds":0}]`)
@@ -202,8 +231,8 @@ func TestParseVitestNamesEachTestByItsFileAndSuites(t *testing.T) {
 
 	// Assert
 	want := []Test{
-		{Suite: "webapp", Name: "test/a.test.ts > suite > case", Outcome: Pass, Seconds: 0.012},
-		{Suite: "webapp", Name: "test/a.test.ts > other", Outcome: Skip, Seconds: 0},
+		{Suite: "webapp", Name: "test/a.test.ts > suite > case", Outcome: Pass, File: "test/a.test.ts", Seconds: 0.012},
+		{Suite: "webapp", Name: "test/a.test.ts > other", Outcome: Skip, File: "test/a.test.ts", Seconds: 0},
 	}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseVitest = %+v, %v; want %+v", got, err, want)

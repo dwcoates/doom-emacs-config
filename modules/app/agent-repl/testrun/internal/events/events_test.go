@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +252,59 @@ func TestEventsWrittenFromTwoGoroutinesReadBackWhole(t *testing.T) {
 	if got := len(readAll(t, &buf)); got != 2*each {
 		t.Fatalf("read back %d events, want %d", got, 2*each)
 	}
+}
+
+func TestEachTestCarriesTheDigestOfTheInputsItReads(t *testing.T) {
+	batch := func(res run.Result) run.Result {
+		res.Spec.InputsDigest = "batch"
+		res.Spec.MemberDigests = map[string]string{"a.test.ts": "da", "b.test.ts": "db"}
+		return res
+	}
+	cases := []struct {
+		name string
+		res  run.Result
+		want []string
+	}{
+		{name: "a confined unit's tests carry its digest", res: digested(result("u", run.Passed, testtimes.Test{Name: "A", Outcome: testtimes.Pass}), "abc"), want: []string{"abc"}},
+		{name: "a batch's tests carry their files' digests, never the batch's", res: batch(result("u", run.Failed,
+			testtimes.Test{Name: "a.test.ts > x", File: "a.test.ts", Outcome: testtimes.Fail},
+			testtimes.Test{Name: "b.test.ts > y", File: "b.test.ts", Outcome: testtimes.Pass})), want: []string{"da", "db"}},
+		{name: "a batch's test that names no file carries no digest", res: batch(result("u", run.Failed, testtimes.Test{Name: "crashed", Outcome: testtimes.Fail})), want: []string{""}},
+		{name: "an unconfined unit's tests carry no digest", res: result("u", run.Passed, testtimes.Test{Name: "A", File: "a.test.ts", Outcome: testtimes.Pass}), want: []string{""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := UnitEndedOf(tc.res, nil)
+
+			// Assert
+			var digests []string
+			for _, r := range got.GetTests() {
+				if r.InputsDigest != nil && r.GetInputsDigest() == "" {
+					t.Fatalf("test %s carries an empty digest; an unknown one is unset", r.GetName())
+				}
+				digests = append(digests, r.GetInputsDigest())
+			}
+			if !slices.Equal(digests, tc.want) {
+				t.Fatalf("digests = %q, want %q", digests, tc.want)
+			}
+		})
+	}
+}
+
+func TestABatchsTestNamingAFileOutsideTheBatchPanics(t *testing.T) {
+	// Arrange
+	res := result("u", run.Passed, testtimes.Test{Name: "c.test.ts > z", File: "c.test.ts", Outcome: testtimes.Pass})
+	res.Spec.MemberDigests = map[string]string{"a.test.ts": "da"}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("UnitEndedOf took a test of a file outside its batch")
+		}
+	}()
+
+	// Act
+	UnitEndedOf(res, nil)
 }
 
 // digested is RES run under a spec confined to the inputs DIGEST.
