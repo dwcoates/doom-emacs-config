@@ -3,6 +3,8 @@ package wifirpc
 import (
 	"sort"
 	"sync"
+
+	"agent-repld/internal/changesignal"
 )
 
 // Peers is the set of processes connected to the service, by the pid the
@@ -13,18 +15,18 @@ import (
 type Peers struct {
 	mu      sync.Mutex
 	pids    map[int]int
-	changed chan struct{}
+	changed changesignal.Signal
 }
 
 // NewPeers answers an empty set.
-func NewPeers() *Peers { return &Peers{pids: map[int]int{}, changed: make(chan struct{})} }
+func NewPeers() *Peers { return &Peers{pids: map[int]int{}} }
 
 // add counts one more connection from pid.
 func (p *Peers) add(pid int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pids[pid]++
-	p.notifyLocked()
+	p.changed.Notify()
 }
 
 // remove counts one connection from pid gone.
@@ -36,22 +38,12 @@ func (p *Peers) remove(pid int) {
 	} else {
 		p.pids[pid]--
 	}
-	p.notifyLocked()
-}
-
-// notifyLocked wakes everything waiting on Changed. Caller holds mu.
-func (p *Peers) notifyLocked() {
-	close(p.changed)
-	p.changed = make(chan struct{})
+	p.changed.Notify()
 }
 
 // Changed answers a channel closed at the next change of the set, so a waiter
 // learns of a connection coming or going by that event and never by polling.
-func (p *Peers) Changed() <-chan struct{} {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.changed
-}
+func (p *Peers) Changed() <-chan struct{} { return p.changed.Changed() }
 
 // PIDs answers every pid with at least one open connection, sorted.
 func (p *Peers) PIDs() []int {

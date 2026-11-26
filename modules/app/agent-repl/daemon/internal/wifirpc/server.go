@@ -25,6 +25,7 @@ import (
 	"agentrepl/proto/persistentwifi/v1/persistentwifiv1connect"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/publish"
 )
@@ -214,13 +215,13 @@ func (s *Server) WatchStanding(
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go func() {
+	inflight.Standing(func() {
 		select {
 		case <-s.draining:
 			cancel()
 		case <-ctx.Done():
 		}
-	}()
+	})
 	for standing := range s.controller.Topic().Subscribe(ctx) {
 		if err := stream.Send(&persistentwifiv1.WatchStandingResponse{Standing: standing}); err != nil {
 			s.log.Debug(opWatch, "a standing watch ended: its caller is gone", dlog.Context{"cause": err.Error()})

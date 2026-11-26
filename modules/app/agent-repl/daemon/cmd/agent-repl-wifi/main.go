@@ -43,6 +43,7 @@ import (
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/netwatch"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/scriptrunner"
@@ -213,6 +214,7 @@ func run(o options) (err error) {
 		"network_watch":                network.Run,
 	} {
 		loops.Add(1)
+		// inflight: joined: waitFor ends the service's stop on the group.
 		go func() {
 			defer loops.Done()
 			if err := run(ctx); err != nil {
@@ -222,7 +224,7 @@ func run(o options) (err error) {
 		}()
 	}
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.Serve(ln) }()
+	inflight.Standing(func() { serveErr <- srv.Serve(ln) })
 
 	var result error
 	select {
@@ -252,7 +254,7 @@ func run(o options) (err error) {
 // waitFor answers whether wg finished within bound.
 func waitFor(wg *sync.WaitGroup, bound time.Duration) bool {
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	inflight.Standing(func() { wg.Wait(); close(done) })
 	select {
 	case <-done:
 		return true

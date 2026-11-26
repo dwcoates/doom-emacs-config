@@ -182,6 +182,7 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) follow(ctx context.Context) (served, answered bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	first, watched := make(chan struct{}), make(chan struct{})
+	// inflight: joined: the follow waits for it before it returns.
 	go func() { defer close(watched); c.watchFirst(ctx, first) }()
 	// The bound's watcher ends with the connection, so what it records is
 	// written before the follow returns.
