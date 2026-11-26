@@ -28,7 +28,7 @@ import (
 const retainedGenerations = 5
 
 var levelRank = map[string]int{"debug": 0, "info": 1, "warn": 2, "error": 3}
-var runtimeNames = map[string]struct{}{"emacs": {}, "daemon": {}, "shim": {}, "webapp": {}, "sidecar": {}, "store": {}, "zettel": {}, "tests": {}}
+var runtimeNames = map[string]struct{}{"emacs": {}, "daemon": {}, "shim": {}, "webapp": {}, "sidecar": {}, "store": {}, "zettel": {}, "launcher": {}, "tests": {}}
 
 type repeatedFlag []string
 

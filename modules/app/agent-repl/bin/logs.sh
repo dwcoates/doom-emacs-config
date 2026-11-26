@@ -17,7 +17,7 @@ Usage:
 
 Selectors:
   --workspace VALUE  read one workspace, resolved by directory, daemon ID, or daemon name
-  --central          read genuinely workspace-free Emacs, daemon, store, sidecar, zettel, and test service logs
+  --central          read genuinely workspace-free Emacs, daemon, store, sidecar, zettel, launcher, and test service logs
   --all              read every daemon-known workspace plus the central logs
 
 Every read of --workspace, --central, or --all names its window with --since:
@@ -273,7 +273,7 @@ if [ -n "$runtimes" ]; then
     for runtime in "${requested_runtimes[@]}"; do
         [ -n "$runtime" ] || fail '--runtime contains an empty value'
         case "$runtime" in
-            emacs|daemon|shim|webapp|sidecar|store|zettel|tests) ;;
+            emacs|daemon|shim|webapp|sidecar|store|zettel|launcher|tests) ;;
             *) fail "unknown runtime: $runtime" ;;
         esac
     done
@@ -294,7 +294,7 @@ workspace_runtime_allowed() {
 }
 
 central_runtime_allowed() {
-    case "$1" in emacs|daemon|store|sidecar|zettel|tests) return 0 ;; esac
+    case "$1" in emacs|daemon|store|sidecar|zettel|launcher|tests) return 0 ;; esac
     return 1
 }
 
@@ -392,6 +392,7 @@ if [ "$scope" = central ] || [ "$scope" = all ]; then
     runtime_requested store && add_base "$cache_root/log/shim-store.log" store "" "" file jsonl
     runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.log" sidecar "" "" file jsonl
     runtime_requested zettel && add_base "$cache_root/log/zettel.log" zettel "" "" file jsonl
+    runtime_requested launcher && add_base "$cache_root/log/launcher.log" launcher "" "" file jsonl
     runtime_requested tests && add_base "$cache_root/log/tests.log" tests "" "" file jsonl
     # The launchd services' emergency stderr sinks: unstructured text the
     # contract permits only when the canonical JSONL sink could not record
@@ -401,6 +402,7 @@ if [ "$scope" = central ] || [ "$scope" = all ]; then
         runtime_requested store && add_base "$cache_root/log/shim-store.err.log" store "" "" file stderr
         runtime_requested sidecar && add_base "$cache_root/log/shim-claude-sidecar.err.log" sidecar "" "" file stderr
         runtime_requested zettel && add_base "$cache_root/log/zettel.err.log" zettel "" "" file stderr
+        runtime_requested launcher && add_base "$cache_root/log/launcher.err.log" launcher "" "" file stderr
         runtime_requested tests && add_base "$cache_root/log/tests.err.log" tests "" "" file stderr
     fi
 fi
