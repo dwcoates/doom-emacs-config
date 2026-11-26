@@ -31,7 +31,7 @@ func TestRenderTabDrawsAHeldBubblesRunningTabOnHold(t *testing.T) {
 		wantState string
 	}{
 		{name: "a live tab of a held bubble is on hold", tab: committingTab(tabState{startedMS: 10}, "s"), hold: held, wantState: "on_hold"},
-		{name: "a tab waiting on the user of a held bubble is on hold", tab: pickTab(tabState{startedMS: 10, waiting: true}), hold: held, wantState: "on_hold"},
+		{name: "a tab waiting on the user of a held bubble is on hold", tab: waitingRebasingTab(tabState{startedMS: 10, waiting: true}), hold: held, wantState: "on_hold"},
 		{name: "a settled tab of a held bubble stays settled", tab: committingTab(tabState{startedMS: 10, settled: true, endedMS: 20}, "s"), hold: held, wantState: "settled"},
 		{name: "a live tab of a running bubble stays live", tab: committingTab(tabState{startedMS: 10}, "s"), wantState: "live"},
 	}
@@ -45,7 +45,7 @@ func TestRenderTabDrawsAHeldBubblesRunningTabOnHold(t *testing.T) {
 				t.Fatalf("drawn state %s, want %s", arm, tt.wantState)
 			}
 			if tt.wantState == "on_hold" {
-				onHold := committingOrPick(got)
+				onHold := committingOrRebasing(got)
 				if onHold.GetStartedAtMs() != 10 || onHold.GetHeldSinceMs() != 50 {
 					t.Fatalf("on hold = %+v, want started 10 held since 50", onHold)
 				}
@@ -57,12 +57,19 @@ func TestRenderTabDrawsAHeldBubblesRunningTabOnHold(t *testing.T) {
 	}
 }
 
-// committingOrPick is the on-hold leaf a committing or pick tab carries.
-func committingOrPick(tab *frontendv1.FeedMergeTab) *frontendv1.FeedMergeTabHeld {
+// committingOrRebasing is the on-hold leaf a committing or rebasing tab
+// carries.
+func committingOrRebasing(tab *frontendv1.FeedMergeTab) *frontendv1.FeedMergeTabHeld {
 	if c := tab.GetCommitting(); c != nil {
 		return c.GetOnHold()
 	}
-	return tab.GetResolving().GetOnHold()
+	return tab.GetRebasing().GetOnHold()
+}
+
+// waitingRebasingTab is a rebasing tab whose agent has an ask open at ST.
+func waitingRebasingTab(st tabState) *frontendv1.FeedMergeTab {
+	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: &frontendv1.FeedMergeTabRebasing{
+		State: &frontendv1.FeedMergeTabRebasing_WaitingOnUser{WaitingOnUser: st.waitingOnUser()}}}}
 }
 
 // EVERY TAB KIND CAN BE DRAWN ON HOLD: renderTab panics on a kind whose state

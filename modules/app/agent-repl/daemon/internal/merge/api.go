@@ -898,7 +898,7 @@ type Meter interface {
 	// ObserveMergeStep records how long a run spent on one step before it
 	// left it, by the step's footer.MergeStep spelling.
 	ObserveMergeStep(step string, took time.Duration)
-	// ObserveMergeSpan records one span of a merge (SpanPick, SpanQueued,
+	// ObserveMergeSpan records one span of a merge (SpanQueued,
 	// SpanRunning, SpanTotal) by how it ended.
 	ObserveMergeSpan(span, outcome string, took time.Duration)
 	// ObserveMediationSpan records one span of a deploy mediation
@@ -982,8 +982,6 @@ var RoundCountKinds = []string{TabRebasing, TabConflicts, TabTests, TabFixes}
 
 // The merge spans a Meter records.
 const (
-	// SpanPick is the branch's preparation from the request's instruction.
-	SpanPick = "pick"
 	// SpanQueued is the time from enqueueing until the run was admitted.
 	SpanQueued = "queued"
 	// SpanRunning is the time from admission until the terminal.

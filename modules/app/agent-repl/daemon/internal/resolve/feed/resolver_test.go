@@ -146,10 +146,6 @@ type harness struct {
 	// addressesErr fails that read.
 	addresses    map[ids.TurnID]*wsm.OutputAddress
 	addressesErr error
-	// mirrors are the recorded mirrors of turns the resolver reads on a
-	// replay; mirrorsErr fails that read.
-	mirrors    map[ids.TurnID]*wsm.MirrorAddress
-	mirrorsErr error
 	// senders are the recorded senders of turns the resolver reads on a
 	// replay; sendersErr fails that read.
 	senders    map[ids.TurnID]ids.WorkspaceID
@@ -283,18 +279,6 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 			for _, turn := range turns {
 				if sender, ok := h.senders[turn]; ok {
 					out[turn] = sender
-				}
-			}
-			return out, nil
-		},
-		TurnMirrors: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error) {
-			if h.mirrorsErr != nil {
-				return nil, h.mirrorsErr
-			}
-			out := map[ids.TurnID]*wsm.MirrorAddress{}
-			for _, turn := range turns {
-				if m, ok := h.mirrors[turn]; ok {
-					out[turn] = m
 				}
 			}
 			return out, nil

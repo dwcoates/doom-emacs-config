@@ -238,11 +238,6 @@ func TestKeyedLockCallSitesShareTheOrchestratorsSets(t *testing.T) {
 			stored: func(h *harness) *sync.Mutex { return h.o.lines.For(h.repoKey()) },
 		},
 		{
-			name:   "the hand-off lock",
-			answer: func(h *harness) *sync.Mutex { return h.o.handOffLock(theWorkspace) },
-			stored: func(h *harness) *sync.Mutex { return h.o.handOffLocks.For(theWorkspace) },
-		},
-		{
 			name:   "the drop lock",
 			answer: func(h *harness) *sync.Mutex { return h.o.dropLock(theWorkspace) },
 			stored: func(h *harness) *sync.Mutex { return h.o.dropLocks.For(theWorkspace) },

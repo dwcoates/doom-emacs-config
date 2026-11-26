@@ -106,7 +106,7 @@ func TestAFailedFinishPromptWithdrawsTheDeployAndHandsItBack(t *testing.T) {
 	if _, queued := h.entryState(); queued {
 		t.Fatal("the deploy stands in the queue after its finish stage failed")
 	}
-	sent := h.detached.sent()
+	sent := h.handBacks.sent()
 	if len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed || !strings.Contains(sent[0].outcome.Summary, "its finish prompt hook did not complete") {
 		t.Fatalf("handbacks = %+v, want the failure handed back to the workspace", sent)
 	}
@@ -134,7 +134,7 @@ func TestAFailedFinishScriptWithdrawsTheDeployNamingItsLog(t *testing.T) {
 	if _, queued := h.entryState(); queued {
 		t.Fatal("the deploy stands in the queue after its finish script failed")
 	}
-	sent := h.detached.sent()
+	sent := h.handBacks.sent()
 	if len(sent) != 1 || !strings.Contains(sent[0].outcome.Summary, "its finish script "+finishScript+" failed: it exited 3") ||
 		!strings.Contains(sent[0].outcome.Summary, LogsDir(h.stateDir)) {
 		t.Fatalf("handbacks = %+v, want the script, its exit and its log named", sent)
@@ -284,27 +284,6 @@ func TestAUsersFinishWithFinishHooksWaitsForThem(t *testing.T) {
 	h.runWait(t)
 	if state, _ := h.entryState(); state != wsm.MergeQueued || len(h.finishPrompts()) != 1 {
 		t.Fatalf("after the wait: state %v, finish prompts %v; want queued after one finish prompt", state, h.finishPrompts())
-	}
-}
-
-func TestAnAsyncMergeRunsNoFinishStage(t *testing.T) {
-	// Arrange: the repository's kind has finish hooks, which an async merge --
-	// its merge workspace's own merge -- never runs.
-	h := newHarness(t)
-	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
-	h.register(theMergeWorkspace, "reconnect-fix")
-	h.db.mu.Lock()
-	merge := h.db.workspaces[theMergeWorkspace]
-	merge.MergeOf = &wsm.MergeOrigin{Requester: theWorkspace}
-	h.db.workspaces[theMergeWorkspace] = merge
-	h.db.mu.Unlock()
-
-	// Act
-	ft, err := h.o.finishTargetOf(t.Context(), theMergeWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch})
-
-	// Assert
-	if err != nil || len(ft.hooks) != 0 {
-		t.Fatalf("finishTargetOf = %+v, %v; want no hooks for an async merge", ft, err)
 	}
 }
 

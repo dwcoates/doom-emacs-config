@@ -22,9 +22,6 @@ func statusHarness(t *testing.T) *harness {
 	h.git.mu.Unlock()
 	h.registerOther(otherWorkspace, "ws-two", "agent/two")
 	h.db.mu.Lock()
-	merging := h.db.workspaces[theWorkspace]
-	merging.MergeOf = &wsm.MergeOrigin{Requester: "ws-asker"}
-	h.db.workspaces[theWorkspace] = merging
 	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{
 		{Repo: h.repoKey(), Workspace: theWorkspace, State: wsm.MergeAdmitted, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: "agent/one"}},
 		{Repo: h.repoKey(), Workspace: otherWorkspace, State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: "agent/two", Front: true}},
@@ -61,7 +58,7 @@ func TestStatusAnswersEachQueueWithItsMembersAndSteps(t *testing.T) {
 			}
 			members := got[0].Queue.Members
 			want := []QueueMember{
-				{Workspace: theWorkspace, Name: members[0].Name, Branch: "agent/one", Mode: MergeModeAsync, Started: true, Requester: "ws-asker", Step: footer.StepTesting},
+				{Workspace: theWorkspace, Name: members[0].Name, Branch: "agent/one", Mode: MergeModeOneShot, Started: true, Step: footer.StepTesting},
 				{Workspace: otherWorkspace, Name: members[1].Name, Branch: "agent/two", Mode: members[1].Mode, Front: true},
 			}
 			if !reflect.DeepEqual(members, want) {

@@ -19,12 +19,12 @@ func TestASyncMergeThatDidNotLandIsHandedBackToItsOwnWorkspace(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.handBack(context.Background(), theWorkspace, DetachedOutcome{Kind: tt.kind, Summary: "the gate failed"})
+			h.o.handBackInPlace(context.Background(), theWorkspace, DetachedOutcome{Kind: tt.kind, Summary: "the gate failed"})
 
 			// Assert: told to the workspace it ran in, marked in place, naming
 			// that workspace's branch.
-			sent := h.detached.sent()
-			if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theWorkspace {
+			sent := h.handBacks.sent()
+			if len(sent) != 1 || sent[0].ws != theWorkspace {
 				t.Fatalf("handbacks = %+v, want one to the workspace itself", sent)
 			}
 			out := sent[0].outcome
@@ -48,10 +48,10 @@ func TestASyncMergeThatLandedIsNotHandedBack(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.handBack(context.Background(), theWorkspace, tt.out)
+			h.o.handBackInPlace(context.Background(), theWorkspace, tt.out)
 
 			// Assert.
-			if sent := h.detached.sent(); len(sent) != 0 {
+			if sent := h.handBacks.sent(); len(sent) != 0 {
 				t.Fatalf("handbacks = %+v, want none", sent)
 			}
 		})
@@ -66,10 +66,10 @@ func TestAnInPlaceHandbackWhoseWorkspaceCannotBeReadIsAnError(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	h.o.handBack(context.Background(), theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "x"})
+	h.o.handBackInPlace(context.Background(), theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "x"})
 
 	// Assert: nothing is sent, and the read failure is recorded at ERROR.
-	if sent := h.detached.sent(); len(sent) != 0 {
+	if sent := h.handBacks.sent(); len(sent) != 0 {
 		t.Fatalf("handbacks = %+v, want none", sent)
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.handback"}) {

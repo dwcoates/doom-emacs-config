@@ -33,7 +33,13 @@ import (
 //   - drops the queue's and the off-queue record's detached-request columns,
 //     and the adopted mark, which only a merge workspace ever carried;
 //   - drops a merge workspace's deploy still being checked, and the deploying
-//     merge's credit and async mark: every merge is its own workspace's.
+//     merge's credit and async mark: every merge is its own workspace's;
+//   - drops every ledger interval of the retired pick step, which no bubble
+//     or roster stage draws any more.
+//
+// A MERGE WORKSPACE STILL OPEN STAYS OPEN, as the visible child of the
+// workspace it was forked for: children are never hidden, and its work is
+// the user's to land or close.
 //
 // IT IS A CONTRACT STEP: it only removes shapes no build after it writes, and
 // the build before it still reads the columns it drops.
@@ -86,6 +92,7 @@ ALTER TABLE off_queue_merges DROP COLUMN source_post_deploy_hooks;
 DELETE FROM deploying_merges WHERE async = 1;
 ALTER TABLE deploying_merges DROP COLUMN credited;
 ALTER TABLE deploying_merges DROP COLUMN async;
+DELETE FROM merge_tab_intervals WHERE kind = 'pick';
 `
 
 // The retired fields of stored feed rows this step drops or carries.

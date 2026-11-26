@@ -216,7 +216,7 @@ func (o *orchestrator) holdForHostFault(ctx context.Context, repo wsm.RepoKey, c
 // drives goes on in its session, test runs and all (2026-10-26: a fixing
 // attempt's full test run went on for minutes after a pause). A hard stop
 // interrupts those turns, and the turn of every waiting merge's background
-// rebase. The turn of any other step (a pick, a deploy-stage prompt) is left
+// rebase. The turn of any other step (a deploy-stage prompt) is left
 // to finish: those steps read an interrupted turn as the user's.
 //
 // A queue already paused is not refused: the hard stop stops what the pause
@@ -2122,7 +2122,7 @@ type passReason string
 
 const (
 	// passHeldBehind: it was placed behind a merge still standing in the
-	// queue, and is neither admitted nor picked until that merge leaves.
+	// queue, and is not admitted until that merge leaves.
 	passHeldBehind passReason = "held_behind"
 	// passServedElsewhere: another daemon serves its workspace, or this one
 	// has not adopted it yet.

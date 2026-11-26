@@ -191,7 +191,6 @@ func snapshotView(paused bool, standings []*frontendv1.FeedMergeQueueEntry) queu
 		names:     map[ids.WorkspaceID]string{},
 		dirs:      map[ids.WorkspaceID]string{},
 		targets:   map[ids.WorkspaceID]string{"ws-1": "/src/doom", "ws-2": "/src/doom"},
-		bubbles:   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{},
 		standings: standings,
 	}
 }

@@ -221,12 +221,6 @@ func problemOf(t *testing.T, h *harness, key wsm.ProblemKey) wsm.DeployProblem {
 	return wsm.DeployProblem{}
 }
 
-// escalationMade reports whether the mediator took a new escalation: it was
-// shown for it.
-func escalationMade(h *harness) bool {
-	return slices.Contains(h.checks.resumed, "ws-fixer")
-}
-
 func TestAnEscalationTakesOnAgainAProblemWhoseFixDeployed(t *testing.T) {
 	// Arrange: the mediator took the problem on and its fix deployed, and
 	// the problem came back.

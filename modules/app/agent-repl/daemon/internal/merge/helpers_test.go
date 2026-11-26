@@ -83,15 +83,6 @@ type fakeDB struct {
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
-	// asyncRequests are the async requests not yet handed off, in the order
-	// they were asked for; asyncRequestErr fails their next record.
-	asyncRequests   []wsm.AsyncMergeRequest
-	asyncRequestErr error
-	// asyncReadErr fails every read of the async requests, and asyncDropErr
-	// every drop of one.
-	asyncReadErr error
-	asyncDropErr error
-
 	wsm.DB
 
 	// workspaceErr, when set, is what every Workspace read answers.
@@ -1488,11 +1479,6 @@ func (f *fakeDB) settleWaitsOnLocked(repo wsm.RepoKey, id ids.WorkspaceID, cause
 			f.queues[repo][i].WaitsOnLeft = cause
 		}
 	}
-	for i, req := range f.asyncRequests {
-		if req.Repo == repo && req.WaitsOn == id && req.WaitsOnLeft == "" {
-			f.asyncRequests[i].WaitsOnLeft = cause
-		}
-	}
 }
 
 // QueueMerge moves a requested entry to the back of the line, exactly as the
@@ -1955,45 +1941,6 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
-// StartMergePick stands for the durable pick start: the merge workspace's
-// requested pick takes its ledger, its turn and its start.
-func (f *fakeDB) StartMergePick(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, ledger wsm.LeaseID, turn wsm.TurnID, at time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i, entry := range f.queues[repo] {
-		if entry.Workspace != id {
-			continue
-		}
-		if (entry.State != wsm.MergeRequested && entry.State != wsm.MergeQueued) || entry.Source.Pick == "" || entry.Source.PickStartedAt != nil {
-			return fmt.Errorf("the merge of %s is no requested or queued pick that has not begun", id)
-		}
-		started := at
-		f.queues[repo][i].Ledger = ledger
-		f.queues[repo][i].Source.PickStartedAt = &started
-		f.queues[repo][i].Source.PickTurn = turn
-		return nil
-	}
-	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
-}
-
-// ClearMergePick stands for the durable record of a pick's success at the
-// head: the queued merge workspace's begun pick leaves its row.
-func (f *fakeDB) ClearMergePick(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, _ time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for i, entry := range f.queues[repo] {
-		if entry.Workspace != id {
-			continue
-		}
-		if entry.State != wsm.MergeQueued || entry.Source.Pick == "" || entry.Source.PickStartedAt == nil {
-			return fmt.Errorf("the merge of %s is no queued pick that began: %w", id, wsm.ErrNotFound)
-		}
-		f.queues[repo][i].Source.Pick, f.queues[repo][i].Source.PickStartedAt, f.queues[repo][i].Source.PickTurn = "", nil, ""
-		return nil
-	}
-	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
-}
-
 func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2031,7 +1978,7 @@ func (f *fakeDB) keepOffQueueLocked(entry wsm.MergeQueueEntry, cause string) {
 		return
 	}
 	source := entry.Source
-	source.Front, source.Behind, source.BehindName, source.PickStartedAt, source.PickTurn = false, "", "", nil, ""
+	source.Front, source.Behind, source.BehindName = false, "", ""
 	f.offQueue[entry.Workspace] = wsm.OffQueueMerge{Workspace: entry.Workspace, Cause: cause, LeftAt: f.clockNow(), RequestedAt: entry.EnqueuedAt, Source: source}
 }
 
@@ -2072,20 +2019,14 @@ func (f *fakeDB) OffQueueMergeOf(_ context.Context, id ids.WorkspaceID) (wsm.Off
 
 // RequeueOffQueueMerge stands for the store's one transaction: the record
 // goes and the request is written back, requested, at the back.
-func (f *fakeDB) RequeueOffQueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, place wsm.RequeuePlacement, version *wsm.VersionIncrement, model string, _ time.Time) (wsm.MergeSource, error) {
+func (f *fakeDB) RequeueOffQueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, place wsm.RequeuePlacement, model string, _ time.Time) (wsm.MergeSource, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.offQueue[id]
 	if !ok {
 		return wsm.MergeSource{}, fmt.Errorf("requeue of %s: %w", id, wsm.ErrNotFound)
 	}
-	if version != nil && !rec.Adopted {
-		return wsm.MergeSource{}, wsm.ErrOffQueueVersionRecorded
-	}
 	source := rec.Source
-	if version != nil {
-		source.Version = version
-	}
 	source.Front, source.Behind, source.BehindName = place.Front, place.Behind, place.BehindName
 	if model != "" {
 		session, ok := f.sessions[id]
@@ -2667,7 +2608,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		defaultBranch:  "master",
 		globalIdentity: fakeIdentity,
 		commonDirs:     map[string]string{},
-		refs:           map[string]string{"refs/heads/" + asyncBranch: "a5ync"},
+		refs:           map[string]string{},
 		trees:          map[string]string{},
 		refSeqs:        map[string][]string{},
 		changedIn:      map[string][][]string{},
@@ -3546,8 +3487,6 @@ type fakeFeed struct {
 
 	rows      []synthesized
 	addresses []*wsm.OutputAddress
-	// mirrors is every output mirror the merge stood or withdrew, in order.
-	mirrors []mirrorCall
 	// onUpsert, when set, runs on every push before it is recorded, so a test
 	// can read the harness's state at the instant a row is published.
 	onUpsert func(row *frontendv1.FeedRow)
@@ -3630,25 +3569,6 @@ func (f *fakeFeed) record(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.
 	if f.db != nil {
 		f.db.putDurable(ws, row, pinned)
 	}
-}
-
-// mirrorCall is one SetOutputMirror the merge made.
-type mirrorCall struct {
-	ws     ids.WorkspaceID
-	mirror *wsm.MirrorAddress
-}
-
-func (f *fakeFeed) SetOutputMirror(ws ids.WorkspaceID, m *wsm.MirrorAddress) {
-	f.mu.Lock()
-	f.mirrors = append(f.mirrors, mirrorCall{ws: ws, mirror: m})
-	f.mu.Unlock()
-}
-
-// mirrorsStood answers every mirror call, in order.
-func (f *fakeFeed) mirrorsStood() []mirrorCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]mirrorCall(nil), f.mirrors...)
 }
 
 func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *wsm.OutputAddress) {
@@ -4163,8 +4083,8 @@ type harness struct {
 	// duringCompactGate, when set, runs inside CompactColdGate, outside the
 	// harness's lock: what happens while an answer is under way.
 	duringCompactGate func(ws ids.WorkspaceID)
-	// detached is the detached-merge service: the fork and the handbacks.
-	detached *fakeDetached
+	// handBacks records every merge outcome handed back to its workspace.
+	handBacks *fakeHandBacks
 	// names is the async merge name check.
 	names *fakeNames
 	// interrupted records every workspace whose turn a merge-tab interrupt
@@ -4278,7 +4198,7 @@ type fakeRollout struct {
 	// their deploy when it fired.
 	landingsAtFire int
 	db             *fakeDB
-	detached       *fakeDetached
+	handBacks      *fakeHandBacks
 }
 
 func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
@@ -4289,8 +4209,8 @@ func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
 	t.leasesAtFire = len(t.db.releasedLeases)
 	t.landingsAtFire = len(t.db.undeployed)
 	t.db.mu.Unlock()
-	if t.detached != nil {
-		t.handbacksAtFire = len(t.detached.sent())
+	if t.handBacks != nil {
+		t.handbacksAtFire = len(t.handBacks.sent())
 	}
 	t.mu.Unlock()
 }
@@ -4505,13 +4425,6 @@ func usersList(entries ...*repoconfigv1.HookEntry) *repoconfigv1.LifecycleStageH
 
 // newHarness builds an orchestrator whose admission is driven a step at a time,
 // so a queue's ordering is asserted without waiting on a goroutine.
-// asyncBranch is the branch the suite's async requests land: one that exists
-// and that the requester does not have checked out.
-const asyncBranch = "agent-fix"
-
-// asyncSource is the source of the suite's async requests.
-var asyncSource = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch}
-
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
@@ -4530,15 +4443,15 @@ func newHarness(t *testing.T) *harness {
 		meter:    &fakeMeter{},
 	}
 	h.tests = newFakeTestService(t, h.runner)
-	h.detached = &fakeDetached{h: h}
+	h.handBacks = &fakeHandBacks{}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
 	h.events = &fakeQueueEvents{}
 	h.names = &fakeNames{}
-	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
+	h.banners = &fakeBanners{told: func() int { return len(h.handBacks.sent()) }}
 	h.queue = &fakeQueue{db: h.db, fixing: func(promptqueue.Submission) { h.git.fixCommitted() }}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next, db: h.db}
-	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
+	h.rollout = &fakeRollout{db: h.db, handBacks: h.handBacks}
 	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, rollout: h.rollout, key: func() wsm.RepoKey { return scopedKey(h) }}
 	h.children = &fakeChildren{db: h.db}
 	h.sites = &fakeTally{answers: map[time.Time]logsites.Answer{}, errs: map[time.Time]error{}}
@@ -4737,9 +4650,9 @@ func (h *harness) deps() Deps {
 			defer h.mu.Unlock()
 			return h.inFlight, h.inFlight != ""
 		},
-		Home:     "/home/tester",
-		Detached: h.detached,
-		Names:    h.names,
+		Home:      "/home/tester",
+		HandBacks: h.handBacks,
+		Names:     h.names,
 		InterruptTurn: func(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -4919,7 +4832,7 @@ func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
 // test if it is refused.
 func enqueue(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
+	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 }
@@ -5120,17 +5033,13 @@ func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string 
 // request records the harness workspace's merge of one source, as asked by.
 func (h *harness) request(t *testing.T, source wsm.MergeSource, by Requester) error {
 	t.Helper()
-	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by, Asker: askerFor(by)}))
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by, Asker: askerFor(by)})
 }
 
 // requestOneShot asks for the harness workspace's one-shot merge, as an agent.
-func (h *harness) requestOneShot(t *testing.T, source wsm.MergeSource, detached bool) error {
+func (h *harness) requestOneShot(t *testing.T, source wsm.MergeSource) error {
 	t.Helper()
-	var run *DetachedRun
-	if detached {
-		run = &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}
-	}
-	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace, Detached: run, OneShot: true}))
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace, OneShot: true})
 }
 
 // publishes answers how many times the roster's durable half was republished.
@@ -5147,25 +5056,17 @@ func (h *harness) oneShot() bool {
 	return h.db.jobs[theWorkspace].OneShot
 }
 
-// runWait runs the harness workspace's standing request waits to their end,
-// as their goroutines would: its async requests' wait (each request's turn's
-// end, then its hand-off), then its own request's (the requesting turn's end,
-// then its place in line).
+// runWait runs the harness workspace's standing request wait to its end, as
+// its goroutine would: the requesting turn's end, then its place in line.
 func (h *harness) runWait(t *testing.T) {
 	t.Helper()
 	h.o.mu.Lock()
 	wait := h.o.requested[theWorkspace]
-	async := h.o.asyncWaits[theWorkspace]
 	h.o.mu.Unlock()
-	if wait == nil && async == nil {
+	if wait == nil {
 		t.Fatal("no request wait stands for the harness workspace")
 	}
-	if async != nil {
-		h.o.runAsyncWait(async)
-	}
-	if wait != nil {
-		h.o.waitThenQueue(wait)
-	}
+	h.o.waitThenQueue(wait)
 }
 
 // entryState answers the harness workspace's queue entry's state, and false
@@ -5314,10 +5215,6 @@ func (f *fakeQueueEvents) kinds() []QueueChangeKind {
 	}
 	return out
 }
-
-// enqueueErr drops what a recorded request reserved, for the helpers that
-// assert only on whether Enqueue refused.
-func enqueueErr(_ Enqueued, err error) error { return err }
 
 // askerFor is the asking workspace a test request names for BY: the harness
 // workspace when its agent asked, none when the user did.
@@ -5526,18 +5423,6 @@ func (f *fakeMeter) CountMediatorRun(outcome string) {
 	f.got = append(f.got, "mediator_run:"+outcome)
 }
 
-// timed answers every duration the orchestrator recorded, in order: all of
-// them but the queue's change counts and the remediation gauge.
-func (f *fakeMeter) timed() []string {
-	var out []string
-	for _, m := range f.all() {
-		if !strings.HasPrefix(m, "change:") && !strings.HasPrefix(m, "in_a_row:") {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
 func (f *fakeMeter) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -5602,86 +5487,6 @@ func causedRun(t *testing.T, h *harness) (*run, func() error) {
 	t.Cleanup(func() { cancel(nil) })
 	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
 	return r, func() error { return context.Cause(ctx) }
-}
-
-// RequestAsyncMerge stands for the store's async request record: one row per
-// request, behind every request recorded before it.
-func (f *fakeDB) RequestAsyncMerge(_ context.Context, repo wsm.RepoKey, requester ids.WorkspaceID, turn ids.TurnID, source wsm.MergeSource, at time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.asyncRequestErr; err != nil {
-		f.asyncRequestErr = nil
-		return err
-	}
-	f.asyncRequests = append(f.asyncRequests, wsm.AsyncMergeRequest{
-		Repo: repo, Requester: requester, Turn: turn, RequestedAt: at, Source: source,
-		WaitsOn: source.Behind, WaitsOnName: source.BehindName,
-	})
-	return nil
-}
-
-// AsyncMergeRequestsOf answers REQUESTER's requests, oldest first.
-func (f *fakeDB) AsyncMergeRequestsOf(_ context.Context, requester ids.WorkspaceID) ([]wsm.AsyncMergeRequest, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.asyncReadErr != nil {
-		return nil, f.asyncReadErr
-	}
-	var out []wsm.AsyncMergeRequest
-	for _, req := range f.asyncRequests {
-		if req.Requester == requester {
-			out = append(out, req)
-		}
-	}
-	return out, nil
-}
-
-// AllAsyncMergeRequests answers every request, oldest first.
-func (f *fakeDB) AllAsyncMergeRequests(context.Context) ([]wsm.AsyncMergeRequest, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.asyncReadErr != nil {
-		return nil, f.asyncReadErr
-	}
-	return append([]wsm.AsyncMergeRequest(nil), f.asyncRequests...), nil
-}
-
-// DropAsyncMergeRequest stands for the store's drop: the request goes, and
-// every merge placed behind it is settled with CAUSE.
-func (f *fakeDB) DropAsyncMergeRequest(_ context.Context, repo wsm.RepoKey, request wsm.DetachedMergeID, cause string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.asyncDropErr != nil {
-		return f.asyncDropErr
-	}
-	i := f.asyncRequestIndexLocked(request)
-	if i < 0 {
-		return fmt.Errorf("no async request %s: %w", request, wsm.ErrNotFound)
-	}
-	f.asyncRequests = append(f.asyncRequests[:i], f.asyncRequests[i+1:]...)
-	f.settleWaitsOnLocked(repo, ids.WorkspaceID(request), cause)
-	return nil
-}
-
-// asyncRequestIndexLocked answers REQUEST's index among the async requests,
-// -1 when none stands, with f.mu held.
-func (f *fakeDB) asyncRequestIndexLocked(request wsm.DetachedMergeID) int {
-	for i, req := range f.asyncRequests {
-		if req.Source.Detach == request {
-			return i
-		}
-	}
-	return -1
-}
-
-// asyncRequestOf answers WS's oldest async request not yet handed off, and
-// false when it has none.
-func (h *harness) asyncRequestOf(ws ids.WorkspaceID) (wsm.AsyncMergeRequest, bool) {
-	requests, _ := h.db.AsyncMergeRequestsOf(context.Background(), ws)
-	if len(requests) == 0 {
-		return wsm.AsyncMergeRequest{}, false
-	}
-	return requests[0], true
 }
 
 // fakeStanding is the rollout controller's queue standing: whether the queue
@@ -5976,4 +5781,67 @@ func (ft *fakeTimers) isStopped(timer *fakeTimer) bool {
 	ft.mu.Lock()
 	defer ft.mu.Unlock()
 	return timer.stopped
+}
+
+// fakeHandBacks records every merge outcome handed back to its workspace.
+type fakeHandBacks struct {
+	mu        sync.Mutex
+	handbacks []handback
+}
+
+// handback is one HandBack the fake was handed.
+type handback struct {
+	ws      ids.WorkspaceID
+	outcome DetachedOutcome
+}
+
+func (d *fakeHandBacks) HandBack(_ context.Context, ws ids.WorkspaceID, _ wsm.Workspace, out DetachedOutcome) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.handbacks = append(d.handbacks, handback{ws: ws, outcome: out})
+	return nil
+}
+
+// sent answers every handback, in order.
+func (d *fakeHandBacks) sent() []handback {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]handback(nil), d.handbacks...)
+}
+
+// recordsFor answers every record with one level, operation and message.
+func (h *harness) recordsFor(level, operation, message string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range h.logs.Records() {
+		if string(rec.Level) == level && rec.Operation == operation && rec.Message == message {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// entryOf answers ws's queue entry, false when it has none.
+func (h *harness) entryOf(ws ids.WorkspaceID) (wsm.MergeQueueEntry, bool) {
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	for _, entry := range entries {
+		if entry.Workspace == ws {
+			return entry, true
+		}
+	}
+	return wsm.MergeQueueEntry{}, false
+}
+
+// headsOn answers every merge head published on ws's root feed, in order.
+func (f *fakeFeed) headsOn(ws ids.WorkspaceID) []*frontendv1.FeedMerge {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*frontendv1.FeedMerge
+	for _, row := range f.rows {
+		if row.WS == ws && row.Feed.Root {
+			if merge := row.Row.GetActivity().GetMerge(); merge != nil {
+				out = append(out, merge)
+			}
+		}
+	}
+	return out
 }

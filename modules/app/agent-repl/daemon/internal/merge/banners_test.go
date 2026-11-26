@@ -2,7 +2,6 @@ package merge
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -202,46 +201,6 @@ func TestARequestDroppedBeforeItWasInLineRaisesNoBanner(t *testing.T) {
 	}
 }
 
-func TestADetachedMergeRaisesItsBannersOnTheMergeWorkspace(t *testing.T) {
-	// Arrange: a detached request handed off and in line.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-
-	// Act
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
-
-	// Assert
-	want := []raisedBanner{{ws: theMergeWorkspace, kind: "landed"}}
-	if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("banners = %+v, want %+v", got, want)
-	}
-}
-
-func TestAForkThatFailsRaisesTheRequestersAbandonedBanner(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.detached.forkErr = errors.New("the worktree could not be made")
-
-	// Act
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-
-	// Assert
-	got := h.banners.seen()
-	if len(got) != 1 || got[0].ws != theWorkspace || got[0].kind != "abandoned" || !strings.Contains(got[0].text, "the worktree could not be made") {
-		t.Fatalf("banners = %+v, want the requester's abandoned banner naming the fork's failure", got)
-	}
-}
-
 func TestAMergeTheRestartCouldNotResumeRaisesTheFailedBanner(t *testing.T) {
 	// Arrange: an interrupted merge whose geometry was forgotten.
 	h := newHarness(t)
@@ -337,24 +296,6 @@ func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
 		end     string
 	}{
 		{
-			name: "an async merge that landed",
-			arrange: func(t *testing.T, h *harness) {
-				h.emacsRepo()
-				h.landsCleanly("abc123def4567")
-				h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-				h.gatePasses("daemon")
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			act: func(t *testing.T, h *harness) {
-				if err := h.admit(context.Background()); err != nil {
-					t.Fatalf("the merge failed: %v", err)
-				}
-			},
-			end: "landed",
-		},
-		{
 			name: "a sync merge that failed",
 			arrange: func(t *testing.T, h *harness) {
 				h.emacsRepo()
@@ -367,18 +308,6 @@ func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
 				_ = h.admit(context.Background())
 			},
 			end: "failed",
-		},
-		{
-			name: "an async request whose fork failed",
-			arrange: func(t *testing.T, h *harness) {
-				h.detached.forkErr = errors.New("the worktree could not be made")
-			},
-			act: func(t *testing.T, h *harness) {
-				if err := requestDetached(t, h, RequestedByUser); err != nil {
-					t.Fatalf("Enqueue: %v", err)
-				}
-			},
-			end: "abandoned",
 		},
 	}
 	for _, tt := range tests {

@@ -49,7 +49,6 @@ const (
 // kinds, so a replayed ledger names the same step a live bubble drew.
 const (
 	TabQueue      = "queue"
-	TabPick       = "pick"
 	TabRebasing   = "rebasing"
 	TabConflicts  = "conflicts"
 	TabTests      = "tests"
@@ -434,7 +433,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 }
 
 // askChanged hands a workspace's change of open asks to its run in flight, if
-// any: a pick, conflict-resolution or fixing tab standing live is redrawn
+// any: a conflict-resolution or fixing tab standing live is redrawn
 // waiting on the user, or live again. A workspace with no run in flight has no
 // tab to draw it on; the ask set keeps the fact for a run that reaches such a
 // tab.

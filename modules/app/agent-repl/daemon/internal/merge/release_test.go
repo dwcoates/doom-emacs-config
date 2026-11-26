@@ -252,21 +252,8 @@ func TestAReleasedMergeIsHandedBackReleasedAndRaisesNoResolvedBanner(t *testing.
 			}
 			return h
 		}},
-		{name: "an evicted queued detached merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
-			h := newHarness(t)
-			if err := requestDetached(t, h, RequestedByUser); err != nil {
-				t.Fatalf("Enqueue: %v", err)
-			}
-			if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
-				t.Fatalf("Evict: %v", err)
-			}
-			return h
-		}},
 		{name: "an evicted running in-place merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
 			return ended(t, phaseRunning, resolutions[0])
-		}},
-		{name: "an evicted running detached merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
-			return endedObserved(t, phaseRunning, resolutions[0], func(h *harness) { markMergeWorkspace(h, otherWorkspace) })
 		}},
 		{name: "a dequeued running in-place merge", cause: CauseUserDequeue, end: func(t *testing.T) *harness {
 			return ended(t, phaseRunning, resolutions[1])
@@ -278,7 +265,7 @@ func TestAReleasedMergeIsHandedBackReleasedAndRaisesNoResolvedBanner(t *testing.
 			h := tt.end(t)
 
 			// Assert: one handback, marked released with its cause.
-			sent := h.detached.sent()
+			sent := h.handBacks.sent()
 			if len(sent) != 1 || sent[0].outcome.Cause != tt.cause || !sent[0].outcome.Released() {
 				t.Fatalf("handbacks = %+v, want one marked released by %s", sent, tt.cause)
 			}
@@ -391,14 +378,13 @@ func TestAWaitingMergeLeavingItsLineHandsBackTheSessionItsWaitParked(t *testing.
 	}
 }
 
-func TestOnlyAnOwnBranchMergeWithNoPickHandsBackItsSession(t *testing.T) {
+func TestOnlyAnOwnBranchMergeHandsBackItsSession(t *testing.T) {
 	tests := []struct {
 		name   string
 		source wsm.MergeSource
 		want   int
 	}{
 		{name: "an own-branch merge", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: 1},
-		{name: "a merge workspace's merge with a pick", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"}},
 		{name: "another workspace's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}},
 		{name: "a named branch's merge", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
 	}
@@ -450,7 +436,6 @@ func TestTheParkAndItsHandBackAskTheSameSourcesAsParksWhileQueued(t *testing.T) 
 	sources := map[string]wsm.MergeSource{
 		"own branch":           {Kind: wsm.MergeSourceOwnBranch},
 		"own branch kept open": {Kind: wsm.MergeSourceOwnBranch, KeepOpen: true},
-		"own branch with pick": {Kind: wsm.MergeSourceOwnBranch, Pick: "fix it"},
 		"another workspace":    {Kind: wsm.MergeSourceWorkspace},
 		"named branch":         {Kind: wsm.MergeSourceBranch, Branch: "feature"},
 	}

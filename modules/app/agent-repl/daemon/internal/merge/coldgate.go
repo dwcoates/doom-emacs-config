@@ -43,7 +43,7 @@ import (
 //     waits in line says at ERROR that the gate stands for the user.
 //   - A MERGE TURN NEVER MEETS A STANDING GATE (2026-11-22). Every turn the
 //     orchestrator hands a merge's workspace passes the gate first
-//     (passColdGate, from handOff): a pick or a repair brings the session
+//     (passColdGate, from handOff): a repair brings the session
 //     up itself, and its submission once raced the queue's answer to the
 //     raise and lost. The turn joins the answer running, or makes the one
 //     answer itself; a failed one fails the turn, which ends the merge.
@@ -402,11 +402,10 @@ func (o *orchestrator) settleColdAnswer(ctx context.Context, ws ids.WorkspaceID,
 // TURN of ORIGIN is handed to its prompt queue (handOff, bringTurnOn).
 //
 // A MERGE NEVER FAILS ON ITS OWN WORKSPACE'S COLD GATE (2026-11-22 11:32:58:
-// an async merge's pick brought its merge workspace up overnight-cold, the
-// bring-up parked at the gate, and the pick's submission was refused by the
-// gate's name while the queue's own answer to the raise was still starting,
-// so the merge failed and the answer that then succeeded passed a gate no
-// merge was left to use). So every merge turn the orchestrator submits reads
+// a merge turn brought its workspace up overnight-cold, the bring-up parked
+// at the gate, and the turn's submission was refused by the gate's name while
+// the queue's own answer to the raise was still starting, so the merge failed
+// and the answer that then succeeded passed a gate no merge was left to use). So every merge turn the orchestrator submits reads
 // the gate once its session was asked up: a gate standing is answered by the
 // compaction the queue's answer makes, and the turn waits for it. THE GATE
 // HAS ONE ANSWER (coldAnswering): a turn that finds the queue's answer, or

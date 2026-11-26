@@ -365,8 +365,7 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 }
 
 // openMergeLedger opens LEDGER, WS's merge ledger: the ONE door to
-// DB.OpenMergeLedger, which a run's openLedger and an async merge's pick (the
-// ledger's first round, before any run) both go through.
+// DB.OpenMergeLedger, which a run's openLedger goes through.
 func (o *orchestrator) openMergeLedger(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID) error {
 	return o.deps.DB.OpenMergeLedger(ctx, ws, ledger)
 }

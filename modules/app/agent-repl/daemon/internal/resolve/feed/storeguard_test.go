@@ -54,7 +54,6 @@ func guardStores(t testing.TB, r *resolver) {
 	}
 	d.TurnCloses = guardedRead(g, "TurnCloses", d.TurnCloses)
 	d.TurnAddresses = guardedRead(g, "TurnAddresses", d.TurnAddresses)
-	d.TurnMirrors = guardedRead(g, "TurnMirrors", d.TurnMirrors)
 	d.TurnSenders = guardedRead(g, "TurnSenders", d.TurnSenders)
 	if d.DurableRows != nil {
 		d.DurableRows = guardedDurableRows{g, d.DurableRows}

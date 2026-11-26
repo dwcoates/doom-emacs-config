@@ -23,7 +23,7 @@ var deployingSince = deployStarted.Add(-30 * time.Second)
 func seedDeploying(t *testing.T, h *harness, repo wsm.RepoKey, timed bool) wsm.DeployingMerge {
 	t.Helper()
 	m := wsm.DeployingMerge{
-		Repo: repo, Workspace: theWorkspace, Lease: "lease-deploying", Credited: theWorkspace, Name: "ws-one", Branch: "agent/one",
+		Repo: repo, Workspace: theWorkspace, Lease: "lease-deploying", Name: "ws-one", Branch: "agent/one",
 		TargetDir: h.targetD, ActiveSince: deployingSince.Add(-time.Minute), DeployingSince: deployingSince, Timed: timed,
 	}
 	if _, err := h.db.RecordDeployingMerge(context.Background(), m); err != nil {
@@ -257,7 +257,7 @@ func TestALandingsTeardownSettlesItsDeployingStep(t *testing.T) {
 				// it holds the head, and a running merge lands nothing under it.
 				h.db.mu.Lock()
 				h.db.beforeRelease = func(*fakeDB) {
-					m := wsm.DeployingMerge{Repo: h.repoKey(), Workspace: otherWorkspace, Lease: "lease-earlier", Credited: otherWorkspace, Name: "ws-two",
+					m := wsm.DeployingMerge{Repo: h.repoKey(), Workspace: otherWorkspace, Lease: "lease-earlier", Name: "ws-two",
 						TargetDir: h.targetD, ActiveSince: deployingSince.Add(-time.Minute), DeployingSince: deployingSince, Timed: true}
 					if _, err := h.db.checks.RecordDeployingMerge(context.Background(), m); err != nil {
 						t.Errorf("RecordDeployingMerge: %v", err)
@@ -336,34 +336,6 @@ func TestAnUnreadableDeployingMergeFailsTheStatus(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.status",
 		Message: "could not read a repository's landed merge still deploying"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
-	}
-}
-
-func TestDeployingMemberCreditsAnAsyncMergeToItsRequester(t *testing.T) {
-	tests := []struct {
-		name          string
-		async         bool
-		wantRequester string
-	}{
-		{name: "an own-branch landing names no requester"},
-		{name: "an async merge names its requester", async: true, wantRequester: "ws-asker"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			m := wsm.DeployingMerge{Workspace: "mws", Credited: "mws", Name: "land-x", Branch: "b", Async: tt.async}
-			if tt.async {
-				m.Credited = "ws-asker"
-			}
-
-			// Act
-			got := deployingMember(m)
-
-			// Assert
-			if string(got.Requester) != tt.wantRequester || !got.Started || got.Step != footer.StepDeploying || got.Name != "land-x" {
-				t.Fatalf("member %+v, want it running its deploying step, requester %q", got, tt.wantRequester)
-			}
-		})
 	}
 }
 
