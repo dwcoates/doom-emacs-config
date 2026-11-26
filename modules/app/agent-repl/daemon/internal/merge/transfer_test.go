@@ -3,6 +3,8 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/logsite"
 )
@@ -438,6 +441,36 @@ func TestASuspensionLeavesAnAbandonedRunToItsEnd(t *testing.T) {
 	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.pause", text: "the merge was abandoned before the suspension took it",
 		context: map[string]string{"workspace": string(theWorkspace), "cause": string(CauseUserDrop)}}) {
 		t.Fatalf("no record of the abandoned run left alone: %v", h.logs.Records())
+	}
+}
+
+func TestAHeldQueueSuspendsItsRunningMergesInWorkspaceOrder(t *testing.T) {
+	// Arrange: two runs of the held repository, both abandoned and ended, so
+	// each suspension records its own end and returns at once.
+	h := newHarness(t)
+	for _, ws := range []ids.WorkspaceID{"ws-b", "ws-a"} {
+		r := liveRun(t, h, ws)
+		h.o.mu.Lock()
+		r.abandonedBy = CauseUserDrop
+		h.o.mu.Unlock()
+		close(r.finished)
+	}
+
+	// Act.
+	err := h.o.suspendHeld(context.Background(), []wsm.RepoKey{h.repoKey()}, suspendPause)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("suspendHeld = %v, want both runs left to their ends", err)
+	}
+	var order []string
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == "daemon.merge.pause" && strings.HasPrefix(rec.Message, "the merge was abandoned before the suspension took it") {
+			order = append(order, fmt.Sprint(rec.Context["workspace"]))
+		}
+	}
+	if !slices.Equal(order, []string{"ws-a", "ws-b"}) {
+		t.Fatalf("suspension order = %v, want [ws-a ws-b]", order)
 	}
 }
 

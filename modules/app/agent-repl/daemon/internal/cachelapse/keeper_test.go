@@ -61,6 +61,7 @@ type fakeDB struct {
 	// the parked keep-alives recorded and parkedCold the parked caches marked
 	// cold, both in order.
 	bypass           map[ids.WorkspaceID]wsm.QueueBypass
+	bypassErr        error
 	parkedKeepalives []time.Time
 	parkedCold       []ids.WorkspaceID
 	// owingErr fails SetKeepaliveOwing; owingWrites counts every write.
@@ -195,6 +196,9 @@ func (f *fakeDB) SetKeepaliveOwing(_ context.Context, id wsm.WorkspaceID, owing 
 func (f *fakeDB) QueueBypass(_ context.Context, id wsm.WorkspaceID) (wsm.QueueBypass, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.bypassErr != nil {
+		return wsm.QueueBypass{}, f.bypassErr
+	}
 	return f.bypass[id], nil
 }
 
@@ -970,6 +974,27 @@ func TestReconcileWithNoServedSessionRecordsNoError(t *testing.T) {
 	// Assert
 	if h.found(dlog.RecordQuery{Level: "error"}) {
 		t.Fatalf("records %v, want no error", h.log.Records())
+	}
+}
+
+func TestReconcileOfAWorkspaceNoLongerRegisteredForgetsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.keeper.deadlines[theWorkspace] = lapseAt
+	h.keeper.beats[theWorkspace] = lapseAt
+	delete(h.db.records, theWorkspace)
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	_, lapse := h.keeper.deadlines[theWorkspace]
+	_, beat := h.keeper.beats[theWorkspace]
+	if lapse || beat {
+		t.Fatalf("lapse armed %v, beat armed %v, want everything kept for the workspace forgotten", lapse, beat)
+	}
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opCadence}) || h.found(dlog.RecordQuery{Level: "error"}) {
+		t.Fatalf("records %v, want the forgetting at INFO and no error", h.log.Records())
 	}
 }
 

@@ -203,3 +203,38 @@ func TestASwitchForgetsTheSteppedOutConversationsSentClock(t *testing.T) {
 		t.Fatal("the stepped-out conversation's sent clock still times the bound conversation's beat")
 	}
 }
+
+func TestAParkedStandingThatCannotBeReadArmsNoParkedBeat(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	withParked(h, 50*time.Minute)
+	h.db.bypassErr = errors.New("database is locked")
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if got, want := h.keeper.beats[theWorkspace], now.Add(-10*time.Minute).Add(KeepaliveInterval); !got.Equal(want) {
+		t.Fatalf("beat = %v, want the running conversation's own %v", got, want)
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive})
+	if !ok || rec.Message != "could not read the workspace's parked conversation; its keep-alive is not armed" || rec.Context["cause"] != "database is locked" {
+		t.Fatalf("error record = %+v, %v; want the unread parked conversation with its cause", rec, ok)
+	}
+}
+
+func TestAParkedBeatWaitsForItsLaterRetry(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	withParked(h, 50*time.Minute)
+	retry := now.Add(-50 * time.Minute).Add(KeepaliveInterval).Add(time.Minute)
+	h.keeper.parkedRetry[theWorkspace] = retry
+
+	// Act
+	due, owed := h.keeper.parkedDue(context.Background(), h.log.Global(), theWorkspace, func(time.Time) bool { return true })
+
+	// Assert
+	if !owed || !due.Equal(retry) {
+		t.Fatalf("parkedDue = (%v, %v), want the later retry %v", due, owed, retry)
+	}
+}

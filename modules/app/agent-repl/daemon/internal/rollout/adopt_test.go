@@ -625,6 +625,41 @@ func TestAnAdoptionTheIncumbentTookBackDialsNothing(t *testing.T) {
 	}
 }
 
+// claimFailingDB fails every unowned-serving claim with one error, leaving the
+// rest of the store as it is.
+type claimFailingDB struct {
+	wsm.DB
+	err error
+}
+
+func (d claimFailingDB) ClaimUnownedServing(context.Context, wsm.WorkspaceID, wsm.InstanceID) (bool, wsm.InstanceID, error) {
+	return false, "", d.err
+}
+
+func TestAnAdoptionWhoseServingClaimFailsDialsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.DB = claimFailingDB{DB: d.DB, err: errFake} })
+	ws, _ := h.workspace(t)
+	releaseServing(t, h, ws)
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want no dial of a shim whose row was never claimed", got)
+	}
+	if got := h.Drained(); len(got) != 0 {
+		t.Fatalf("drained = %v, want no intake drained for an unclaimed workspace", got)
+	}
+	if owner, err := h.db.Serving(context.Background(), ws); err != nil || owner != nil {
+		t.Fatalf("Serving = %v, %v, want the row still unowned", owner, err)
+	}
+	if !loggedError(h.log, opAdopt, "could not claim serving ownership") {
+		t.Fatalf("records = %+v, want the failed claim at ERROR", h.log.Records())
+	}
+}
+
 func TestAnAdoptionWhoseShimWillNotAnswerStillDrainsTheIntake(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

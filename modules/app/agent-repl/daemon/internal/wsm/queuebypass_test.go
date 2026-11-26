@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 // swappedOnce answers a store holding one workspace whose queue conversation
@@ -403,5 +405,58 @@ func TestTheWorkspaceRecordStatesItsQueueBypassHold(t *testing.T) {
 				t.Fatalf("QueueBypassHeld = %v, AlwaysShown = %v; want %v", got.QueueBypassHeld, got.AlwaysShown(), tt.want)
 			}
 		})
+	}
+}
+
+// corruptParkedClock stores a parked clock that is no instant, so the standing
+// read's scan fails with an error that is not ErrNoRows.
+func corruptParkedClock(t *testing.T, s *store, ws Workspace) {
+	t.Helper()
+	if _, err := s.db().ExecContext(context.Background(),
+		`UPDATE workspace_parked_conversations SET clock_at = 'not a clock' WHERE workspace_id = ?`, ws.ID); err != nil {
+		t.Fatalf("corrupting the parked clock: %v", err)
+	}
+}
+
+func TestAStandingThatCannotBeScannedIsRefusedAtError(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.SwapParkedConversation(context.Background(), ws.ID, "vendor-queue", instant, true); err != nil {
+		t.Fatalf("SwapParkedConversation: %v", err)
+	}
+	corruptParkedClock(t, s, ws)
+
+	// Act
+	_, err := s.QueueBypass(context.Background(), ws.ID)
+
+	// Assert
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("QueueBypass = %v, want the scan's failure, not ErrNotFound", err)
+	}
+	refused := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.queue_bypass"})
+	if len(refused) != 1 || refused[0].Message != "refused the read" {
+		t.Fatalf("queue_bypass errors = %+v, want exactly one \"refused the read\"", refused)
+	}
+}
+
+func TestATakeWhoseStandingCannotBeScannedRecordsNoHolder(t *testing.T) {
+	// Arrange
+	s, ws, _ := swappedOnce(t)
+	corruptParkedClock(t, s, ws)
+
+	// Act
+	err := s.TakeQueueBypass(context.Background(), ws.ID, instant)
+
+	// Assert
+	if err == nil {
+		t.Fatal("TakeQueueBypass = nil, want the standing read's failure")
+	}
+	var holders int
+	if err := s.db().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM queue_bypass_holders`).Scan(&holders); err != nil {
+		t.Fatalf("counting holders: %v", err)
+	}
+	if holders != 0 {
+		t.Fatalf("holders = %d after a refused take, want 0", holders)
 	}
 }

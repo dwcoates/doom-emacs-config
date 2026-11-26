@@ -89,6 +89,78 @@ func TestAwaitQuietReportsTheCallsItGaveUpOn(t *testing.T) {
 	}
 }
 
+// parkedCall serves one unary call through the gate whose handler holds until
+// release is closed, answering once the handler has entered and a channel
+// closed once its caller has read the answer.
+func parkedCall(t *testing.T, log dlog.Logger, release <-chan struct{}) (*Serving, <-chan struct{}) {
+	t.Helper()
+	entered := make(chan struct{})
+	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}), log)
+	httpServer := servedThroughTheGate(serving)
+	t.Cleanup(httpServer.Close)
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		resp, err := httpServer.Client().Get(httpServer.URL + "/agentrepl.v1.AgentRepl/SelectWorkspace")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-entered
+	return serving, answered
+}
+
+// TestAwaitQuietReturnsWhenTheLastCallIsAnsweredInsideItsBound pins the wait's
+// own end: a call answered while the exit waits ends the wait at once, with
+// nothing left in flight and nothing recorded.
+func TestAwaitQuietReturnsWhenTheLastCallIsAnsweredInsideItsBound(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	release := make(chan struct{})
+	serving, answered := parkedCall(t, log, release)
+	waiting := make(chan struct{})
+	serving.awaitingQuiet = func() { close(waiting) }
+	left := make(chan int, 1)
+	go func() { left <- serving.AwaitQuiet(time.Minute) }()
+	<-waiting
+
+	// Act
+	close(release)
+	got := <-left
+	<-answered
+
+	// Assert
+	if got != 0 {
+		t.Fatalf("AwaitQuiet = %d once the parked call was answered, want 0", got)
+	}
+	if recs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.await_quiet"}); len(recs) != 0 {
+		t.Fatalf("await_quiet records = %+v, want none for a wait that ended quiet", recs)
+	}
+}
+
+// TestAwaitQuietRecordsTheCallsItGaveUpOnAtWarn pins the record the expired
+// bound writes: the calls still in flight and the bound, at WARN.
+func TestAwaitQuietRecordsTheCallsItGaveUpOnAtWarn(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	release := make(chan struct{})
+	serving, _ := parkedCall(t, log, release)
+	defer close(release)
+
+	// Act
+	left := serving.AwaitQuiet(0)
+
+	// Assert
+	recs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.await_quiet"})
+	if left != 1 || len(recs) != 1 || recs[0].Level != dlog.LevelWarn || recs[0].Context["in_flight"] != 1 {
+		t.Fatalf("AwaitQuiet = %d, records %+v, want 1 and one WARN naming one call in flight", left, recs)
+	}
+}
+
 // TestAwaitQuietDoesNotWaitForAStandingStream pins the exclusion. A Watch*
 // handler returns only when its client goes away, so counting one would spend
 // the exit's whole grace on every stop and bound nothing.

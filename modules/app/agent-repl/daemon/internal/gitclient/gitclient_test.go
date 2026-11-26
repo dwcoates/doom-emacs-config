@@ -939,6 +939,48 @@ func TestFastForwardRefusalPropagatesTheGitEvidence(t *testing.T) {
 	}
 }
 
+func TestAFastForwardGitThatDidNotFinishIsAnsweredAsItsFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelled bool
+		git       func() gitFixture
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "git was killed by a signal", git: func() gitFixture { return killedBy(syscall.SIGKILL) }, wantLevel: "error", wantMsg: "git was killed by a signal"},
+		{name: "the caller's context ended", cancelled: true, git: func() gitFixture { return ok("") }, wantLevel: "info", wantMsg: "git was cancelled before it finished"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tt.git())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancelled {
+				cancel()
+			}
+
+			// Act.
+			err := git.FastForward(ctx, "/target", "abc123")
+
+			// Assert.
+			if err == nil || IsCancelled(err) != tt.cancelled {
+				t.Fatalf("FastForward error = %v, want a failure with cancelled=%v", err, tt.cancelled)
+			}
+			var got []string
+			for _, r := range surfaces.records() {
+				if r.Operation == "daemon.gitclient.fast_forward" {
+					got = append(got, r.Level+": "+r.Message)
+				}
+			}
+			if want := tt.wantLevel + ": " + tt.wantMsg; len(got) != 1 || got[0] != want {
+				t.Fatalf("fast_forward records = %v, want exactly [%s]", got, want)
+			}
+		})
+	}
+}
+
 const (
 	trackedOverwrite   = "error: Your local changes to the following files would be overwritten by merge:\n\t.claude/skills/create-or-update-pr/SKILL.md\nPlease commit your changes or stash them before you merge.\nAborting\n"
 	untrackedOverwrite = "error: The following untracked working tree files would be overwritten by merge:\n\tnew.go\nPlease move or remove them before you merge.\nAborting\n"

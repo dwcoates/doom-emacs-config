@@ -195,6 +195,26 @@ func TestALateConnectionFailedCardThatFailedBeforeTheReturnIsNotDrawn(t *testing
 	}
 }
 
+func TestALateConnectionFailedCardIsAnsweredWithNoStoreToRecordIt(t *testing.T) {
+	// Arrange: a resolver with no reconnected-turn store bound.
+	h := newHarness(t)
+	h.resolver.NetworkFaultOpened(testWorkspace, "f-1")
+	h.deliverPrompt("t1", "question t1")
+	failedAt := h.nowMs - 5_000
+	h.resolver.NetworkFaultClosed(testWorkspace, "f-1")
+
+	// Act
+	h.terminalAt("t1", nil, unreachableFailure(), failedAt)
+
+	// Assert
+	if h.endingDrawn("t1") {
+		t.Fatal("a connection failure the network's return answered was drawn")
+	}
+	if !h.hasRecordWith("info", opReconnected, "failed_at_ms", failedAt) || h.hasRecord("error", opReconnected) {
+		t.Fatalf("records = %+v, want the late answer at INFO and no error", h.records())
+	}
+}
+
 func TestAConnectionFailedCardThatFailedAfterTheReturnStands(t *testing.T) {
 	// Arrange: a new outage's first card arrives before its fault opens.
 	h := newHarness(t)
