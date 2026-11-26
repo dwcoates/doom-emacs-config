@@ -79,16 +79,47 @@ func Paragraph(noun, text string, min, max, maxWords int) error {
 	if last, _ := utf8.DecodeLastRuneInString(words[len(words)-1]); !isSentenceEnd(last) {
 		return fmt.Errorf("a %s ends its last sentence with its last word", noun)
 	}
-	sentences := 0
-	for _, word := range words {
-		if last, _ := utf8.DecodeLastRuneInString(word); isSentenceEnd(last) {
-			sentences++
-		}
-	}
+	sentences := len(Sentences(text))
 	if sentences < min || sentences > max {
 		return fmt.Errorf("a %s is %d to %d sentences, not %d", noun, min, max, sentences)
 	}
 	return nil
+}
+
+// Sentences splits TEXT into its sentences, each the words from one
+// sentence's start through the word ending it, joined by single spaces. A
+// sentence ends on a word ending in a sentence terminator; trailing words
+// with no terminator form a last sentence. It is the ONE reading of "a
+// sentence" Paragraph counts by and Bullets lists by.
+func Sentences(text string) []string {
+	var (
+		out     []string
+		current []string
+	)
+	for _, word := range strings.Fields(text) {
+		current = append(current, word)
+		if last, _ := utf8.DecodeLastRuneInString(word); isSentenceEnd(last) {
+			out = append(out, strings.Join(current, " "))
+			current = nil
+		}
+	}
+	if len(current) > 0 {
+		out = append(out, strings.Join(current, " "))
+	}
+	return out
+}
+
+// Bullets is TEXT's sentences as a markdown bulleted list, one "- " item per
+// sentence, joined by newlines; "" for a text with no sentence. The agent
+// writes plain sentences and the daemon draws them as bullets, so no agent
+// ever writes markdown.
+func Bullets(text string) string {
+	sentences := Sentences(text)
+	items := make([]string, len(sentences))
+	for i, sentence := range sentences {
+		items[i] = "- " + sentence
+	}
+	return strings.Join(items, "\n")
 }
 
 // trimmedLine answers why TEXT is not one line with no whitespace at either

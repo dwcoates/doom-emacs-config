@@ -176,3 +176,50 @@ func TestTrimmedLineIsTheSharedFirstCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestSentences(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{name: "the empty text has no sentences", text: "", want: nil},
+		{name: "each terminated run is a sentence", text: "Fix it. Is it? Yes!", want: []string{"Fix it.", "Is it?", "Yes!"}},
+		{name: "words with no terminator are a last sentence", text: "One. Two words", want: []string{"One.", "Two words"}},
+		{name: "runs of whitespace collapse to one space", text: "A  b.   C d.", want: []string{"A b.", "C d."}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := Sentences(tt.text)
+
+			// Assert.
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Sentences(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBullets(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "the empty text has no bullets", text: "", want: ""},
+		{name: "one sentence is one bullet", text: "Fix it.", want: "- Fix it."},
+		{name: "each sentence is its own bullet line", text: "Fix it. Test it.", want: "- Fix it.\n- Test it."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := Bullets(tt.text)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("Bullets(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}

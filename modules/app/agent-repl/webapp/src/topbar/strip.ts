@@ -50,6 +50,7 @@ import type {
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
+import { renderMarkdown } from "../markdown.js";
 import { drawLinkBadge, drawLinkMarks } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
 import { createLogger } from "../log.js";
@@ -233,11 +234,14 @@ export function bindTitleDescription(element: HTMLElement, description: TopbarTi
   });
 }
 
-/** The summary's hover popup: the long summary, drawn verbatim. */
+/**
+ * The summary's hover popup: the long summary, a markdown bulleted list the
+ * daemon made of the agent's sentences, rendered as markdown.
+ */
 export function drawTitleDescription(u: TopbarTitleDescription): HTMLElement {
   const element = document.createElement("div");
   element.className = "topbar-title-description";
-  element.textContent = u.text;
+  element.innerHTML = renderMarkdown(u.text);
   return element;
 }
 

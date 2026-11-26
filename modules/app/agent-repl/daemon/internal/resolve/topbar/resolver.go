@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/textline"
 	"agent-repld/internal/tokenusage"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
@@ -315,12 +316,14 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 //
 // THE LONG SUMMARY IS THE TITLE'S DESCRIPTION, the popup a hover shows. It
 // rides only the agent's own short summary: the vendor's ai-title has none.
+// ITS TEXT IS MARKDOWN: each of the agent's plain sentences is one bullet
+// (textline.Bullets), so the agent never writes markdown.
 func title(s *wsState) *frontendv1.TopbarTitle {
 	switch {
 	case s.summary.Short != "":
 		out := &frontendv1.TopbarTitle{Text: s.summary.Short}
 		if s.summary.Long != "" {
-			out.Description = &frontendv1.TopbarTitleDescription{Text: s.summary.Long}
+			out.Description = &frontendv1.TopbarTitleDescription{Text: textline.Bullets(s.summary.Long)}
 		}
 		return out
 	case s.sessionTitle != "":
