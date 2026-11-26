@@ -4076,6 +4076,31 @@ func TestMediationDispatchesTheProblemsReadFromStandardInput(t *testing.T) {
 	}
 }
 
+func TestMediationDispatchCarriesEachProblemsRaceFindings(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.stdin = `[{"statement": "the reaper races its sweep", "evidence": [], "race_findings": [{"suite": "daemon", "test": "TestA"}, {"suite": "webapp", "test": "b"}]}]`
+
+	// Act
+	code := f.run(mergeQueueNoun, "mediation", "dispatch", "-summary", "a race")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	problems := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation().GetDispatch().GetProblems()
+	if len(problems) != 1 {
+		t.Fatalf("problems = %v, want the one read", problems)
+	}
+	var got []string
+	for _, r := range problems[0].GetRaceFindings() {
+		got = append(got, r.GetSuite()+"/"+r.GetTest())
+	}
+	if !slices.Equal(got, []string{"daemon/TestA", "webapp/b"}) {
+		t.Fatalf("race findings = %v, want both, in order", got)
+	}
+}
+
 func TestMediationEscalatesWithItsFindingsWhenAsked(t *testing.T) {
 	tests := []struct {
 		name         string
