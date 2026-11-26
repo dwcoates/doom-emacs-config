@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # build-launcher.sh — build Zettel.app, the launcher, which opens Emacs and posts
 # every macOS desktop banner (launcher/), into a complete bundle, signed with the local identity, at OUT (default
-# ~/.cache/agent-repl/bin/Zettel.app), then, unless --no-install, install it
+# ~/.cache/agent-repl/bin/Zettel.app.staged), then, unless --no-install, install it
 # at ~/Applications/Zettel.app, register it with LaunchServices, and restart
 # its launchd agent (app.zettel.launcher) onto the new build.
+#
+# THE BUILD IS NEVER NAMED *.app: macOS registers any .app it finds, so a build
+# standing beside the installed ~/Applications/Zettel.app listed a second Zettel
+# in System Settings (Notifications, Focus). A leftover Zettel.app beside OUT,
+# from a build before this, is removed and named, so a machine heals on its
+# next build.
 #
 # THE BUNDLE IS ASSEMBLED, NEVER COMMITTED: the executable is SwiftPM's
 # release build, the Info.plist is launcher/Bundle/Info.plist, and the icon is
@@ -24,7 +30,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 LAUNCHER="$ROOT/launcher"
-OUT="${HOME}/.cache/agent-repl/bin/Zettel.app"
+OUT="${HOME}/.cache/agent-repl/bin/Zettel.app.staged"
 INSTALL=1
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -68,6 +74,11 @@ cp -R "$STAGE" "$OUT.new"
 rm -rf "$OUT"
 mv "$OUT.new" "$OUT"
 echo "[build-launcher] built $OUT"
+STRAY="$(dirname "$OUT")/Zettel.app"
+if [ -e "$STRAY" ]; then
+    rm -rf "$STRAY"
+    echo "[build-launcher] removed the stray $STRAY, which macOS would list beside the installed Zettel"
+fi
 
 [ "$INSTALL" -eq 1 ] || exit 0
 DEST="$APPS/Zettel.app"
