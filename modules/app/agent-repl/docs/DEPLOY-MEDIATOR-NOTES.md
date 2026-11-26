@@ -13,6 +13,10 @@ Its brief names this file, and it is the mediator's to write.
 
 ## Notes
 
+- A race finding's ref is `suite/test`, where the suite is `daemon` and the
+  test is `integration.Test…` (and may hold a slash for a subtest); since
+  2026-11-26 the brief names the two apart, as suite `daemon`, test
+  `integration.Test…`, and a dispatch copies each verbatim.
 - Handover groups that are older than the three most recent deploys and
   recover on their own: `daemon.server.await_streams_ended`, `go_away`,
   `streams_unwritten`, `await_quiet` are the predecessor's exit-deadline
