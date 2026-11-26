@@ -2715,12 +2715,14 @@ The composer asks for every slash command the workspace's runtime answers."
 
 (defun agent-repl-wire-decode-session-command-catalog-entry (value)
   "Decode VALUE as `SessionCommandCatalogEntry', a plist
-\(:name :description :argument-hint :aliases).
+\(:name :description :argument-hint :aliases :skill-file).
 One command the runtime answers: its name WITHOUT the leading slash, and
-the runtime's own description and argument hint, nil when it states none."
+the runtime's own description and argument hint, nil when it states none.
+SKILL-FILE is the absolute path of a skill command's SKILL.md, nil for a
+command with no file."
   (let* ((message "SessionCommandCatalogEntry")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(name description argumentHint aliases))
+    (agent-repl-wire--check-keys message object '(name description argumentHint aliases skillFile))
     (let ((name (agent-repl-wire--decode-string message 'name object)))
       (when (string-empty-p name)
         (agent-repl-wire--fail message 'name "a command name is never empty"))
@@ -2729,7 +2731,8 @@ the runtime's own description and argument hint, nil when it states none."
        (list :name name
              :description (agent-repl-wire--decode-optional-string message 'description object)
              :argument-hint (agent-repl-wire--decode-optional-string message 'argumentHint object)
-             :aliases (agent-repl-wire--decode-repeated-string message 'aliases object))))))
+             :aliases (agent-repl-wire--decode-repeated-string message 'aliases object)
+             :skill-file (agent-repl-wire--decode-optional-string message 'skillFile object))))))
 
 (defun agent-repl-wire-decode-session-command-catalog (value)
   "Decode VALUE as `SessionCommandCatalog', a plist (:commands LIST).

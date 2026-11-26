@@ -2875,16 +2875,26 @@ replaces it."
                   #'agent-repl-wire-decode-list-slash-commands-response
                   (concat "{\"success\":{\"stated\":{\"catalog\":{\"commands\":["
                           "{\"name\":\"merge-queue\",\"description\":\"Land work\","
-                          "\"argumentHint\":\"<own>\"},"
+                          "\"argumentHint\":\"<own>\","
+                          "\"skillFile\":\"/skills/merge-queue/SKILL.md\"},"
                           "{\"name\":\"usage\",\"aliases\":[\"cost\"]}]}}}}"))
                  '(:arm :success
                    :value (:arm :stated
                            :value (:catalog
                                    (:commands
                                     ((:name "merge-queue" :description "Land work"
-                                      :argument-hint "<own>" :aliases nil)
+                                      :argument-hint "<own>" :aliases nil
+                                      :skill-file "/skills/merge-queue/SKILL.md")
                                      (:name "usage" :description nil
-                                      :argument-hint nil :aliases ("cost"))))))))))
+                                      :argument-hint nil :aliases ("cost")
+                                      :skill-file nil)))))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-non-string-skill-file-is-a-breach ()
+  "A skill file that is not a string is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"name\":\"a\",\"skillFile\":7}]}}}}")
+                 '("SessionCommandCatalogEntry" skillFile "expected a string"))))
 
 (ert-deftest agent-repl-test-wire-host-list-slash-commands-empty-catalog-decodes ()
   "An empty stated catalog is a catalog with no commands."
