@@ -31,7 +31,7 @@ func production(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.config.ProductionChecks = &repoconfigv1.ProductionChecks{}
-	h.briefs[BriefProductionIntake] = []string{"span_since", "span_until", "new_sites", "refired_sites", "site_file", "baseline", "open_children", "metrics_window"}
+	h.briefs[BriefProductionIntake] = []string{"span_since", "span_until", "new_sites", "refired_sites", "site_file", "baseline", "span_children", "metrics_window"}
 	h.briefs[BriefProductionIntakeResumed] = []string{"span_since", "span_until"}
 	h.briefs[BriefProductionChild] = []string{"kind", "findings", "siblings"}
 	h.briefs[BriefProductionChildFolded] = []string{"folded", "branch", "dir"}
@@ -265,6 +265,8 @@ func TestAProductionTurnTheUserInterruptedIsLeftToTheUser(t *testing.T) {
 
 func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 	fixedAt := deployStarted.Add(-time.Hour)
+	// spanEnd is when the span ended: the landing after it began.
+	spanEnd := deployStarted.Add(time.Minute)
 	cases := []struct {
 		name string
 		span []logsites.Site
@@ -277,6 +279,9 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 		wantRefired []string
 		wantOwned   int
 		wantIgnored int
+		// wantUnshipped is how many sites a fix landed for only after the
+		// span ended.
+		wantUnshipped int
 	}{
 		{
 			name:    "a site the span before never fired is new",
@@ -309,6 +314,32 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			wantRefired: []string{"aaaaaaaaaaaa"},
 		},
 		{
+			name:          "a site whose fix landed after the span ended is left out, not new",
+			span:          []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			fixed:         []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantUnshipped: 1,
+		},
+		{
+			name:          "a site whose fix landed after the span ended is left out, not refired, when the span before had it",
+			span:          []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			before:        []logsites.Site{site("aaaaaaaaaaaa", "warn", priorDeploy)},
+			fixed:         []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantUnshipped: 1,
+		},
+		{
+			name:    "a site whose fix landed as the span ended was in production for it",
+			span:    []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			fixed:   []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd}},
+			wantNew: []string{"aaaaaaaaaaaa"},
+		},
+		{
+			name:      "a site an open child owns is counted owned even when another child's fix is unshipped",
+			span:      []logsites.Site{site("aaaaaaaaaaaa", "warn", deployStarted)},
+			owned:     map[string]wsm.WorkspaceID{"aaaaaaaaaaaa": "child-2"},
+			fixed:     []wsm.FixedSite{{Site: "aaaaaaaaaaaa", Workspace: "child", LandedAt: spanEnd.Add(time.Second)}},
+			wantOwned: 1,
+		},
+		{
 			name:   "a fixed site last seen before its fix landed is not refired",
 			span:   []logsites.Site{site("aaaaaaaaaaaa", "warn", fixedAt.Add(-time.Minute))},
 			before: []logsites.Site{site("aaaaaaaaaaaa", "warn", priorDeploy)},
@@ -324,7 +355,7 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			}
 
 			// Act
-			got := DiffProductionSites(logsites.Answer{Sites: tc.span}, before, tc.owned, tc.fixed, tc.kinds)
+			got := DiffProductionSites(logsites.Answer{Sites: tc.span}, spanEnd, before, tc.owned, tc.fixed, tc.kinds)
 
 			// Assert
 			var gotNew, gotRefired []string
@@ -334,8 +365,8 @@ func TestDiffProductionSitesListsWhatIsNewToTheSpan(t *testing.T) {
 			for _, r := range got.Refired {
 				gotRefired = append(gotRefired, r.Site.Key)
 			}
-			if !slices.Equal(gotNew, tc.wantNew) || !slices.Equal(gotRefired, tc.wantRefired) || got.Owned != tc.wantOwned || got.Ignored != tc.wantIgnored {
-				t.Fatalf("diff = new %v, refired %v, owned %d, ignored %d; want %v, %v, %d, %d", gotNew, gotRefired, got.Owned, got.Ignored, tc.wantNew, tc.wantRefired, tc.wantOwned, tc.wantIgnored)
+			if !slices.Equal(gotNew, tc.wantNew) || !slices.Equal(gotRefired, tc.wantRefired) || got.Owned != tc.wantOwned || got.Ignored != tc.wantIgnored || got.Unshipped != tc.wantUnshipped {
+				t.Fatalf("diff = new %v, refired %v, owned %d, ignored %d, unshipped %d; want %v, %v, %d, %d, %d", gotNew, gotRefired, got.Owned, got.Ignored, got.Unshipped, tc.wantNew, tc.wantRefired, tc.wantOwned, tc.wantIgnored, tc.wantUnshipped)
 			}
 		})
 	}
@@ -347,11 +378,26 @@ func TestDiffProductionSitesCarriesTheHoursTheTallyCovered(t *testing.T) {
 	span := logsites.Answer{From: from, To: to, Partial: true}
 
 	// Act
-	got := DiffProductionSites(span, nil, nil, nil, nil)
+	got := DiffProductionSites(span, deployStarted, nil, nil, nil, nil)
 
 	// Assert
 	if !got.From.Equal(from) || !got.To.Equal(to) || !got.Partial {
 		t.Fatalf("coverage = %v to %v, partial %v; want %v to %v, partial", got.From, got.To, got.Partial, from, to)
+	}
+}
+
+func TestRenderProductionSitesCountsWhatItLeftOut(t *testing.T) {
+	// Arrange
+	c := wsm.ProductionCheck{Since: priorDeploy, Until: deployStarted}
+	sites := ProductionSites{Baseline: "no earlier span", Owned: 2, Unshipped: 3, Ignored: 4}
+
+	// Act
+	got := RenderProductionSites(sites, c)
+
+	// Assert
+	want := "Left out: 2 sites open children own, 3 sites whose fix landed, not yet in production, 4 sites of ignored kinds.\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("site file = %q, want %q", got, want)
 	}
 }
 
@@ -686,5 +732,122 @@ func TestSubmitMarkedTurnRecordsTheTurnBeforeItSubmitsTheBrief(t *testing.T) {
 				t.Fatalf("submissions %d, want %d", got, tc.wantSubmits)
 			}
 		})
+	}
+}
+
+func TestRenderSpanChildrenSaysHowEachStands(t *testing.T) {
+	endedAt := deployStarted.Add(time.Hour)
+	into := ids.WorkspaceID("ws-survivor")
+	names := map[ids.WorkspaceID]string{"ws-a": "fix-tail", "ws-survivor": "fix-all"}
+	cases := []struct {
+		name  string
+		child wsm.ProductionChild
+		want  string
+	}{
+		{name: "an open child owns its sites", child: wsm.ProductionChild{Workspace: "ws-a", Kind: wsm.ProductionRemediation, Sites: []string{"aaaaaaaaaaaa"}},
+			want: "\n- `fix-tail` (remediation): open, owning aaaaaaaaaaaa"},
+		{name: "an open child that owns no site says so", child: wsm.ProductionChild{Workspace: "ws-a", Kind: wsm.ProductionInvestigation},
+			want: "\n- `fix-tail` (investigation): open, owning no site"},
+		{name: "a landed child names its landing and the sites it fixed", child: wsm.ProductionChild{Workspace: "ws-a", Kind: wsm.ProductionRemediation, Named: []string{"aaaaaaaaaaaa"}, Ending: wsm.ProductionChildLanded, EndedAt: &endedAt},
+			want: "\n- `fix-tail` (remediation): landed 2026-11-13T22:00:00Z, its fix for aaaaaaaaaaaa"},
+		{name: "a closed child names its close", child: wsm.ProductionChild{Workspace: "ws-a", Kind: wsm.ProductionRemediation, Named: []string{"aaaaaaaaaaaa"}, Ending: wsm.ProductionChildClosed, EndedAt: &endedAt},
+			want: "\n- `fix-tail` (remediation): closed unlanded 2026-11-13T22:00:00Z, given aaaaaaaaaaaa"},
+		{name: "a folded child names the child it went into", child: wsm.ProductionChild{Workspace: "ws-a", Kind: wsm.ProductionRemediation, Named: []string{"aaaaaaaaaaaa"}, Ending: wsm.ProductionChildFolded, EndedAt: &endedAt, FoldedInto: &into},
+			want: "\n- `fix-tail` (remediation): folded into `fix-all` 2026-11-13T22:00:00Z, given aaaaaaaaaaaa"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := renderSpanChildren(names, []wsm.ProductionChild{tc.child})
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("renderSpanChildren = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderSpanChildrenOfNoneSaysNone(t *testing.T) {
+	// Act
+	got := renderSpanChildren(nil, nil)
+
+	// Assert
+	if got != "none" {
+		t.Fatalf("renderSpanChildren = %q, want none", got)
+	}
+}
+
+func TestChildStandingPanicsOnACorruptEnding(t *testing.T) {
+	endedAt := deployStarted
+	cases := []struct {
+		name  string
+		child wsm.ProductionChild
+	}{
+		{name: "an ending at no instant", child: wsm.ProductionChild{Workspace: "ws-a", Ending: wsm.ProductionChildLanded}},
+		{name: "a fold into no child", child: wsm.ProductionChild{Workspace: "ws-a", Ending: wsm.ProductionChildFolded, EndedAt: &endedAt}},
+		{name: "an unknown ending", child: wsm.ProductionChild{Workspace: "ws-a", Ending: wsm.ProductionChildEnding("vanished"), EndedAt: &endedAt}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			defer func() {
+				if recover() == nil {
+					t.Fatal("childStanding answered, want a panic")
+				}
+			}()
+
+			// Act
+			childStanding(map[ids.WorkspaceID]string{}, tc.child)
+		})
+	}
+}
+
+func TestTheProductionBriefListsTheChildrenOpenDuringTheSpan(t *testing.T) {
+	// Arrange: two children; one lands at the start of the span the brief is
+	// of, and so was open during it.
+	h := production(t)
+	toldProduction(t, h)
+	made, err := h.o.DecideProduction(context.Background(), "ws-fixer", twoChildren())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spanSince := deployStarted.Add(time.Hour)
+	if _, err := h.db.EndProductionChild(context.Background(), made[0].ID, wsm.ProductionChildLanded, spanSince); err != nil {
+		t.Fatal(err)
+	}
+	c := wsm.ProductionCheck{Since: spanSince, Until: spanSince.Add(time.Hour)}
+
+	// Act
+	brief, err := h.o.productionBrief(context.Background(), productionQueueOf(t, h), c)
+
+	// Assert
+	if err != nil || !strings.Contains(brief, "landed "+spanSince.UTC().Format(time.RFC3339)+", its fix for aaaaaaaaaaaa") || !strings.Contains(brief, "open, owning bbbbbbbbbbbb") {
+		t.Fatalf("brief = %q, %v; want the landed child and the open one", brief, err)
+	}
+}
+
+func TestAProductionBriefWhoseChildrenCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := production(t)
+	deployEnds(t, h, wsm.DeployFinished)
+	h.db.mu.Lock()
+	h.db.spanChildrenErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert: recorded at ERROR, nothing told, and the span still due.
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opProduction,
+		Message: "the production check's brief could not be composed; the span stays due"})
+	if !ok || !strings.Contains(fmt.Sprint(rec.Context["error"]), "database is locked") {
+		t.Fatalf("records = %v, want the brief's failure at ERROR carrying its cause", h.logs.Records())
+	}
+	if told := productionTellings(h); len(told) != 0 {
+		t.Fatalf("tellings = %+v, want none", told)
+	}
+	if c, err := h.db.ProductionCheckOf(context.Background(), mediationKey(h)); err != nil || c == nil {
+		t.Fatalf("the check to decide = (%+v, %v), want it still due", c, err)
 	}
 }

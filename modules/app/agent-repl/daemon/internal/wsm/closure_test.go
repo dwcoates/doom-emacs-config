@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
@@ -26,6 +27,9 @@ func TestMarkClosedRecordsTheClose(t *testing.T) {
 		{name: "a user close takes over the daemon's", first: &Closure{At: firstClose, By: CloseByDaemon}, second: Closure{At: secondClose, By: CloseByUser}, want: Closure{At: secondClose, By: CloseByUser}},
 		{name: "a user close takes over an agent's", first: &Closure{At: firstClose, By: CloseByAgent}, second: Closure{At: secondClose, By: CloseByUser}, want: Closure{At: secondClose, By: CloseByUser}},
 		{name: "a merge close never takes over the user's", first: &Closure{At: firstClose, By: CloseByUser}, second: Closure{At: secondClose, By: CloseByMerge}, want: Closure{At: firstClose, By: CloseByUser}},
+		{name: "a kill is recorded as a kill", second: Closure{At: secondClose, By: CloseByUser, How: HowKilled}, want: Closure{At: secondClose, By: CloseByUser, How: HowKilled}},
+		{name: "the user's kill takes over the daemon's close, with its kind", first: &Closure{At: firstClose, By: CloseByDaemon}, second: Closure{At: secondClose, By: CloseByUser, How: HowKilled}, want: Closure{At: secondClose, By: CloseByUser, How: HowKilled}},
+		{name: "a second close keeps the first's kind", first: &Closure{At: firstClose, By: CloseByUser, How: HowKilled}, second: Closure{At: secondClose, By: CloseByUser}, want: Closure{At: firstClose, By: CloseByUser, How: HowKilled}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,7 +56,7 @@ func TestMarkClosedRecordsTheClose(t *testing.T) {
 			if !got.Closed || got.Closure == nil {
 				t.Fatalf("closed = %v, closure = %v, want a closed row with a record", got.Closed, got.Closure)
 			}
-			if !got.Closure.At.Equal(tt.want.At) || got.Closure.By != tt.want.By {
+			if !got.Closure.At.Equal(tt.want.At) || got.Closure.By != tt.want.By || got.Closure.How != tt.want.How {
 				t.Fatalf("closure = %+v, want %+v", *got.Closure, tt.want)
 			}
 		})
@@ -342,6 +346,78 @@ func TestWorkspaceRefusesACorruptCloseRecord(t *testing.T) {
 			var decode *DecodeError
 			if !errors.As(err, &decode) || decode.Field != tt.field {
 				t.Fatalf("Workspace = %v, want a %s decode error", err, tt.field)
+			}
+		})
+	}
+}
+
+func TestMarkClosedRefusesAKindNoCloseWrites(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.MarkClosed(ctx, ws.ID, Closure{At: firstClose, By: CloseByUser, How: HowUnrecorded})
+
+	// Assert: refused, recorded at error, and the row untouched.
+	if err == nil {
+		t.Fatalf("MarkClosed as %s succeeded", HowUnrecorded)
+	}
+	if !loggedOperation(log, "daemon.wsm.mark_closed", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	got, err := s.Workspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.Closed || got.Closure != nil {
+		t.Fatalf("closed = %v, closure = %v, want the row untouched", got.Closed, got.Closure)
+	}
+}
+
+func TestACloseRecordedBeforeItsKindReadsUnrecorded(t *testing.T) {
+	// Arrange: a close the previous build wrote, with no kind.
+	ctx := context.Background()
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.MarkClosed(ctx, ws.ID, Closure{At: firstClose, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+	corrupt(t, s, `UPDATE workspaces SET closure_how = NULL WHERE id = ?`, ws.ID)
+
+	// Act
+	got, err := s.Workspace(ctx, ws.ID)
+
+	// Assert
+	if err != nil || got.Closure == nil || got.Closure.How != HowUnrecorded {
+		t.Fatalf("Workspace = %+v, %v; want a close of unrecorded kind", got.Closure, err)
+	}
+}
+
+func TestDecodeClosureRefusesACorruptKind(t *testing.T) {
+	at := sql.NullInt64{Int64: 1, Valid: true}
+	by := sql.NullString{String: string(CloseByUser), Valid: true}
+	tests := []struct {
+		name string
+		ws   Workspace
+		at   sql.NullInt64
+		by   sql.NullString
+		how  sql.NullString
+	}{
+		{name: "a kind with no close record", ws: Workspace{ID: "w1", Closed: true}, how: sql.NullString{String: "killed", Valid: true}},
+		{name: "a kind no close writes", ws: Workspace{ID: "w1", Closed: true}, at: at, by: by, how: sql.NullString{String: "unrecorded", Valid: true}},
+		{name: "an unknown kind", ws: Workspace{ID: "w1", Closed: true}, at: at, by: by, how: sql.NullString{String: "vanished", Valid: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			closure, err := decodeClosure(tt.ws, tt.at, tt.by, tt.how)
+
+			// Assert
+			var decode *DecodeError
+			if !errors.As(err, &decode) || decode.Field != "closure_how" || closure != nil {
+				t.Fatalf("decodeClosure = %+v, %v; want a closure_how decode error", closure, err)
 			}
 		})
 	}

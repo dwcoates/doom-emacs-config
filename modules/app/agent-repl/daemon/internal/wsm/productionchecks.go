@@ -149,9 +149,14 @@ type ProductionChild struct {
 	DispatchedAt time.Time
 	// Sites are the log sites it owns while open.
 	Sites []string
+	// Named are every log site it was given, at its dispatch or by a fold,
+	// owned or not: what it was asked to fix, kept after it ends.
+	Named []string
 	// Ending and EndedAt are how and when it ended; empty and nil while open.
 	Ending  ProductionChildEnding
 	EndedAt *time.Time
+	// FoldedInto is the child it was folded into, set only for a fold.
+	FoldedInto *WorkspaceID
 }
 
 // Open reports whether the child has not ended.
@@ -476,6 +481,9 @@ func (s *store) DecideProductionCheck(ctx context.Context, repo RepoKey, until, 
 				if err := claimSite(ctx, tx, key, site, child.Workspace); err != nil {
 					return err
 				}
+				if err := nameSite(ctx, tx, site, child.Workspace); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -499,6 +507,12 @@ func (s *store) recordUnanswered(ctx context.Context, op string, key RepoKey, un
 		}
 		return nil
 	})
+}
+
+// nameSite records SITE as one WS was given, kept after its ownership ends.
+func nameSite(ctx context.Context, tx *sql.Tx, site string, ws WorkspaceID) error {
+	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO production_child_named_sites (workspace_id, site) VALUES (?, ?)`, string(ws), site)
+	return err
 }
 
 // claimSite records WS as SITE's owner in KEY, refusing a site an open child
@@ -576,14 +590,22 @@ func (s *store) FixedSites(ctx context.Context, repo RepoKey) ([]FixedSite, erro
 }
 
 // productionChildColumns are the columns scanProductionChild decodes.
-const productionChildColumns = `workspace_id, repo_key, span_until, kind, dispatched_at, ended_at, ending`
+const productionChildColumns = `workspace_id, repo_key, span_until, kind, dispatched_at, ended_at, ending, folded_into`
 
 func scanProductionChild(row interface{ Scan(...any) error }) (ProductionChild, error) {
 	var c ProductionChild
 	var until, dispatched int64
 	var ended sql.NullInt64
-	if err := row.Scan(&c.Workspace, &c.Repo, &until, &c.Kind, &dispatched, &ended, &c.Ending); err != nil {
+	var into sql.NullString
+	if err := row.Scan(&c.Workspace, &c.Repo, &until, &c.Kind, &dispatched, &ended, &c.Ending, &into); err != nil {
 		return ProductionChild{}, err
+	}
+	if into.Valid != (c.Ending == ProductionChildFolded) {
+		return ProductionChild{}, &DecodeError{Table: "production_children", Row: string(c.Workspace), Field: "folded_into", Err: errors.New("a child names the child it was folded into exactly when it was folded")}
+	}
+	if into.Valid {
+		id := WorkspaceID(into.String)
+		c.FoldedInto = &id
 	}
 	c.Check, c.DispatchedAt = fromNanos(until), fromNanos(dispatched)
 	if ended.Valid {
@@ -623,8 +645,23 @@ func (s *store) ProductionChildOf(ctx context.Context, ws WorkspaceID) (Producti
 // ProductionChildrenOf answers REPO's open production children, oldest
 // first and in their dispatch's order, each with the sites it owns.
 func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]ProductionChild, error) {
-	const op = "daemon.wsm.production_children_of"
-	fields := dlog.Context{"repo": string(repo)}
+	return s.productionChildren(ctx, "daemon.wsm.production_children_of", repo, dlog.Context{"repo": string(repo)}, `ending = ''`)
+}
+
+// ProductionChildrenOpenSince answers REPO's production children that were
+// open at any moment from SINCE on: those open now, and those that ended at
+// or after it, in their dispatch's order, each with the sites it owns, the
+// sites it was given, and how and when it ended.
+func (s *store) ProductionChildrenOpenSince(ctx context.Context, repo RepoKey, since time.Time) ([]ProductionChild, error) {
+	return s.productionChildren(ctx, "daemon.wsm.production_children_open_since", repo, dlog.Context{"repo": string(repo), "since": nanos(since)},
+		`(ending = '' OR ended_at >= ?)`, nanos(since))
+}
+
+// productionChildren is the one read of REPO's production children: those
+// WHERE (a condition on production_children, with ARGS) holds, oldest first
+// and in their dispatch's order, each with the sites it owns and the sites
+// it was given.
+func (s *store) productionChildren(ctx context.Context, op string, repo RepoKey, fields dlog.Context, where string, args ...any) ([]ProductionChild, error) {
 	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
 		return nil, err
@@ -633,28 +670,69 @@ func (s *store) ProductionChildrenOf(ctx context.Context, repo RepoKey) ([]Produ
 	err = s.read(ctx, op, fields, func(ctx context.Context) error {
 		var err error
 		out, err = listRows(ctx, s.q(ctx),
-			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND ending = '' ORDER BY dispatched_at, ordinal`, scanProductionChild, string(key))
+			`SELECT `+productionChildColumns+` FROM production_children WHERE repo_key = ? AND `+where+` ORDER BY dispatched_at, ordinal`, scanProductionChild, append([]any{string(key)}, args...)...)
 		if err != nil {
 			return err
 		}
 		for i := range out {
-			sites, err := s.childSites(ctx, out[i].Workspace)
-			if err != nil {
+			if out[i].Sites, err = s.childSites(ctx, out[i].Workspace); err != nil {
 				return err
 			}
-			out[i].Sites = sites
+			if out[i].Named, err = s.namedSites(ctx, out[i].Workspace); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
 	return out, err
 }
 
+// FoldedChildren answers every production child that was folded, mapped to
+// the child it was folded into.
+func (s *store) FoldedChildren(ctx context.Context) (map[WorkspaceID]WorkspaceID, error) {
+	const op = "daemon.wsm.folded_children"
+	type fold struct{ folded, into WorkspaceID }
+	var rows []fold
+	err := s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
+		var err error
+		rows, err = listRows(ctx, s.q(ctx), `SELECT workspace_id, folded_into FROM production_children WHERE ending = 'folded'`, func(row interface{ Scan(...any) error }) (fold, error) {
+			var f fold
+			var into sql.NullString
+			if err := row.Scan(&f.folded, &into); err != nil {
+				return fold{}, err
+			}
+			if !into.Valid {
+				return fold{}, &DecodeError{Table: "production_children", Row: string(f.folded), Field: "folded_into", Err: errors.New("a folded child names the child it was folded into")}
+			}
+			f.into = WorkspaceID(into.String)
+			return f, nil
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[WorkspaceID]WorkspaceID, len(rows))
+	for _, f := range rows {
+		out[f.folded] = f.into
+	}
+	return out, nil
+}
+
+// namedSites answers every site WS was given, in order.
+func (s *store) namedSites(ctx context.Context, ws WorkspaceID) ([]string, error) {
+	return listRows(ctx, s.q(ctx), `SELECT site FROM production_child_named_sites WHERE workspace_id = ? ORDER BY site`, scanSite, string(ws))
+}
+
 // childSites answers the sites WS owns, in order.
 func (s *store) childSites(ctx context.Context, ws WorkspaceID) ([]string, error) {
-	return listRows(ctx, s.q(ctx), `SELECT site FROM production_child_sites WHERE workspace_id = ? ORDER BY site`, func(row interface{ Scan(...any) error }) (string, error) {
-		var site string
-		return site, row.Scan(&site)
-	}, string(ws))
+	return listRows(ctx, s.q(ctx), `SELECT site FROM production_child_sites WHERE workspace_id = ? ORDER BY site`, scanSite, string(ws))
+}
+
+// scanSite reads one row's site.
+func scanSite(row interface{ Scan(...any) error }) (string, error) {
+	var site string
+	return site, row.Scan(&site)
 }
 
 // FoldProductionChild moves every site FOLDED owns to SURVIVING and ends
@@ -685,7 +763,10 @@ func (s *store) FoldProductionChild(ctx context.Context, folded, surviving Works
 		if _, err := tx.ExecContext(ctx, `UPDATE production_child_sites SET workspace_id = ? WHERE workspace_id = ?`, string(surviving), string(folded)); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE production_children SET ending = 'folded', ended_at = ? WHERE workspace_id = ?`, nanos(at), string(folded))
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO production_child_named_sites (workspace_id, site) SELECT ?, site FROM production_child_named_sites WHERE workspace_id = ?`, string(surviving), string(folded)); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE production_children SET ending = 'folded', ended_at = ?, folded_into = ? WHERE workspace_id = ?`, nanos(at), string(surviving), string(folded))
 		return err
 	})
 }

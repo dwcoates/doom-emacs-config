@@ -215,6 +215,10 @@ type fakeDB struct {
 	// turnStartsErr fails that read.
 	turnStarts    []wsm.TurnStart
 	turnStartsErr error
+	// folds are the folded production children FoldedChildren answers, each
+	// mapped to its survivor; foldsErr fails that read.
+	folds    map[ids.WorkspaceID]ids.WorkspaceID
+	foldsErr error
 	// creationJobs are the creation jobs CreationJob answers, by workspace;
 	// creationJobErr fails every creation-job read.
 	creationJobs   map[ids.WorkspaceID]wsm.CreationJob
@@ -278,6 +282,13 @@ func (f *fakeDB) TurnStarts(context.Context) ([]wsm.TurnStart, error) {
 		return nil, f.turnStartsErr
 	}
 	return f.turnStarts, nil
+}
+
+func (f *fakeDB) FoldedChildren(context.Context) (map[ids.WorkspaceID]ids.WorkspaceID, error) {
+	if f.foldsErr != nil {
+		return nil, f.foldsErr
+	}
+	return f.folds, nil
 }
 
 func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {

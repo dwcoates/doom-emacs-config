@@ -287,6 +287,17 @@ func TestAFoldMovesTheFoldedChildsSitesToTheSurvivor(t *testing.T) {
 	if err != nil || owned["aaaaaaaaaaaa"] != b.ID || owned["bbbbbbbbbbbb"] != b.ID || folded.Ending != ProductionChildFolded || folded.Open() {
 		t.Fatalf("fold = %v, owned %v, folded child %+v; want both sites the survivor's and the folded child ended", err, owned, folded)
 	}
+	if folded.FoldedInto == nil || *folded.FoldedInto != b.ID {
+		t.Fatalf("folded into = %v, want %s", folded.FoldedInto, b.ID)
+	}
+	folds, err := s.FoldedChildren(ctx)
+	if err != nil || len(folds) != 1 || folds[a.ID] != b.ID {
+		t.Fatalf("FoldedChildren = %v, %v; want %s folded into %s", folds, err, a.ID, b.ID)
+	}
+	children, err := s.ProductionChildrenOpenSince(ctx, repo, until)
+	if err != nil || len(children) != 2 || !slices.Equal(children[0].Named, []string{"aaaaaaaaaaaa"}) || !slices.Equal(children[1].Named, []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb"}) {
+		t.Fatalf("children = %+v, %v; want the folded child keeping its site and the survivor given both", children, err)
+	}
 }
 
 func TestAFoldIsRefusedForAnythingButTwoOpenChildren(t *testing.T) {
@@ -374,6 +385,71 @@ func TestAnEndedChildReleasesItsSites(t *testing.T) {
 	}
 }
 
+func TestProductionChildrenOpenSinceAnswersTheChildrenOpenDuringASpan(t *testing.T) {
+	// Arrange: three children of one dispatch. One is still open, one ended
+	// before the span began, and one ended inside it.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo, key := productionRepo(t)
+	readThrough(t, s, key, instant)
+	until := instant.Add(time.Hour)
+	toldCheck(t, s, repo, until)
+	open, early, late := testWorkspaceNamed(t, s, "child-open"), testWorkspaceNamed(t, s, "child-early"), testWorkspaceNamed(t, s, "child-late")
+	if err := s.DecideProductionCheck(ctx, repo, until, until, ProductionDispatched, "three", []ProductionChild{
+		{Workspace: open.ID, Kind: ProductionRemediation, Sites: []string{"aaaaaaaaaaaa"}},
+		{Workspace: early.ID, Kind: ProductionInvestigation, Sites: []string{"bbbbbbbbbbbb"}},
+		{Workspace: late.ID, Kind: ProductionRemediation, Sites: []string{"cccccccccccc"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	spanSince := until.Add(2 * time.Hour)
+	if _, err := s.EndProductionChild(ctx, early.ID, ProductionChildClosed, spanSince.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndProductionChild(ctx, late.ID, ProductionChildLanded, spanSince); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := s.ProductionChildrenOpenSince(ctx, repo, spanSince)
+
+	// Assert: the open one and the one ended at the span's start, in
+	// dispatch order, the landed one keeping the site it no longer owns.
+	if err != nil || len(got) != 2 || got[0].Workspace != open.ID || got[1].Workspace != late.ID {
+		t.Fatalf("ProductionChildrenOpenSince = %+v, %v; want the open child and the one ended inside the span", got, err)
+	}
+	if got[1].Ending != ProductionChildLanded || got[1].EndedAt == nil || !got[1].EndedAt.Equal(spanSince) || len(got[1].Sites) != 0 || !slices.Equal(got[1].Named, []string{"cccccccccccc"}) {
+		t.Fatalf("landed child = %+v, want landed at the span's start, owning nothing, named its site", got[1])
+	}
+	if !slices.Equal(got[0].Sites, []string{"aaaaaaaaaaaa"}) || !slices.Equal(got[0].Named, []string{"aaaaaaaaaaaa"}) || got[0].FoldedInto != nil {
+		t.Fatalf("open child = %+v, want it owning and named its site", got[0])
+	}
+}
+
+func TestAProductionChildFoldedIntoNoneIsACorruptRow(t *testing.T) {
+	// Arrange: a folded child the store holds with no survivor.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo, key := productionRepo(t)
+	readThrough(t, s, key, instant)
+	until := instant.Add(time.Hour)
+	toldCheck(t, s, repo, until)
+	child := testWorkspaceNamed(t, s, "child")
+	if err := s.DecideProductionCheck(ctx, repo, until, until, ProductionDispatched, "one", []ProductionChild{{Workspace: child.ID, Kind: ProductionRemediation, Sites: []string{"aaaaaaaaaaaa"}}}); err != nil {
+		t.Fatal(err)
+	}
+	corrupt(t, s, `UPDATE production_children SET ending = 'folded', ended_at = 1 WHERE workspace_id = ?`, child.ID)
+
+	// Act
+	_, err := s.ProductionChildrenOpenSince(ctx, repo, time.Unix(0, 0))
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "folded_into" {
+		t.Fatalf("ProductionChildrenOpenSince = %v, want a folded_into decode error", err)
+	}
+}
+
 func TestAProductionMediatorIsItsWorkspacesRole(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -450,5 +526,29 @@ func TestAnUnansweredCheckIsRecordedOnlyAfterItsResumption(t *testing.T) {
 				t.Fatalf("DecideProductionCheck = %v, still to decide %+v; want error %v", err, next, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestFoldedChildrenRefusesAFoldNamingNoSurvivor(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo, key := productionRepo(t)
+	readThrough(t, s, key, instant)
+	until := instant.Add(time.Hour)
+	toldCheck(t, s, repo, until)
+	child := testWorkspaceNamed(t, s, "child")
+	if err := s.DecideProductionCheck(ctx, repo, until, until, ProductionDispatched, "one", []ProductionChild{{Workspace: child.ID, Kind: ProductionRemediation, Sites: []string{"aaaaaaaaaaaa"}}}); err != nil {
+		t.Fatal(err)
+	}
+	corrupt(t, s, `UPDATE production_children SET ending = 'folded', ended_at = 1 WHERE workspace_id = ?`, child.ID)
+
+	// Act
+	_, err := s.FoldedChildren(ctx)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "folded_into" {
+		t.Fatalf("FoldedChildren = %v, want a folded_into decode error", err)
 	}
 }

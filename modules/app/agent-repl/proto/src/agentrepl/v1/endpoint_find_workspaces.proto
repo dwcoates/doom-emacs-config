@@ -71,6 +71,18 @@ message FindWorkspacesRequest {
   // window. Unlike `window`, which matches every kind of activity, this one
   // matches turns alone.
   optional FindWorkspacesTurnWindow turned = 10;
+  // Only the children of this workspace (FoundWorkspace.parent): what a
+  // workspace reads to account for its children, open or ended. UNSET = any
+  // parent, or none. A ref naming no registered workspace is the
+  // unknown_parent answer.
+  optional workspace.v1.WorkspaceRef parent = 11;
+  // Only workspaces that had not ended by this instant, unix milliseconds:
+  // those open now, and those that landed or closed at or after it. A
+  // workspace ends when its merge lands (FoundWorkspaceStandingLanded) or it
+  // closes (FoundWorkspaceStandingClosed.closed_at_ms). A closed workspace
+  // whose close instant was never recorded ended before any instant asked
+  // for, and is left out. UNSET = however long ago it ended.
+  optional int64 ended_since_ms = 12;
 }
 
 // The login a find narrows to (FindWorkspacesRequest.login). THE ARM IS HOW
@@ -315,7 +327,45 @@ message FoundWorkspaceStandingClosed {
   // When it was closed, unix milliseconds. UNSET for a workspace whose close
   // predates the daemon recording close instants.
   optional int64 closed_at_ms = 1;
+  // How it ended.
+  FoundWorkspaceClosedHow how = 2;
 }
+
+// How a closed workspace that never landed ended. THE ARM IS HOW, and
+// exactly one holds.
+message FoundWorkspaceClosedHow {
+  oneof how {
+    // Closed: by the user, an agent, or the daemon.
+    FoundWorkspaceClosedHowClosed closed = 1;
+    // Killed: its session force-stopped, its worktree, branch and records
+    // kept (KillWorkspace).
+    FoundWorkspaceClosedHowKilled killed = 2;
+    // Folded into another child of its production mediator, which took over
+    // its work (UpdateProductionMediation's fold).
+    FoundWorkspaceClosedHowFolded folded = 3;
+    // Closed before the daemon recorded how a workspace ended.
+    FoundWorkspaceClosedHowUnrecorded unrecorded = 4;
+    // Nuked (NukeWorkspace): its session killed, and its worktree, branch
+    // and record being destroyed. A nuke closes the record first and forgets
+    // it once the teardown is done, so the record is found only while that
+    // teardown runs or after it failed partway.
+    FoundWorkspaceClosedHowNuked nuked = 5;
+  }
+}
+// Closed. No fields.
+message FoundWorkspaceClosedHowClosed {}
+// Killed. No fields.
+message FoundWorkspaceClosedHowKilled {}
+// Folded into another child.
+message FoundWorkspaceClosedHowFolded {
+  // The child it was folded into. UNSET when the registry no longer holds
+  // that workspace: the fold records it by id alone.
+  optional workspace.v1.WorkspaceRef into = 1;
+}
+// How it ended was not recorded. No fields.
+message FoundWorkspaceClosedHowUnrecorded {}
+// Nuked, its record not yet forgotten. No fields.
+message FoundWorkspaceClosedHowNuked {}
 // Its branch landed, and the workspace is closed.
 message FoundWorkspaceStandingLanded {
   // When its merge landed, unix milliseconds.
@@ -323,7 +373,8 @@ message FoundWorkspaceStandingLanded {
 }
 
 // Validation failures (a blank text or account root, a zero limit, a
-// reversed window or turn window) are Connect InvalidArgument, never an arm.
+// reversed window or turn window, a malformed parent ref) are Connect
+// InvalidArgument, never an arm.
 message FindWorkspacesError {
   oneof cause {
     // `repository` names a RepositoryRef the daemon's registry does not hold.
@@ -337,6 +388,8 @@ message FindWorkspacesError {
     FindWorkspacesUnknownLoginWorkspace unknown_login_workspace = 4;
     // `login.account_root` names an account root the daemon does not know.
     FindWorkspacesUnknownLoginRoot unknown_login_root = 5;
+    // `parent` names a workspace the daemon's registry does not hold.
+    FindWorkspacesUnknownParent unknown_parent = 6;
   }
 }
 // Empty: the echoed ref is the only identity involved.
@@ -347,6 +400,8 @@ message FindWorkspacesUnknownCreator {}
 message FindWorkspacesUnknownCaller {}
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownLoginWorkspace {}
+// Empty: the echoed ref is the only identity involved.
+message FindWorkspacesUnknownParent {}
 // The account roots the daemon does know, so the caller can say which one it
 // meant.
 message FindWorkspacesUnknownLoginRoot {

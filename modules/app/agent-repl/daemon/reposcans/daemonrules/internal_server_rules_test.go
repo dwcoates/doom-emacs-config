@@ -210,7 +210,7 @@ func TestEveryClientOnlyStandingTopicGoesThroughOneShape(t *testing.T) {
 }
 
 // EVERY REF CRITERION RESOLVES THROUGH registeredRef: a handler that resolves
-// created_by, caller or login.of_workspace by hand fails here.
+// created_by, parent, caller or login.of_workspace by hand fails here.
 func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.T) {
 	sourcescan.InPackage(t, internalServerDir)
 	// Arrange
@@ -224,8 +224,8 @@ func TestFindWorkspacesResolvesEveryWorkspaceRefThroughRegisteredRef(t *testing.
 	byHand := strings.Count(string(src), "byID[wsm.WorkspaceID(ref.GetId())]")
 
 	// Assert
-	if calls != 3 || byHand != 1 {
-		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want all three refs through the helper and its own one lookup", calls, byHand)
+	if calls != 4 || byHand != 1 {
+		t.Fatalf("registeredRef calls = %d, hand lookups = %d; want all four refs through the helper and its own one lookup", calls, byHand)
 	}
 }
 

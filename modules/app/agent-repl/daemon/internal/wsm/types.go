@@ -1855,6 +1855,19 @@ func (r MediatorRole) Name() string {
 	panic(fmt.Sprintf("wsm: the name of mediator role %q", string(r)))
 }
 
+// EndedAt is when the workspace ended: its landing, else its close, and nil
+// while it is open. ENDED reports whether it ended at all, so a closed
+// workspace whose close instant was never recorded answers (nil, true).
+func (w Workspace) EndedAt() (at *time.Time, ended bool) {
+	switch {
+	case w.MergedAt != nil:
+		return w.MergedAt, true
+	case w.Closed && w.Closure != nil:
+		return &w.Closure.At, true
+	}
+	return nil, w.Closed
+}
+
 // IsMediator reports whether the workspace is one of its repository's
 // standing mediators.
 func (w Workspace) IsMediator() bool { return w.Mediator != NotMediator }

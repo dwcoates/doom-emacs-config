@@ -2,7 +2,8 @@
 
 - `workspace find [-repository here|DIR] [-since WHEN] [-until WHEN]
   [-turned-since WHEN] [-turned-until WHEN] [-standing open|closed|landed]
-  [-text TEXT] [-created-by WS] [-login here|WS | -login-root ROOT]
+  [-text TEXT] [-created-by WS] [-parent WS] [-ended-since WHEN]
+  [-login here|WS | -login-root ROOT]
   [-limit N|-all]` lists the
   workspaces the daemon's registry holds, OPEN OR CLOSED (including ones
   closed long ago that the roster no longer shows), each with its name,
@@ -33,7 +34,14 @@
   branch or summary case-insensitively. `-created-by WS` (`-created-by here`)
   keeps only the workspaces WS's agent asked for: the way a workspace
   accounts for every workspace it made, open or closed, when its conversation
-  was compacted and no longer remembers them. It answers 50 by default; `-limit N`
+  was compacted and no longer remembers them. `-parent WS` (`-parent here`)
+  keeps only WS's children. `-ended-since WHEN` keeps only workspaces open now
+  or that landed or closed at or after WHEN, so `-parent here -ended-since
+  2h` lists this workspace's children still at work plus those that ended in
+  the last two hours. A closed workspace's `standing.closed.how` says how it
+  ended: `closed`, `killed`, `folded` (into the child its `into` names) or
+  `unrecorded` (closed before the daemon recorded how), or `nuked` (a nuke
+  whose teardown has not yet forgotten the record). It answers 50 by default; `-limit N`
   or `-all` change that, and a cut answer is a `partial` extent naming how
   many were omitted. Zettel chat threads and async-merge workspaces are not
   answered. Use it whenever the agent needs to find the workspace that did

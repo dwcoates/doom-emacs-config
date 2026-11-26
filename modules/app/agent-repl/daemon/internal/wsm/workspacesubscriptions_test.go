@@ -2,7 +2,6 @@ package wsm
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"slices"
@@ -330,7 +329,7 @@ func TestCloseHowIsNamedInANotice(t *testing.T) {
 		how  CloseHow
 		want string
 	}{
-		{HowClosed, "closed"}, {HowKilled, "killed"}, {HowNuked, "nuked"}, {CloseHow(9), "CloseHow(9)"},
+		{HowClosed, "closed"}, {HowKilled, "killed"}, {HowNuked, "nuked"}, {HowUnrecorded, "unrecorded"}, {CloseHow(9), "CloseHow(9)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -342,20 +341,6 @@ func TestCloseHowIsNamedInANotice(t *testing.T) {
 				t.Errorf("String() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestADecodedClosureCarriesNoHow(t *testing.T) {
-	// Arrange: a closed row as the registry stores it.
-	at := sql.NullInt64{Int64: 1, Valid: true}
-	by := sql.NullString{String: string(CloseByUser), Valid: true}
-
-	// Act
-	closure, err := decodeClosure(Workspace{ID: "w1", Closed: true}, at, by)
-
-	// Assert
-	if err != nil || closure == nil || closure.How != HowClosed {
-		t.Fatalf("decodeClosure = %+v, %v; want the zero how, since it is told and never stored", closure, err)
 	}
 }
 
