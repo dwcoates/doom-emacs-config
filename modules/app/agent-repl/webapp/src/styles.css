@@ -7558,7 +7558,7 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.72rem;
   padding: 2px 6px;
   border-radius: 6px;
-  color: var(--fg);
+  color: var(--muted);
   background: var(--panel-bg);
   border: 1px solid var(--border);
   box-shadow: var(--sidebar-shadow);
@@ -8636,7 +8636,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-title-description {
   max-width: 48rem;
   padding: 0.5rem 0.7rem;
-  color: var(--fg);
+  /* The strip's quiet grey, as the account, model, effort and mode chips
+     draw (owner ruling, 2026-11-26). */
+  color: var(--muted);
   line-height: 1.4;
   white-space: normal;
 }
@@ -8841,6 +8843,10 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   border-radius: 6px;
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
   font-size: 0.85rem;
+  /* The strip's quiet grey, as the account, model, effort and mode chips draw
+     it: every reveal's text, and every menu row's, unless a rule names its own
+     (owner ruling, 2026-11-26). A row lights to the foreground on hover. */
+  color: var(--muted);
 }
 
 /* Menu rows: full-width buttons that light on hover, delimited by the shared
@@ -8858,7 +8864,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   width: 100%;
   background: none;
   border: none;
-  color: var(--fg);
+  color: var(--muted);
   font: inherit;
   text-align: left;
   padding: 0.4rem 0.7rem;
@@ -8871,6 +8877,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-queue-bypass-option:hover,
 .topbar-name-link-option:hover {
   background: var(--border);
+  color: var(--fg);
 }
 /* A link row's label is a menu row's title, not a link in prose (owner
    ruling, 2026-10-27): the foreground white and the size of the model
