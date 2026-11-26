@@ -432,9 +432,12 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
       ? BigInt(Math.trunc(value))
       : 0n;
   };
-  const details = normalized.outputTokensDetails;
-  const reasoning = details === undefined ? undefined : details.reasoning_tokens;
   return create(conversationv1.TokenUsageSchema, {
+    // ALWAYS PROVISIONAL: the stream plane reads the SDK's assistant message
+    // while the response is still streaming, so its figures are the in-flight
+    // snapshot; the sidecar's file plane writes the settled usage from the
+    // record the vendor itself wrote, and that report supersedes this one.
+    provisional: true,
     // ORGANIZED BY ECONOMICS, not by the vendor's field names: the cache READ is
     // the only cheap bucket, and both miss buckets together are the expensive
     // sum — which is why the nesting exists.
@@ -446,11 +449,38 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
       unwritten: count("input_tokens"),
     }),
     outputTokens: count("output_tokens"),
-    outputThinkingTokens:
-      typeof reasoning === "number" && Number.isFinite(reasoning) && reasoning > 0
-        ? BigInt(Math.trunc(reasoning))
-        : 0n,
+    outputThinkingTokens: thinkingTokens(normalized.outputTokensDetails),
   });
+}
+
+/** A non-negative whole token count, or undefined when the value is not one. */
+function tokenCount(value: unknown): bigint | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? BigInt(Math.trunc(value))
+    : undefined;
+}
+
+/**
+ * The thinking tokens out of the vendor's output-token details.
+ *
+ * THE VENDOR WRITES `thinking_tokens` (a real record on 2026-11-26:
+ * `output_tokens_details: { thinking_tokens: 209 }`); `reasoning_tokens` is the
+ * name the earlier harvest modeled and is still read. Both present and
+ * differing is a vendor contradiction: it is warned and `thinking_tokens`, the
+ * vendor's current name, is taken. No details at all means no thinking: 0.
+ */
+function thinkingTokens(details: Record<string, unknown> | undefined): bigint {
+  if (details === undefined) return 0n;
+  const thinking = tokenCount(details.thinking_tokens);
+  const reasoning = tokenCount(details.reasoning_tokens);
+  if (thinking !== undefined && reasoning !== undefined && thinking !== reasoning) {
+    // warn: a defect because the vendor contradicted itself about one response's thinking tokens.
+    LOGGER.warn(
+      { thinking_tokens: Number(thinking), reasoning_tokens: Number(reasoning) },
+      "the vendor's output-token details name two different thinking counts; taking thinking_tokens",
+    );
+  }
+  return thinking ?? reasoning ?? 0n;
 }
 
 // ---------------------------------------------------------------------------
