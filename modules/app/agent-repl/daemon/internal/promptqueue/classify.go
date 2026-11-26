@@ -458,11 +458,14 @@ func (q *queue) logJudgeFailure(ctx context.Context, running ids.TurnID, err err
 // move's seal bumps it too (handoff.go): a verdict answering after the
 // workspace was sealed for another daemon is that daemon's to reach.
 func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, route classifier.Route, log dlog.Logger) {
-	if route == classifier.RouteAfterToolCall {
+	switch route {
+	case classifier.RouteAfterToolCall:
 		q.settleJoin(ctx, sub, running, epoch, c, joinJudged, log)
 		return
+	case classifier.RouteInterrupt:
+		q.settleInterject(ctx, sub, running, epoch, c, log)
+		return
 	}
-	interject := route == classifier.RouteInterrupt
 	state := q.state(sub.WS)
 	state.verdicts.Lock()
 	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
@@ -470,20 +473,55 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 		return
 	}
 	q.record(ctx, sub, c, log)
-	// THE INTERJECTION IS REGISTERED UNDER THE VERDICT LOCK and its interrupt
-	// is SENT OFF IT: the verdict is settled at the epoch it was judged at,
-	// and no queue lock is held across a call to the shim (call.go). An edit
-	// that commits after the registration finds the jump already standing, as
-	// it would have found it after the interrupt was answered.
-	// A verdict kept from interjecting by a running session act is re-stamped
-	// and recorded by registerInterjection itself.
-	registered := interject && q.registerInterjection(ctx, sub, running, log)
 	state.verdicts.Unlock()
-	if registered {
-		q.sendInterrupt(ctx, sub, running, log)
+	q.reportHeld(ctx, sub, log)
+}
+
+// settleInterject settles an interrupt verdict against the running turn.
+//
+// IT TAKES THE DELIVERY LOCK, THEN THE VERDICT LOCK, the one order the queue
+// takes them in. A turn end pops and delivers under the delivery lock, so the
+// judged turn cannot end and hand this prompt to the shim between the checks
+// here and the interjection's registration (2026-11-25: a verdict reached as
+// the turn ended was registered against a prompt already delivered, and its
+// kill named the ended turn). An interjection is registered only when:
+//   - the turn it judged is still the running turn, since a turn that ended
+//     while the verdict was reached is what delivers the prompt;
+//   - the verdict stands on a held prompt, since one retired while it was
+//     judged (delivered, dropped) has nothing left to deliver early.
+//
+// The interrupt is SENT OFF THE LOCKS (delivery.afterUnlock): the running
+// turn's end takes the delivery lock to pop the head the interjection made.
+// A running session act refuses the interjection, which registerInterjection
+// records itself.
+func (q *queue) settleInterject(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) {
+	d := q.lockDelivery(sub.WS)
+	defer d.unlock()
+	state := d.state
+	state.verdicts.Lock()
+	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
+		state.verdicts.Unlock()
 		return
 	}
-	q.reportHeld(ctx, sub, log)
+	if !q.isRunning(sub.WS, running) {
+		state.verdicts.Unlock()
+		log.Info(opInterject, "the turn the prompt would interrupt ended while the verdict was reached; the prompt is not interjected, and that turn's end delivers it", dlog.Context{
+			"turn": string(sub.Turn), "interrupted_turn": string(running),
+		})
+		q.recordWaiting(ctx, sub, "the turn it would have interrupted ended while the verdict was reached, so that end delivers it", log)
+		return
+	}
+	if !q.record(ctx, sub, c, log) {
+		state.verdicts.Unlock()
+		return
+	}
+	registered := q.registerInterjection(ctx, sub, running, log)
+	state.verdicts.Unlock()
+	if !registered {
+		q.reportHeld(ctx, sub, log)
+		return
+	}
+	d.afterUnlock(func() { q.sendInterrupt(ctx, sub, running, log) })
 }
 
 // reportHeld tells the footer where a held prompt stands in the queue: its
@@ -570,8 +608,11 @@ func (q *queue) runningText(ctx context.Context, ws ids.WorkspaceID, running ids
 	return "", false, storeOpen, nil
 }
 
-// record stamps a verdict on the held prompt and re-pushes the tray.
-func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification, log dlog.Logger) {
+// record stamps a verdict on the held prompt and re-pushes the tray. It
+// reports whether the verdict now stands on a held prompt: a prompt retired
+// while it was judged, or a verdict the store refused, stands nowhere, and
+// nothing may act on it (settleInterject).
+func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification, log dlog.Logger) bool {
 	if err := q.deps.DB.UpdateHeldPromptClassification(ctx, sub.Turn, c); err != nil {
 		// A PROMPT RETIRED WHILE IT WAS JUDGED (dropped, delivered, cleared)
 		// has no verdict to keep: the judge ran outside the queue's lock, and
@@ -580,12 +621,12 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 			log.Info(opClassify, "the prompt was retired while it was judged; its verdict is not recorded", dlog.Context{
 				"turn": string(sub.Turn), "cause": err.Error(),
 			})
-			return
+			return false
 		}
 		log.Error(opClassify, "could not record the verdict", dlog.Context{
 			"turn": string(sub.Turn), "cause": err.Error(),
 		})
-		return
+		return false
 	}
 	// EVERY VERDICT IS ON DISK AT INFO: why a prompt interrupted or waited is
 	// the first question a stuck tray raises, and a debug record answers it
@@ -597,6 +638,7 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 		log.Error(opClassify, "the verdict was recorded but the tray was not republished",
 			dlog.Context{"cause": err.Error()})
 	}
+	return true
 }
 
 // interject runs the interject re-spec: the interrupting prompt moves to the
@@ -702,6 +744,11 @@ func interjectionCommand() *conversationv1.AgentInterruptedByUser {
 // nature earns:
 //   - `no_turn_open` is the turn having ended on its own before the interrupt
 //     landed, an expected race, recorded at info;
+//   - `not_the_open_turn` against a turn the queue no longer runs is the same
+//     race one step later: the turn ended and the queue opened the next one
+//     (this prompt, as the head) before the kill landed, recorded at info.
+//     Against the turn the queue still runs, the shim and the queue disagree
+//     on which turn is open, recorded at warn under its own message;
 //   - `live` is a refusal the shim no longer produces, so one arriving is a
 //     contract breach, recorded at warn under its own message;
 //   - any other refusal, or a missing session, is unexpected but costs the
@@ -717,9 +764,15 @@ func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnI
 	fields := dlog.Context{"turn": string(sub.Turn), "interrupted_turn": string(running), "cause": cause.Error()}
 	var ended interface{ KillFoundNoTurnOpen() bool }
 	var live interface{ KillRefusedLive() bool }
+	var replaced interface{ KillRefusedNotTheOpenTurn() bool }
+	notOpen := errors.As(cause, &replaced) && replaced.KillRefusedNotTheOpenTurn()
 	switch {
 	case errors.As(cause, &ended) && ended.KillFoundNoTurnOpen():
 		log.Info(opInterject, "the running turn had already ended when the interrupt landed; the jump is stripped and the prompt waits for the turn's end", fields)
+	case notOpen && !q.isRunning(sub.WS, running):
+		log.Info(opInterject, "the running turn had already ended and the next one opened when the interrupt landed; the jump is stripped", fields)
+	case notOpen:
+		log.Warn(opInterject, "the shim refused the interrupt as not naming its open turn, though the queue still runs that turn; the jump is stripped and the prompt waits for the turn to end", fields)
 	case errors.As(cause, &live) && live.KillRefusedLive():
 		log.Warn(opInterject, "the shim refused an unforced interrupt as live, which its contract no longer produces; the jump is stripped and the prompt waits for the turn to end", fields)
 	default:

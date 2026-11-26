@@ -272,6 +272,11 @@ func (d *fakeDB) UpdateHeldPromptClassification(_ context.Context, turn ids.Turn
 	if !ok {
 		return errors.New("no such hold")
 	}
+	// A RETIRED HOLD TAKES NO VERDICT, as the store's requireStandingHold
+	// refuses it.
+	if h.Tombstone != nil {
+		return fmt.Errorf("held prompt %s is tombstoned: %w", turn, wsm.ErrHoldRetired)
+	}
 	copied := c
 	h.Classification = &copied
 	return nil
