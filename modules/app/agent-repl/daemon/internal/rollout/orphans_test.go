@@ -78,13 +78,7 @@ func TestTheTakeoverDialsNoShimForAFreeLock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 
 	// Act
 	takeOver(h)
@@ -120,9 +114,7 @@ func TestTheTakeoverOfAFreeLock(t *testing.T) {
 					t.Fatalf("SetSessionTerminal: %v", err)
 				}
 			}
-			h.mu.Lock()
-			h.lockStates[record.Dir] = sessionlock.StateFree
-			h.mu.Unlock()
+			h.setLock(record.Dir, sessionlock.StateFree)
 			h.fleet.mu.Lock()
 			h.fleet.listening[ws] = tt.listening
 			h.fleet.mu.Unlock()
@@ -164,8 +156,8 @@ func TestTheTakeoverDoesNotReadAnUnreadableLockAsHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
+	h.setLock(record.Dir, sessionlock.StateUnknown)
 	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateUnknown
 	h.lockErr[record.Dir] = errors.New("arranged: the lock could not be read")
 	h.mu.Unlock()
 
@@ -278,9 +270,7 @@ func TestTheTakeoverStartsNoSessionForAFreeLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(record.Dir, sessionlock.StateFree)
 
 	// Act
 	takeOver(h)
@@ -302,13 +292,7 @@ func TestTheTakeoverStartsTheSessionOfAFreeLockAtAColdGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
 
 	// Act
@@ -352,13 +336,7 @@ func TestTheTakeoverStartsNoSessionForAClosedWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}
@@ -376,13 +354,7 @@ func TestTheTakeoverLeavesAHandedOverWorkspaceToItsAdoption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := orphan(t, h)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	lockOf(t, h, ws, sessionlock.StateFree)
 	h.c.mu.Lock()
 	if h.c.joining == nil {
 		h.c.joining = map[ids.WorkspaceID]bool{}
@@ -400,5 +372,187 @@ func TestTheTakeoverLeavesAHandedOverWorkspaceToItsAdoption(t *testing.T) {
 	// Assert
 	if got := h.Started(); len(got) != 0 {
 		t.Fatalf("started = %v, want none: the handover's own adoption decides a handed-over workspace", got)
+	}
+}
+
+// EACH ROW NOBODY HANDED OVER IS SETTLED BY THE ORPHAN PASS'S OWN DECISION
+// FOR IT, once (sidebar carry.go): after its start for a row it starts, after
+// its adoption for a shim it recovers, and at once for a row it starts
+// nothing for.
+func TestTheTakeoverSettlesEachRowItDecidesOnce(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+		// started is whether the row's settle must follow its start.
+		started bool
+	}{
+		{name: "a row at a cold gate after its start raised the gate", started: true, arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := orphan(t, h)
+			lockOf(t, h, ws, sessionlock.StateFree)
+			h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
+			return ws
+		}},
+		{name: "a row whose shim was not up at once", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := orphan(t, h)
+			lockOf(t, h, ws, sessionlock.StateFree)
+			return ws
+		}},
+		{name: "a row whose orphaned shim is adopted", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return orphan(t, h)
+		}},
+		{name: "a row this daemon already serves", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws, _ := h.workspace(t)
+			return ws
+		}},
+		{name: "a closed row", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := orphan(t, h)
+			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: time.Now(), By: wsm.CloseByUser}); err != nil {
+				t.Fatalf("MarkClosed: %v", err)
+			}
+			return ws
+		}},
+		{name: "a row whose lock could not be read", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := orphan(t, h)
+			lockOf(t, h, ws, sessionlock.StateUnknown)
+			return ws
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tc.arrange(t, h)
+
+			// Act
+			takeOver(h)
+
+			// Assert
+			if got := h.Settled(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+				t.Fatalf("settled = %v, want the row settled once", got)
+			}
+			taken := h.order.Taken()
+			if started, settled := indexOf(taken, "start_session"), indexOf(taken, "facts_settled"); tc.started && (started < 0 || settled < started) {
+				t.Fatalf("steps = %v, want the row settled after its start", taken)
+			}
+		})
+	}
+}
+
+// A row handed over is its adoption's to settle: the takeover's orphan pass
+// settles nothing for it.
+func TestTheTakeoverSettlesNoHandedOverRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	lockOf(t, h, ws, sessionlock.StateFree)
+	h.c.mu.Lock()
+	h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+	h.c.owned = map[ids.WorkspaceID]bool{ws: true}
+	h.c.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.Settled(); len(got) != 0 {
+		t.Fatalf("settled = %v, want nothing settled for a row its adoption owns", got)
+	}
+}
+
+// WHILE AN OLDER DAEMON STILL RUNS, NO ROW NOBODY HANDED OVER IS SETTLED: the
+// orphan pass that decides it waits for the older daemons, and the takeover's
+// own settle settles no row (2026-11-25 12:32:56, three rows at a cold gate
+// drawn `done` for seven seconds).
+func TestATakeoverWithAnElderRunningSettlesNoRowUntilTheOrphanPassDecidesIt(t *testing.T) {
+	// Arrange
+	release := make(chan struct{})
+	h := newHarness(t, withElder(release))
+	ws := orphan(t, h)
+	lockOf(t, h, ws, sessionlock.StateFree)
+	h.c.deps.DB = coldGatedDB{DB: h.db, gated: []wsm.WorkspaceID{ws}}
+
+	// Act: the takeover settles with the elder still running.
+	takeOver(h)
+	<-h.servingSettled
+
+	// Assert
+	if got := h.Settled(); len(got) != 0 {
+		t.Fatalf("settled = %v, want no row settled while the elder runs", got)
+	}
+
+	// Act: the elder ends.
+	close(release)
+	<-h.c.eldersGoneSignal()
+
+	// Assert
+	if got := h.Settled(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+		t.Fatalf("settled = %v, want the row settled once its start ended", got)
+	}
+}
+
+// WHEN THE ORPHAN PASS WILL NOT RUN, every row nobody handed over is settled
+// on the event that says so, and a handed-over row is still left to its
+// adoption: nothing more will be established for the rest, and kept carried
+// they would draw the incumbent's last arm for good.
+func TestARowTheOrphanPassWillNotDecideIsSettledOnTheEventThatSaysSo(t *testing.T) {
+	cases := []struct {
+		name    string
+		deps    func(d *Deps)
+		arrange func(h *harness)
+		record  string
+	}{
+		{
+			name:    "a takeover that cannot promote its state handle",
+			arrange: func(h *harness) { h.c.deps.DB = refusingPromote{DB: h.db} },
+			record:  "the state handle could not be promoted to writing",
+		},
+		{
+			name: "a takeover whose wait for the older daemons fails",
+			deps: func(d *Deps) {
+				d.LiveElders = func() ([]string, error) { return []string{"elder"}, nil }
+				d.AwaitElders = func(context.Context, []string) error {
+					return errors.New("arranged: the life locks could not be watched")
+				}
+			},
+			arrange: func(*harness) {},
+			record:  "the wait for the older daemons failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			settles := make(chan ids.WorkspaceID, 8)
+			opts := []func(d *Deps){func(d *Deps) {
+				record := d.FactsSettled
+				d.FactsSettled = func(ws ids.WorkspaceID) {
+					record(ws)
+					settles <- ws
+				}
+			}}
+			if tc.deps != nil {
+				opts = append(opts, tc.deps)
+			}
+			h := newHarness(t, opts...)
+			undecided := orphan(t, h)
+			handed, _ := h.workspace(t)
+			h.c.mu.Lock()
+			h.c.joining = map[ids.WorkspaceID]bool{handed: true}
+			h.c.owned = map[ids.WorkspaceID]bool{handed: true}
+			h.c.mu.Unlock()
+			tc.arrange(h)
+
+			// Act
+			takeOver(h)
+			<-settles
+
+			// Assert
+			if got := h.Settled(); !slices.Equal(got, []ids.WorkspaceID{undecided}) {
+				t.Fatalf("settled = %v, want only the row nobody handed over", got)
+			}
+			rec, found := dlog.FindRecord(records(h.log, opOrphans), dlog.RecordQuery{Message: "the orphan pass will not run; the rows it would have decided are drawn from this daemon's own facts"})
+			if !found || rec.Level != dlog.LevelInfo || rec.Context["why"] != tc.record || rec.Context["workspaces"] != 1 {
+				t.Fatalf("record = %+v (found %v), want one INFO record naming why, for one row", rec, found)
+			}
+		})
 	}
 }

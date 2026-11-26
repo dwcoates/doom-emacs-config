@@ -1,6 +1,8 @@
 package daemonrules
 
 import (
+	"go/ast"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -32,5 +34,39 @@ func TestControllerLockIsReleasedOnlyThroughUnlock(t *testing.T) {
 				t.Fatalf("%s releases c.mu directly %d times, want %d; release it through c.unlock()", f.Name, got, want)
 			}
 		})
+	}
+}
+
+// EVERY TEST ARRANGES A LOCK THROUGH setLock: a hand-rolled write to the
+// harness's lock table skips its lock, and drifts from the one shape.
+func TestEveryLockArrangedGoesThroughSetLock(t *testing.T) {
+	sourcescan.InPackage(t, internalRolloutDir)
+	var stray []string
+	sourcescan.EachSourceIn(t, ".", true, func(fset *token.FileSet, file *ast.File) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name == "setLock" || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				assign, ok := n.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for _, lhs := range assign.Lhs {
+					index, ok := lhs.(*ast.IndexExpr)
+					if !ok {
+						continue
+					}
+					if sel, ok := index.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "lockStates" {
+						stray = append(stray, fset.Position(assign.Pos()).String())
+					}
+				}
+				return true
+			})
+		}
+	})
+	if len(stray) != 0 {
+		t.Fatalf("locks arranged outside setLock at %v", stray)
 	}
 }

@@ -22,9 +22,26 @@ import (
 //
 // So a row the mirror lets go of keeps the arm it last drew, the incumbent's,
 // as its CARRIED arm, and draws it (for its status and its visibility alike)
-// until its facts are settled: the adoption declared them in (SettleFacts,
-// or SettleAllFacts once the takeover settled) AND no bring-up of the row
-// stands. A row this daemon never mirrored carries nothing.
+// until ITS OWN facts are settled AND no bring-up of the row stands. A row
+// this daemon never mirrored carries nothing.
+//
+// EACH ROW IS SETTLED BY THE EVENT THAT ESTABLISHES ITS FACTS, never by the
+// takeover wholesale (2026-11-25). The takeover used to settle every row the
+// moment its adoptions finished, but a row nobody handed over is decided only
+// by the takeover's orphan pass, which waits for the older daemons to end: at
+// the 12:32:53 handover three folded rows at a cold gate were settled at
+// 12:32:56, drawn from a durable turn end as `done`, unviewed, so shown under
+// their fold and opened as tabs, until the orphan pass raised their gates
+// seven seconds later. The rollout settles a row (SettleFacts) once its
+// adoption has taken its merges and its session's facts, once its start has
+// ended, or once the orphan pass decided nothing will be started for it.
+//
+// A START OF A CARRIED ROW'S SESSION THAT THIS DAEMON RAN SETTLES IT too
+// when it ends, unless an adoption owes the row's facts (OweFacts): the
+// session's facts are then this daemon's own, so a row the user answers or
+// prompts before the orphan pass reaches it is drawn as it runs. An adoption
+// owes the facts from its start to its settle, because a start it drains
+// can end before it has taken the row's merges back.
 
 // heldArm answers the arm WS draws from the incumbent rather than from its own
 // facts, and where it was read: the mirror's, for a row not yet adopted, or
@@ -59,6 +76,19 @@ func (r *resolver) carryLetGo(before, after map[ids.WorkspaceID]string) {
 	}
 }
 
+// startEnded settles WS when a start of its session that this daemon ran has
+// ended while the row is carried and no adoption owes its facts (the
+// bring-up marker's falling edge). Caller holds mu.
+func (r *resolver) startEnded(ws ids.WorkspaceID, s *wsState) {
+	if s.carried == "" || s.settleAsked || s.adoptionOwes {
+		return
+	}
+	r.logFor(ws).Info("daemon.sidebar.facts_settled_by_start",
+		"a start of the carried row's session that this daemon ran has ended; its session's facts are this daemon's own",
+		dlog.Context{"carried": s.carried})
+	s.settleAsked = true
+}
+
 // releaseCarry lets go of WS's carried arm once its facts are settled. Caller
 // holds mu.
 func (r *resolver) releaseCarry(ws ids.WorkspaceID, s *wsState) {
@@ -74,30 +104,26 @@ func (r *resolver) releaseCarry(ws ids.WorkspaceID, s *wsState) {
 // SettleFacts implements Resolver.
 func (r *resolver) SettleFacts(ws ids.WorkspaceID) {
 	r.mutateWorkspaceIf(ws, "daemon.sidebar.settle_facts",
-		logsite.Msg("the adoption declared the row's facts in"), nil, func(s *wsState, _ dlog.Logger) bool {
-			if s.settleAsked {
+		logsite.Msg("the row's facts are established"), nil, func(s *wsState, _ dlog.Logger) bool {
+			if s.settleAsked && !s.adoptionOwes {
 				return false
 			}
 			s.settleAsked = true
+			s.adoptionOwes = false
 			r.releaseCarry(ws, s)
 			return true
 		})
 }
 
-// SettleAllFacts implements Resolver.
-func (r *resolver) SettleAllFacts() {
-	r.mutateIf("daemon.sidebar.settle_all_facts",
-		logsite.Msg("the takeover settled; every row's facts are declared in"), nil, r.log.Global(), func() bool {
-			changed := false
-			for _, rec := range r.state.reg.Workspaces {
-				s := r.state.workspace(rec.ID)
-				if s.settleAsked {
-					continue
-				}
-				s.settleAsked = true
-				r.releaseCarry(rec.ID, s)
-				changed = true
+// OweFacts implements Resolver.
+func (r *resolver) OweFacts(ws ids.WorkspaceID, owed bool) {
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.owe_facts",
+		logsite.Msg("the roster took whether an adoption owes the row's facts"), dlog.Context{"owed": owed},
+		func(s *wsState, _ dlog.Logger) bool {
+			if s.adoptionOwes == owed {
+				return false
 			}
-			return changed
+			s.adoptionOwes = owed
+			return true
 		})
 }

@@ -1289,6 +1289,10 @@ type harness struct {
 	marker []markerEdge
 	// replacing records every Replacing edge, in order.
 	replacing []markerEdge
+	// settled records every FactsSettled call, in order.
+	settled []ids.WorkspaceID
+	// owed records every OweFacts edge, in order.
+	owed []markerEdge
 	// servingSettled receives once per ServingSettled call.
 	servingSettled chan struct{}
 }
@@ -1309,6 +1313,41 @@ func (h *harness) Started() []ids.WorkspaceID {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]ids.WorkspaceID(nil), h.started...)
+}
+
+// Settled answers every workspace whose facts were settled, in order, once
+// every start and straggler adoption has finished.
+func (h *harness) Settled() []ids.WorkspaceID {
+	h.c.bringUps.Wait()
+	h.c.stragglerAdoptions.Wait()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.settled...)
+}
+
+// setLock arranges the lock of the workspace in DIR to read STATE to the
+// controller's probe. Every test arranges a lock through it (or lockOf).
+func (h *harness) setLock(dir string, state sessionlock.State) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lockStates[dir] = state
+}
+
+// lockOf arranges WS's lock to read STATE to the controller's probe.
+func lockOf(t *testing.T, h *harness, ws ids.WorkspaceID, state sessionlock.State) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.setLock(record.Dir, state)
+}
+
+// Owed answers every OweFacts edge, in order.
+func (h *harness) Owed() []markerEdge {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]markerEdge(nil), h.owed...)
 }
 
 // Marker answers every bring-up marker edge, once every start has finished.
@@ -1493,6 +1532,14 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		ServingSettled: func(context.Context) { h.servingSettled <- struct{}{} },
 		FactsSettled: func(ws ids.WorkspaceID) {
 			order.record("facts_settled")
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.settled = append(h.settled, ws)
+		},
+		OweFacts: func(ws ids.WorkspaceID, owed bool) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.owed = append(h.owed, markerEdge{ws: ws, up: owed})
 		},
 		Replacing: func(ws ids.WorkspaceID, replacing bool) {
 			order.record(fmt.Sprintf("replacing:%v", replacing))
@@ -1636,9 +1683,7 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and
 	// the lock probe is called with the registry's spelling: keying the fake
 	// probe by anything else would silently answer "could not tell".
-	h.mu.Lock()
-	h.lockStates[ws.Dir] = sessionlock.StateHeld
-	h.mu.Unlock()
+	h.setLock(ws.Dir, sessionlock.StateHeld)
 	return ws.ID, ws.Dir
 }
 
@@ -1955,4 +2000,35 @@ func (f *fakeHotReload) ShimJudged(_ context.Context, ws ids.WorkspaceID, outcom
 }
 func (f *fakeHotReload) ShimReplaceFailed(ws ids.WorkspaceID, _ error) {
 	f.record("shim_replace_failed:" + string(ws))
+}
+
+// A lock arranged through setLock, or through lockOf by the workspace's
+// directory, is what the controller's probe reads.
+func TestALockArrangedIsWhatTheProbeReads(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID, dir string)
+	}{
+		{name: "by directory", arrange: func(_ *testing.T, h *harness, _ ids.WorkspaceID, dir string) {
+			h.setLock(dir, sessionlock.StateFree)
+		}},
+		{name: "by workspace", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, _ string) {
+			lockOf(t, h, ws, sessionlock.StateFree)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, dir := h.workspace(t)
+
+			// Act
+			tc.arrange(t, h, ws, dir)
+
+			// Assert
+			if state, err := h.c.deps.LockProbe(dir); err != nil || state != sessionlock.StateFree {
+				t.Fatalf("probe = %v, %v; want the arranged free lock", state, err)
+			}
+		})
+	}
 }

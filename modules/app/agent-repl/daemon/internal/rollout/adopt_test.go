@@ -703,9 +703,7 @@ func TestAdoptionOfAFreeLockDialsNoShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, dir := h.workspace(t)
-	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(dir, sessionlock.StateFree)
 
 	// Act
 	arm(t, h, ws, Participants{})
@@ -730,9 +728,7 @@ func TestAnAdoptionOfAParkedWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
 	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, At: time.Unix(1_700_000_000, 0)}); err != nil {
 		t.Fatalf("SetSessionTerminal: %v", err)
 	}
-	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(dir, sessionlock.StateFree)
 	h.fleet.mu.Lock()
 	h.fleet.listening[ws] = true
 	h.fleet.mu.Unlock()
@@ -2051,9 +2047,7 @@ func TestADialedAdoptionClosesTheHealthyAttachsFaults(t *testing.T) {
 func freeLockAdoption(t *testing.T, h *harness) ids.WorkspaceID {
 	t.Helper()
 	ws, dir := h.workspace(t)
-	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(dir, sessionlock.StateFree)
 	h.fleet.mu.Lock()
 	delete(h.fleet.live, ws)
 	h.fleet.mu.Unlock()
@@ -2598,9 +2592,7 @@ func TestTheDaemonAdoptsAWorkspaceWhoseParticipantsNeverCall(t *testing.T) {
 			adopted := make(chan ids.WorkspaceID, 4)
 			h := harnessSignallingAdoptions(t, adopted)
 			ws, dir := h.workspace(t)
-			h.mu.Lock()
-			h.lockStates[dir] = tt.lock
-			h.mu.Unlock()
+			h.setLock(dir, tt.lock)
 
 			// Act: the successor joins, and nobody calls in.
 			arm(t, h, ws, tt.expected)

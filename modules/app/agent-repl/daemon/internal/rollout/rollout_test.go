@@ -332,8 +332,8 @@ func TestAHandoverWaitsForTheTakeoversOwnBringUp(t *testing.T) {
 			close(release)
 		}
 	})
+	h.setLock(record.Dir, sessionlock.StateFree)
 	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
 	h.startHold = func(ids.WorkspaceID) {
 		close(entered)
 		<-release
@@ -386,8 +386,8 @@ func TestAHandoverWhoseCallerLeavesBeforeTheTakeoverSettlesStartsNothing(t *test
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	defer close(release)
+	h.setLock(record.Dir, sessionlock.StateFree)
 	h.mu.Lock()
-	h.lockStates[record.Dir] = sessionlock.StateFree
 	h.startHold = func(ids.WorkspaceID) {
 		close(entered)
 		<-release

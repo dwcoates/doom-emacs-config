@@ -1232,7 +1232,11 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_bringing_up",
 		logsite.Msg("the roster took whether a bring-up is under way"),
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) {
+			ended := s.bringingUp && !bringingUp
 			s.bringingUp = bringingUp
+			if ended {
+				r.startEnded(ws, s)
+			}
 			r.releaseCarry(ws, s)
 		})
 }

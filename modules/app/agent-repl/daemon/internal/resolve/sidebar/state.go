@@ -159,10 +159,13 @@ type wsState struct {
 	// the mirror let go of, until the row's own facts are settled (carry.go);
 	// empty when nothing is carried.
 	carried string
-	// settleAsked reports that the adoption declared the row's facts in
-	// (SettleFacts, SettleAllFacts): the carried arm is let go once no
-	// bring-up of the row stands either.
+	// settleAsked reports that the row's facts are established (SettleFacts,
+	// or the end of a start this daemon ran): the carried arm is let go once
+	// no bring-up of the row stands either.
 	settleAsked bool
+	// adoptionOwes reports an adoption of the row under way that owes its
+	// facts (OweFacts): the end of a start does not settle the row meanwhile.
+	adoptionOwes bool
 	// replacing reports a relaunch replacing the session's shim
 	// (SetReplacing), whose stand-down's dead link leaves the session live.
 	replacing bool

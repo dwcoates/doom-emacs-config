@@ -56,9 +56,7 @@ func reconcileOne(t *testing.T, h *harness, intent Intent, lock sessionlock.Stat
 func reconcileOnePID(t *testing.T, h *harness, intent Intent, lock sessionlock.State, pid int) (ids.WorkspaceID, []Disposition) {
 	t.Helper()
 	ws, dir := h.workspace(t)
-	h.mu.Lock()
-	h.lockStates[dir] = lock
-	h.mu.Unlock()
+	h.setLock(dir, lock)
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{{
@@ -420,9 +418,7 @@ func TestAManifestSessionThisBootAdoptedIsPreserved(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			ws, dir := h.workspace(t)
-			h.mu.Lock()
-			h.lockStates[dir] = sessionlock.StateHeld
-			h.mu.Unlock()
+			h.setLock(dir, sessionlock.StateHeld)
 			if err := h.c.writeManifest(context.Background(), Manifest{
 				Daemon: previousInstance, WrittenAt: instant,
 				Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentStandDown}},
@@ -726,9 +722,8 @@ func reconcileTwoReadOnly(t *testing.T, h *harness) (first, second ids.Workspace
 	h.c.deps.DB = handle
 	first, firstDir := h.workspace(t)
 	second, secondDir := h.workspace(t)
-	h.mu.Lock()
-	h.lockStates[firstDir], h.lockStates[secondDir] = sessionlock.StateFree, sessionlock.StateFree
-	h.mu.Unlock()
+	h.setLock(firstDir, sessionlock.StateFree)
+	h.setLock(secondDir, sessionlock.StateFree)
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{

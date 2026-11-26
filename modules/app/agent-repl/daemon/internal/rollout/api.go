@@ -456,10 +456,17 @@ type Deps struct {
 	// ended, so the stand-down's dead link is never drawn as a fault.
 	// Required.
 	Replacing func(ws ids.WorkspaceID, replacing bool)
-	// FactsSettled declares a workspace's own facts in
-	// (sidebar.Resolver.SettleFacts): an adoption calls it once the rest of
-	// it, past ownership, has run. Required.
+	// FactsSettled declares a workspace's own facts established
+	// (sidebar.Resolver.SettleFacts), each by the event that establishes them:
+	// an adoption once the rest of it, past ownership, has run; a session the
+	// takeover starts once its start has ended; and a workspace the orphan
+	// pass starts nothing for once the pass decided so. Required.
 	FactsSettled func(ws ids.WorkspaceID)
+	// OweFacts raises or lowers the fact that an adoption of a workspace
+	// under way owes its facts (sidebar.Resolver.OweFacts): raised as the
+	// adoption begins, lowered on every path that ends before ownership.
+	// Required.
+	OweFacts func(ws ids.WorkspaceID, owed bool)
 	// ServingSettled is told once this daemon owns every workspace it serves
 	// and the sessions it started are up: at a fresh boot's settle
 	// (SettleBoot) and once a successor's takeover settled. What a previous
@@ -974,6 +981,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.FactsSettled == nil {
 		return nil, errors.New("rollout: the facts-settled declaration is required; a successor must not draw an adopted row from facts it has not taken")
+	}
+	if deps.OweFacts == nil {
+		return nil, errors.New("rollout: the adoption's debt of facts is required; a start an adoption drains must not settle a row before its merges are taken")
 	}
 	if deps.Replacing == nil {
 		return nil, errors.New("rollout: the replacement fact is required; a relaunch's stand-down must not read as a dead session")
