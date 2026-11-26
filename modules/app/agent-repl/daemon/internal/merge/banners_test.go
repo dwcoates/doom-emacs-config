@@ -110,8 +110,8 @@ func TestAFailedMergeRaisesTheFailedBannerWithItsSummary(t *testing.T) {
 
 	// Assert
 	got := h.banners.seen()
-	if len(got) != 2 || got[1].kind != "failed" || got[1].ws != theWorkspace || got[1].text == "" {
-		t.Fatalf("banners = %+v, want the queued banner then the failed one with its summary", got)
+	if len(got) != 1 || got[0].kind != "failed" || got[0].ws != theWorkspace || got[0].text == "" {
+		t.Fatalf("banners = %+v, want only the failed one with its summary", got)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestALandedMergeRaisesTheLandedBannerNamingItsTarget(t *testing.T) {
 
 			// Assert
 			got := h.banners.seen()
-			if len(got) != 2 || got[1].kind != "landed" || got[1].ws != theWorkspace || got[1].text != tt.want {
-				t.Fatalf("banners = %+v, want the queued banner then the landed one reading %q", got, tt.want)
+			if len(got) != 1 || got[0].kind != "landed" || got[0].ws != theWorkspace || got[0].text != tt.want {
+				t.Fatalf("banners = %+v, want only the landed one reading %q", got, tt.want)
 			}
 		})
 	}
