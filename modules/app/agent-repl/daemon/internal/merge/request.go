@@ -77,6 +77,13 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		logRefusal(log, op, logsite.Msg("refused a merge request"), fields, err)
 		return err
 	}
+	// A ONE-SHOT ITS CREATOR ASKED TO PROFILE PROFILES ITS OWN GATE
+	// (wsm.LandingEffects.ProfileGate): the creator decided it, so the
+	// one-shot's finish carries it whether or not it asked again.
+	if e := record.Effects; e != nil && e.ProfileGate && source.Kind == wsm.MergeSourceOwnBranch {
+		source.ProfileGate = true
+		fields["profile_gate"] = "landing_effect"
+	}
 	if req.PlaceBehind != "" {
 		fields["place_behind"] = req.PlaceBehind
 		source.BehindName = req.PlaceBehind

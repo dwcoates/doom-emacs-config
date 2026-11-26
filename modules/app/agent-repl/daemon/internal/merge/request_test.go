@@ -872,3 +872,39 @@ func TestParkQueuedAsksOnlyForAnOwnBranchMerge(t *testing.T) {
 		})
 	}
 }
+
+// A ONE-SHOT ITS CREATOR ASKED TO PROFILE PROFILES ITS OWN GATE
+// (wsm.LandingEffects.ProfileGate), whether or not its finish asked again.
+func TestAOneShotsProfileGateEffectProfilesItsOwnMerge(t *testing.T) {
+	tests := []struct {
+		name    string
+		effects *wsm.LandingEffects
+		asked   bool
+		want    bool
+	}{
+		{name: "an effect its finish does not repeat", effects: &wsm.LandingEffects{ProfileGate: true}, want: true},
+		{name: "an effect its finish repeats", effects: &wsm.LandingEffects{ProfileGate: true}, asked: true, want: true},
+		{name: "effects that do not profile", effects: &wsm.LandingEffects{CompactRequester: true}},
+		{name: "no effects, and a finish that asks", asked: true, want: true},
+		{name: "no effects, and a finish that does not ask"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			setRecord(h, theWorkspace, func(ws *wsm.Workspace) { ws.Effects = tt.effects })
+
+			// Act
+			err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, ProfileGate: tt.asked}, RequestedByUser)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			entry, ok := h.entryOf(theWorkspace)
+			if !ok || entry.Source.ProfileGate != tt.want {
+				t.Fatalf("entry = %+v, %v; want profile_gate %v", entry, ok, tt.want)
+			}
+		})
+	}
+}

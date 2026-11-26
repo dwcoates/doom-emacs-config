@@ -73,22 +73,9 @@ const (
 	// ArmSubscriberClosed refuses a subscription of a closed workspace
 	// (UpdateMergeQueueError.subscriber_closed).
 	ArmSubscriberClosed = "subscriber_closed"
-	// ArmUnknownCloseAfter refuses an async request whose close-after
-	// workspace is not open, is in another repository, or is the requester
-	// itself (CreateWorkspaceError.async_merge_unknown_close_after).
-	ArmUnknownCloseAfter = "async_merge_unknown_close_after"
-	// ArmUnknownMaker refuses an async request whose maker workspace is not
-	// registered in the requester's repository
-	// (CreateWorkspaceError.async_merge_unknown_maker).
-	ArmUnknownMaker = "async_merge_unknown_maker"
 	// ArmUnknownBranch refuses an async request whose branch does not exist
 	// (CreateWorkspaceError.async_merge_unknown_branch).
 	ArmUnknownBranch = "async_merge_unknown_branch"
-	// ArmNameTaken refuses an async request whose merge workspace name is
-	// already a workspace, a branch, an occupied worktree directory, or another
-	// pending async merge's reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
-	// field names the branch the name resolves to.
-	ArmNameTaken = "async_merge_name_taken"
 	// ArmPlacementBehindNotInLine refuses a merge asked to go behind a merge
 	// that does not stand in its queue.
 	ArmPlacementBehindNotInLine = "placement_behind_not_in_line"
@@ -116,8 +103,7 @@ const (
 	// ArmRuleChecksFailed refuses an agent's merge whose branch failed its
 	// repository's rule suites, run before the merge is admitted
 	// (agentrepl.v1.MergeRuleChecksFailed: FinishWorkspaceError's
-	// rule_checks_failed, CreateWorkspaceError's
-	// async_merge_rule_checks_failed).
+	// rule_checks_failed).
 	ArmRuleChecksFailed = "rule_checks_failed"
 )
 
