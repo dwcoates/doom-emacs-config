@@ -47,11 +47,13 @@ const (
 
 // readHeaderTimeout bounds a client's request headers on the unix socket. The
 // headers arrive inside the measured connect-to-first-standing time (worst
-// 1.31ms over 300 fresh connections, 2026-11-26, under the test runner's CPU
-// governor), and five times that, rounded up to the millisecond, is 7ms. The
-// only caller is the local daemon, so this bound only ever ends a connection
-// that is stuck.
-const readHeaderTimeout = 7 * time.Millisecond
+// 1.31ms over 300 fresh connections on an idle-host measurement, 2026-11-26,
+// under the test runner's CPU governor), and a bound of five times that
+// (7ms) was too tight for the same reason the service's stop bounds were
+// (cmd/agent-repl-wifi, main.go): under a gate's host load a stall of tens of
+// milliseconds is plausible. 100ms is five times a 20ms stall. The only caller
+// is the local daemon, so this bound only ever ends a connection that is stuck.
+const readHeaderTimeout = 100 * time.Millisecond
 
 // Controller is the slice of the persistent-wifi controller the service
 // serves.

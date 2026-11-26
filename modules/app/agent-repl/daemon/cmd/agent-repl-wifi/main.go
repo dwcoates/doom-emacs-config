@@ -56,27 +56,32 @@ import (
 // socket holder (the holder's `sockets` entry in daemon/requirements.json).
 const holderSocketName = "persistent-wifi"
 
+// THE THREE BOUNDS BELOW WERE SIZED FIRST AT FIVE TIMES AN IDLE-HOST
+// MEASUREMENT, AND THAT WAS TOO TIGHT UNDER THE GATE'S LOAD: a stop of the
+// controller's loops ran past 2ms in a merge gate at 90% host load (2026-11-26),
+// where the same stop took at worst 0.19ms over 12 services under the test
+// runner's CPU governor. Until the loaded stops are measured they are 100ms:
+// 5x of a 20ms stop, a stall the gate's load makes plausible and a stuck loop
+// does not. Every stop records its own times (`drain_us`, `loops_us` on the
+// service's "stop steps ended" record), so the bounds are re-sized from real
+// stops under load.
+
 // shutdownGrace bounds the orderly drain of in-flight requests: a standing
-// watch is one and ends with the drain, and the daemon opens it again. Five
-// times the measured worst, rounded up to the millisecond: 50 drains of a
-// server with a watch open took at worst 0.33ms (p99 0.33ms) on 2026-11-26
-// under the test runner's CPU governor, and 5 x 0.33ms is 1.65ms.
-const shutdownGrace = 2 * time.Millisecond
+// watch is one and ends with the drain, and the daemon opens it again. Idle
+// worst 0.33ms over 50 drains on 2026-11-26 (see above for the loaded bound).
+const shutdownGrace = 100 * time.Millisecond
 
 // probeTimeout bounds the dial that decides whether an existing socket has a
-// live service behind it, when the service binds its own socket. Five times
-// the measured worst, rounded up to the millisecond: 300 dials to a live
-// unix socket took at worst 24us (p99 20us) on 2026-11-26 under the test
-// runner's CPU governor, and 5 x 24us is 120us.
-const probeTimeout = time.Millisecond
+// live service behind it, when the service binds its own socket. Idle worst
+// 24us over 300 dials on 2026-11-26 (see above for the loaded bound).
+const probeTimeout = 100 * time.Millisecond
 
 // stopGrace bounds the controller's loops ending once the service is told to
-// stop. Five times the measured worst, rounded up to the millisecond: 200
-// stops of the controller's loop over its fakes took at worst 0.25ms (p99
-// 0.12ms) on 2026-11-26 under the test runner's CPU governor, and 5 x 0.25ms
-// is 1.25ms. The measurement did not run the operating system's own lid and
-// network watchers, whose stop is bounded by the same constant.
-const stopGrace = 2 * time.Millisecond
+// stop. Idle worst 0.25ms over 200 stops over the loop's fakes and 0.19ms over
+// 12 real services on 2026-11-26 (see above for the loaded bound). The
+// operating system's own lid and network watchers are bounded by the same
+// constant.
+const stopGrace = 100 * time.Millisecond
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == thawGuardVerb {
@@ -238,16 +243,22 @@ func run(o options) (err error) {
 		}
 	}
 	stop()
+	// EACH STOP STEP IS TIMED AND RECORDED, so its bound is re-sized from real
+	// stops (the measurements at shutdownGrace and stopGrace).
 	drain, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
+	began := time.Now()
 	if err := srv.Shutdown(drain); err != nil {
 		log.Error(op, "draining in-flight requests failed", dlog.Context{"cause": err.Error(), "bound": shutdownGrace.String()})
 		result = errors.Join(result, err)
 	}
+	drained := time.Since(began)
+	began = time.Now()
 	if !waitFor(&loops, stopGrace) {
 		log.Error(op, "the persistent-wifi loops did not end within their bound", dlog.Context{"bound": stopGrace.String()})
 		result = errors.Join(result, errors.New("agent-repl-wifi: the loops did not end in time"))
 	}
+	log.Info(op, "the service's stop steps ended", dlog.Context{"drain_us": drained.Microseconds(), "loops_us": time.Since(began).Microseconds()})
 	return result
 }
 

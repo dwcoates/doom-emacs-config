@@ -498,14 +498,15 @@ quiet state, not the switch.
     connection and is recorded) and `appfreeze.Protection.Selves` names those
     pids with its own while their connections live.
   - EVERY TIMEOUT IS FIVE TIMES ITS MEASURED EXPECTED TIME (owner ruling,
-    2026-11-26), measured on 2026-11-26 under the test runner's CPU governor:
-    the first-standing bound (2.1s) from the live daemon's 205 standing reads, worst
-    412ms, which a connection made while the service starts waits on, plus a
-    connection to a serving server at worst 1.31ms over 300 (the server's header
-    read, 7ms); the drain with a watch open worst 0.33ms over
-    50 (2ms), a dial to a live socket worst 24us over 300 (1ms), the
-    controller's loop stop worst 0.25ms over 200 (2ms; the operating system's
-    own lid and network watchers were not in that measurement).
+    2026-11-26). The first-standing bound (2.1s) is five times the live
+    daemon's worst standing read, 412ms over 205 reads, which a connection
+    made while the service starts waits on. The service's drain, loop stop and
+    probe dial and the server's header read were sized first at five times an
+    idle-host measurement (drain 0.33ms, loop stop 0.25ms, dial 24us, header
+    1.31ms) and fired in a merge gate at 90% host load (a loop stop past 2ms),
+    so each is 100ms until the loaded stops are measured: the service records
+    each stop's own times (`drain_us`, `loops_us`), and the bounds are
+    re-sized from them.
   - The daemon's deploy still stops the Wi-Fi helper's waiting asks
     (`persistentwifi.StopAsks`) with the tools it resolves itself
     (`persistentwifi.ToolsFromEnv`); the helper app is still launched per job
