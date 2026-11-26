@@ -114,6 +114,9 @@ type Test struct {
 	Suite   string
 	Name    string
 	Outcome string
+	// File is the batch member the test is defined in, where its runner
+	// says (a vitest or ERT batch), "" elsewhere.
+	File    string
 	Seconds float64
 	// Start is when the test's own clock started, where its runner says
 	// (zero where it does not); it ran from Start for Seconds.
@@ -321,11 +324,19 @@ var ertResultLine = regexp.MustCompile(`^\s*(passed|FAILED|skipped)\s+\d+/\d+\s+
 // ertOutcomes maps an ERT result word to its outcome.
 var ertOutcomes = map[string]string{"passed": Pass, "FAILED": Fail, "skipped": Skip}
 
-// ParseERT reads every test result line of an ERT batch run, and its Start
-// from the StartMarker lines the driver wrote.
+// ItemMarker opens the line a batch's runner writes as each of its files
+// ends: "TESTRUN-ITEM <file> <seconds>" (suites.ParseItemLines).
+const ItemMarker = "TESTRUN-ITEM"
+
+// ParseERT reads every test result line of an ERT batch run, its Start from
+// the StartMarker lines the driver wrote, and its File from the ItemMarker
+// line that follows it: the driver runs the batch's files one at a time and
+// ends each with that line (testrun/ert/driver.el). A result no ItemMarker
+// line follows is of a file that never ended, and names no file.
 func ParseERT(suite string, out []byte) ([]Test, error) {
 	var tests []Test
 	starts := map[string]time.Time{}
+	fileless := 0
 	for line := range strings.SplitSeq(string(out), "\n") {
 		name, at, ok, err := startOf(line)
 		if err != nil {
@@ -333,6 +344,14 @@ func ParseERT(suite string, out []byte) ([]Test, error) {
 		}
 		if ok {
 			starts[name] = at
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, ItemMarker+" "); ok {
+			file, _, _ := strings.Cut(rest, " ")
+			for i := fileless; i < len(tests); i++ {
+				tests[i].File = file
+			}
+			fileless = len(tests)
 			continue
 		}
 		m := ertResultLine.FindStringSubmatch(line)
@@ -389,7 +408,7 @@ func ParseVitest(suite, path, dir string) ([]Test, error) {
 			// float's nanoseconds of a unix instant are not exact.
 			start = time.UnixMicro(int64(math.Round(r.Start * 1e6)))
 		}
-		tests = append(tests, Test{Suite: suite, Name: file + " > " + r.Name, Outcome: outcome, Seconds: r.Seconds, Start: start})
+		tests = append(tests, Test{Suite: suite, Name: file + " > " + r.Name, Outcome: outcome, File: file, Seconds: r.Seconds, Start: start})
 	}
 	return tests, nil
 }

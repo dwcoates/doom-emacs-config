@@ -25,7 +25,10 @@
 ;;   TESTRUN-ITEM <file> <seconds>
 ;;
 ;; which is that file's load time plus its tests' run time, the cost the
-;; planner splits the next run by.  As each test starts it prints
+;; planner splits the next run by.  It also names the file of every result
+;; line printed since the previous file's line, since the files run one at a
+;; time: that is how each result is put under its file's own inputs digest
+;; (testtimes.ParseERT).  As each test starts it prints
 ;;
 ;;   TESTRUN-TEST-START <unix seconds> <test>
 ;;
