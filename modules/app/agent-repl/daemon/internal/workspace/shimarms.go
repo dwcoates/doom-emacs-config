@@ -147,6 +147,14 @@ func (r *ShimRefusal) KillFoundNoTurnOpen() bool {
 	return r.Verb == "KillTurn" && r.Arm == ArmShimNoTurnOpen
 }
 
+// KillRefusedNotTheOpenTurn reports that this refusal is a KillTurn naming a
+// turn that is not the shim's open one. For an interjection whose turn has
+// since ended and been followed by the next, that is an expected race, and the
+// prompt queue matches it structurally to tell it from a real disagreement.
+func (r *ShimRefusal) KillRefusedNotTheOpenTurn() bool {
+	return r.Verb == "KillTurn" && r.Arm == ArmShimNotTheOpenTurn
+}
+
 // Error renders the verb, the arm and the shim's own words, because the
 // evidence is the point.
 func (r *ShimRefusal) Error() string {

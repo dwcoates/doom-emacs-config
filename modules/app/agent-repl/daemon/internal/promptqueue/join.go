@@ -112,9 +112,7 @@ func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.Turn
 	d := q.lockDelivery(sub.WS)
 	defer d.unlock()
 	state := d.state
-	state.verdicts.Lock()
-	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
-		state.verdicts.Unlock()
+	if !state.lockFreshVerdict(sub.Turn, epoch, c, log) {
 		return
 	}
 	q.record(ctx, sub, c, log)

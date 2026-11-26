@@ -259,6 +259,29 @@ func TestKillFoundNoTurnOpenMarksOnlyAKillTurnThatFoundNoTurn(t *testing.T) {
 	}
 }
 
+func TestKillRefusedNotTheOpenTurnMarksOnlyAKillTurnNamingAnotherTurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal ShimRefusal
+		want    bool
+	}{
+		{name: "a kill refused as not the open turn", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimNotTheOpenTurn}, want: true},
+		{name: "a kill that found no turn open", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoTurnOpen}, want: false},
+		{name: "a kill refused as live", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimTurnLive}, want: false},
+		{name: "another verb's not_the_open_turn", refusal: ShimRefusal{Verb: "StartTurn", Arm: ArmShimNotTheOpenTurn}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := tt.refusal.KillRefusedNotTheOpenTurn()
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("KillRefusedNotTheOpenTurn(%+v) = %v, want %v", tt.refusal, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShimRefusalCarriesTheShimsOwnWords(t *testing.T) {
 	// Arrange: the evidence is the point.
 	refusal := &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNotDeliverable, Detail: "the SDK has no route to a subagent"}

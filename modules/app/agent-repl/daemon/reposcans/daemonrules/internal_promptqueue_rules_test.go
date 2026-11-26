@@ -864,3 +864,18 @@ func calls(node ast.Node, name string) bool {
 	})
 	return found
 }
+
+// TestEveryVerdictSettlesThroughLockFreshVerdict pins that no settle path
+// takes the verdict lock and discards a stale verdict by hand: lockFreshVerdict
+// is the one shape, so no site can keep the lock after a discard or settle a
+// verdict it never checked.
+func TestEveryVerdictSettlesThroughLockFreshVerdict(t *testing.T) {
+	sourcescan.InPackage(t, internalPromptqueueDir)
+	// Act
+	sites := sourcescan.Sites(t, internalPromptqueueDir, ".verdictStaleLocked(")
+
+	// Assert
+	if strings.Join(sites, ",") != "classify.go" {
+		t.Fatalf("verdictStaleLocked is called from %v, want only lockFreshVerdict's in classify.go", sites)
+	}
+}

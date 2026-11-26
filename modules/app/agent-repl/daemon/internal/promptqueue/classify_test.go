@@ -664,10 +664,21 @@ type noTurnOpenRefusal struct{}
 func (noTurnOpenRefusal) Error() string             { return "shim KillTurn refused: no_turn_open" }
 func (noTurnOpenRefusal) KillFoundNoTurnOpen() bool { return true }
 
+// notTheOpenTurnRefusal is the fake's stand-in for the workspace package's
+// KillTurn refusal naming a turn that is not the shim's open one, matched
+// structurally exactly as the real one is.
+type notTheOpenTurnRefusal struct{}
+
+func (notTheOpenTurnRefusal) Error() string {
+	return "shim KillTurn refused: not_the_open_turn"
+}
+func (notTheOpenTurnRefusal) KillRefusedNotTheOpenTurn() bool { return true }
+
 func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 	tests := []struct {
 		name    string
 		cause   error
+		during  func(h *harness)
 		level   string
 		message string
 	}{
@@ -684,6 +695,25 @@ func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 			message: "the shim refused an unforced interrupt as live, which its contract no longer produces; the jump is stripped and the prompt waits for the turn to end",
 		},
 		{
+			name:  "a turn replaced by the next before the kill landed is an expected race",
+			cause: notTheOpenTurnRefusal{},
+			during: func(h *harness) {
+				h.sender.callHook = func(call string) {
+					if call == "KillTurn" {
+						h.watcher.running("next-turn")
+					}
+				}
+			},
+			level:   "info",
+			message: "the running turn had already ended and the next one opened when the interrupt landed; the jump is stripped",
+		},
+		{
+			name:    "a kill refused as not the open turn the queue still runs is a disagreement",
+			cause:   notTheOpenTurnRefusal{},
+			level:   "warn",
+			message: "the shim refused the interrupt as not naming its open turn, though the queue still runs that turn; the jump is stripped and the prompt waits for the turn to end",
+		},
+		{
 			name:    "any other refusal is unexpected",
 			cause:   errors.New("the turn is not the open one"),
 			level:   "warn",
@@ -697,6 +727,9 @@ func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 			running(t, h, "running-turn", "the running work")
 			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
 			h.sender.killErr = tt.cause
+			if tt.during != nil {
+				tt.during(h)
+			}
 			// Act.
 			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
 				t.Fatalf("Submit: %v", err)
@@ -1775,6 +1808,62 @@ func TestAJudgedPromptsTrayShowsClassifyingThenItsHold(t *testing.T) {
 	}
 }
 
+func TestAnInterruptVerdictForATurnThatEndedWhileItWasReachedSendsNoKill(t *testing.T) {
+	tests := []struct {
+		name string
+		// end ends the judged turn while the verdict is reached.
+		end func(h *harness)
+	}{
+		{
+			name: "the turn's end delivered the prompt",
+			end: func(h *harness) {
+				h.watcher.idle()
+				h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+			},
+		},
+		{
+			name: "the watcher stands the next turn in flight",
+			end:  func(h *harness) { h.watcher.running("next-turn") },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
+			release := h.judge.hold()
+			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			<-h.judge.asking()
+			tt.end(h)
+			// Act.
+			release()
+			h.q.waitForClassifications()
+			// Assert.
+			if killed := h.sender.killed(); len(killed) != 0 {
+				t.Fatalf("killed = %v, want no kill of a turn that already ended", killed)
+			}
+			for _, on := range h.footer.interruptions() {
+				if on {
+					t.Fatal("an interjection was registered against a turn that already ended")
+				}
+			}
+			var got []string
+			for _, r := range h.log.Records() {
+				if r.Operation == opInterject {
+					got = append(got, r.Level+": "+r.Message)
+				}
+			}
+			want := "info: the turn the prompt would interrupt ended while the verdict was reached; the prompt is not interjected, and that turn's end delivers it"
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("interject records = %q, want exactly %q", got, want)
+			}
+		})
+	}
+}
+
 func TestAnInterjectionIsDrawnInterjectingAndDeliveredAtTheInterruptedTurnsEnd(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1843,5 +1932,65 @@ func TestAFailedInterjectGoesAheadOfALaterPromptInFifoOrder(t *testing.T) {
 	}
 	if started := h.sender.started(); !reflect.DeepEqual(started, []ids.TurnID{"t2", "t3"}) {
 		t.Fatalf("started = %v, want t2 then t3", started)
+	}
+}
+
+func TestAnInterruptVerdictForAPromptRetiredWhileItWasReachedSendsNoKill(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the work"}
+	release := h.judge.hold()
+	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-h.judge.asking()
+	if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Drop: %v", err)
+	}
+	// Act.
+	release()
+	h.q.waitForClassifications()
+	// Assert.
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want no kill for a prompt no longer held", killed)
+	}
+	for _, on := range h.footer.interruptions() {
+		if on {
+			t.Fatal("an interjection was registered for a prompt no longer held")
+		}
+	}
+	for _, r := range h.log.Records() {
+		if r.Operation == opInterject {
+			t.Fatalf("an interject record was written for a prompt no longer held: %s: %s", r.Level, r.Message)
+		}
+	}
+}
+
+func TestLockFreshVerdictHoldsTheVerdictLockOnlyForAFreshVerdict(t *testing.T) {
+	tests := []struct {
+		name      string
+		judged    uint64
+		wantFresh bool
+	}{
+		{name: "the content still stands, so the lock stays held", judged: 2, wantFresh: true},
+		{name: "an edit replaced the content, so the lock is released", judged: 1, wantFresh: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			state := &wsState{epochs: map[ids.TurnID]uint64{"t1": 2}}
+			log := dlog.NewTestSurfaces()
+
+			// Act
+			fresh := state.lockFreshVerdict("t1", tt.judged, wsm.Classification{Arm: wsm.ArmInterject}, log.Global())
+
+			// Assert
+			released := state.verdicts.TryLock()
+			state.verdicts.Unlock()
+			if fresh != tt.wantFresh || released == tt.wantFresh {
+				t.Fatalf("fresh = %v, lock released = %v; want fresh %v with the lock held exactly when fresh", fresh, released, tt.wantFresh)
+			}
+		})
 	}
 }
