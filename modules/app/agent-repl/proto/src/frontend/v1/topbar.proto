@@ -1,8 +1,9 @@
 // topbar.proto — THE TOPBAR: one THIN strip, edge to edge. Left, tight: the
 // connectivity dot and, right beside it, the account label it qualifies —
 // one cell — then the status chips in order: remote-control chip,
-// persistent-wifi chip. Center: the heading — the workspace's short summary,
-// and on a line beneath it the workspace's name — centered
+// persistent-wifi chip, and, in a repository that checks its production, the
+// production-checks chip. Center: the heading — the workspace's short
+// summary, and on a line beneath it the workspace's name — centered
 // on the strip between the flank groups, which never spread and never push
 // it. Right, tight, in order: model selector, effort selector,
 // permission-mode picker, context chip at the far edge. The status chips ride
@@ -57,6 +58,7 @@ package frontend.v1;
 
 import "conversation/v1/api.proto";
 import "frontend/v1/workspace_name_prefix.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -134,6 +136,12 @@ message TopbarView {
   // immediately left of the persistent-wifi chip.
   // ALWAYS SET: every workspace has a remote-control mode, on or off.
   TopbarRemoteControl remote_control = 16;
+  // The production-checks chip, last in the left group's status run,
+  // immediately right of the persistent-wifi chip. OPTIONAL BY PRESENCE: SET
+  // only when the workspace's repository turns production checks on
+  // (repoconfig.v1.LifecycleConfig.production_checks); UNSET otherwise, and
+  // the client then draws nothing in its place.
+  optional TopbarProductionChecks production_checks = 18;
 }
 
 // THE REMOTE-CONTROL CHIP: one phone glyph stating whether this workspace's
@@ -325,6 +333,42 @@ message TopbarPersistentWifiLidUnwatched {}
 message TopbarPersistentWifiTooltip {
   // Drawn verbatim ("Wi-Fi: joined (network name withheld by macOS) ·
   // persistent wifi on: the lid can close").
+  string text = 1;
+}
+
+// THE PRODUCTION-CHECKS CHIP: one glyph stating whether the workspace's
+// repository's production checks are running or paused
+// (agentrepl.v1.UpdateProductionPause). It is the REPOSITORY'S standing, so
+// every workspace of the repository draws the same chip, and a pause or a
+// resume restates it on each. Drawn as the persistent-wifi chip is: the glyph
+// is always black, and the standing arm paints the disc it sits on.
+//   standing:  running → a green disc; paused → a white one.
+//
+// A STATUS AND A CONTROL: clicking the chip sends UpdateProductionPause for
+// `repository`, `pause` while running and `resume` while paused. The chip
+// draws nothing on success; it redraws from the push the change causes, and a
+// refusal is stated at the chip.
+message TopbarProductionChecks {
+  // Whether the repository's production checks are running or paused.
+  oneof standing {
+    TopbarProductionChecksRunning running = 1;
+    TopbarProductionChecksPaused paused = 2;
+  }
+  // The repository a click pauses or resumes, echoed verbatim in
+  // UpdateProductionPauseRequest.repository.
+  workspace.v1.RepositoryRef repository = 3;
+  // The hover text, composed by the daemon: the standing, the production
+  // mediator it acts on by name, and what a click does.
+  TopbarProductionChecksTooltip tooltip = 4;
+}
+// The checks run: each landing's span is told to the production mediator.
+message TopbarProductionChecksRunning {}
+// The checks are paused: the production mediator is told no span.
+message TopbarProductionChecksPaused {}
+// The chip's hover text.
+message TopbarProductionChecksTooltip {
+  // Drawn verbatim ("Production checks are running, reviewed by
+  // prod-mediator · click to pause them").
   string text = 1;
 }
 

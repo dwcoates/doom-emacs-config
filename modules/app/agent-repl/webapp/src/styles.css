@@ -8756,6 +8756,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-context-figure,
 .topbar-queue-bypass-button,
 .topbar-remote-control-button,
+.topbar-production-checks-button,
 .topbar-wifi-button {
   background: transparent;
   border: 1px solid transparent;
@@ -8788,6 +8789,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-context-figure:hover,
 .topbar-queue-bypass:not([data-mode="held-elsewhere"]) .topbar-queue-bypass-button:hover,
 .topbar-remote-control-button:hover,
+.topbar-production-checks-button:hover,
 .topbar-wifi-button:hover {
   border-color: var(--border);
 }
@@ -9656,6 +9658,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    glyph inside it is centered by geometry rather than by layout. */
 .topbar-queue-bypass,
 .topbar-remote-control,
+.topbar-production-checks,
 .topbar-wifi {
   display: inline-flex;
   align-items: center;
@@ -9667,6 +9670,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    but keeps the chip's color, which is the glyph's black. */
 .topbar-queue-bypass-button,
 .topbar-remote-control-button,
+.topbar-production-checks-button,
 .topbar-wifi-button {
   display: inline-flex;
   align-items: center;
@@ -9674,6 +9678,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 }
 .topbar-queue-bypass-glyph,
 .topbar-remote-control-glyph,
+.topbar-production-checks-glyph,
 .topbar-wifi-glyph {
   display: block;
   width: 16px;
@@ -9686,9 +9691,13 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 }
 .topbar-queue-bypass-disc,
 .topbar-remote-control-disc,
+.topbar-production-checks-disc,
 .topbar-wifi-disc { stroke: none; fill: var(--wifi-mode-off-disc); }
 .topbar-remote-control[data-mode="on"] .topbar-remote-control-disc,
 .topbar-wifi[data-mode="on"] .topbar-wifi-disc { fill: var(--wifi-mode-on-disc); }
+/* THE PRODUCTION-CHECKS CHIP lights the same green while its repository's
+   checks run; its arm is the standing, not a mode. */
+.topbar-production-checks[data-standing="running"] .topbar-production-checks-disc { fill: var(--wifi-mode-on-disc); }
 /* THE QUEUE-BYPASS CHIP (owner request, 2026-11-10): lit in the canonical
    orange while this workspace holds the mode, muted and inert while another
    workspace of the repository holds it. */
@@ -9701,6 +9710,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    is set while the call stands and removed at its answer. */
 .topbar-queue-bypass[data-settling],
 .topbar-remote-control[data-settling],
+.topbar-production-checks[data-settling],
 .topbar-wifi[data-settling] {
   animation: topbar-wifi-settling 1.4s ease-in-out infinite;
 }
@@ -9708,6 +9718,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 @media (prefers-reduced-motion: reduce) {
   .topbar-queue-bypass[data-settling],
   .topbar-remote-control[data-settling],
+  .topbar-production-checks[data-settling],
   .topbar-wifi[data-settling] { animation: none; opacity: 0.7; }
 }
 

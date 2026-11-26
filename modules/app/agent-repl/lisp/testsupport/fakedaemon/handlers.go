@@ -674,6 +674,10 @@ func (s *fakeServer) UnsubscribeWorkspace(ctx context.Context, req *connect.Requ
 	return handleUnary[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse](ctx, s, "UnsubscribeWorkspace", req.Msg)
 }
 
+func (s *fakeServer) UpdateProductionPause(ctx context.Context, req *connect.Request[v1.UpdateProductionPauseRequest]) (*connect.Response[v1.UpdateProductionPauseResponse], error) {
+	return handleUnary[v1.UpdateProductionPauseRequest, v1.UpdateProductionPauseResponse](ctx, s, "UpdateProductionPause", req.Msg)
+}
+
 func (s *fakeServer) UpdateDeployHold(ctx context.Context, req *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
 	return handleUnary[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse](ctx, s, "UpdateDeployHold", req.Msg)
 }

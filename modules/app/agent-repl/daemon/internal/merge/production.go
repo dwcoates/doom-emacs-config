@@ -105,6 +105,9 @@ const (
 	ProductionCheckNothingToDo = "nothing_to_do"
 	ProductionCheckDispatched  = "dispatched"
 	ProductionCheckUnanswered  = "unanswered"
+	// ProductionCheckPaused is a span a pause left unreviewed: dropped by
+	// the pause, or skipped as it ended in or began in one.
+	ProductionCheckPaused = "paused"
 )
 
 // The events ObserveProductionChild records.
@@ -133,18 +136,28 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 	var errs []error
 	for _, q := range queues {
 		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
-		check, owed, err := o.deps.DB.OweProductionCheck(ctx, q.key, at, "")
+		check, owing, err := o.deps.DB.OweProductionCheck(ctx, q.key, at, "")
 		if err != nil {
 			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not owe the production check of the span the landing closed; the span runs on into the next"), err)
 			errs = append(errs, err)
 			continue
 		}
-		if !owed {
+		span := withField(withField(fields,
+			"span_since", check.Since.UTC().Format(time.RFC3339Nano)), "span_until", check.Until.UTC().Format(time.RFC3339Nano))
+		switch owing {
+		case wsm.ProductionSpanEmpty:
 			o.deps.Log.Global().Info(opProduction, "the landing closed no span between landings; it owes no production check", fields)
-			continue
+		case wsm.ProductionSpanPaused:
+			o.deps.Meter.ObserveProductionCheck(ProductionCheckPaused, 0)
+			o.deps.Log.Global().Info(opProduction, "the landing closed a span while the production checks are paused; it is never reviewed", span)
+		case wsm.ProductionSpanBeganInPause:
+			o.deps.Meter.ObserveProductionCheck(ProductionCheckPaused, 0)
+			o.deps.Log.Global().Info(opProduction, "the first landing after the production checks resumed closed a span begun in the pause; it is never reviewed, and the checks start at this landing", span)
+		case wsm.ProductionSpanOwed:
+			o.deps.Log.Global().Info(opProduction, "the landing owes a production check of the span before it", span)
+		default:
+			panic(fmt.Sprintf("merge: the store answered the undeclared production owing %q", owing))
 		}
-		o.deps.Log.Global().Info(opProduction, "the landing owes a production check of the span before it", withField(withField(fields,
-			"span_since", check.Since.UTC().Format(time.RFC3339Nano)), "span_until", check.Until.UTC().Format(time.RFC3339Nano)))
 	}
 	return errors.Join(errs...)
 }
@@ -294,8 +307,18 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 	fields = withField(fields, "mediator", string(ws))
 	var closed wsm.TurnClose
 	if !c.Prompted() {
-		turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
-			return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
+		// THE MARK AND THE SUBMIT RUN UNDER THE PRODUCTION LOCK, so a pause
+		// either drops the span before the mark reads it or finds the brief
+		// submitted and retires it (productionpause.go).
+		var (
+			turn   ids.TurnID
+			marked bool
+			failed turnFailure
+		)
+		o.underProductionLock(q.key, func() {
+			turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+				return o.deps.DB.MarkProductionCheckPrompted(ctx, q.key, c.Until, o.deps.Now(), turn)
+			})
 		})
 		switch {
 		case failed == turnMarkFailed:
@@ -327,9 +350,14 @@ func (o *orchestrator) productionRound(ctx context.Context, q checkedQueue, c ws
 			}
 		}
 		o.deps.Log.Global().Info(opProduction, "the production mediator was told of the span before; its turn is reattached", withField(withField(fields, "turn", string(c.Turn)), "resumed", c.Resumed))
-		closed, err = o.reattachTurn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
+		var ended bool
+		closed, ended, err = o.reattachProductionTurn(ctx, q, ws, c, told, fields)
 		if err != nil {
 			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the production mediator's reattached turn could not be awaited; the span stays due"), err)
+			return
+		}
+		if !ended {
+			o.deps.Log.Global().Info(opProduction, "the span was decided, or dropped by a pause, before its turn was reattached; this round ends", fields)
 			return
 		}
 	}
@@ -348,7 +376,15 @@ func (o *orchestrator) productionTurnEnded(ctx context.Context, q checkedQueue, 
 		return
 	}
 	if now == nil || !now.Until.Equal(told.Until) {
-		o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended with its span decided", fields)
+		pause, err := o.deps.DB.ProductionPauseOf(ctx, q.key)
+		switch {
+		case err != nil:
+			o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("could not read whether the production checks are paused at the mediator's turn end"), err)
+		case pause.Paused:
+			o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended under a pause; its span was dropped, never reviewed", fields)
+		default:
+			o.deps.Log.Global().Info(opProduction, "the production mediator's turn ended with its span decided", fields)
+		}
 		return
 	}
 	if closed == wsm.CloseKilled {
@@ -385,8 +421,16 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		o.mediationFailedUnder(ctx, opProduction, fields, logsite.Msg("the undecided production mediator's resuming brief could not be composed; the span stays due"), err)
 		return
 	}
-	turn, marked, failed, err := o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
-		return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
+	// Under the production lock, as productionRound's first telling.
+	var (
+		turn   ids.TurnID
+		marked bool
+		failed turnFailure
+	)
+	o.underProductionLock(q.key, func() {
+		turn, marked, failed, err = o.submitMarkedTurn(ctx, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION, func(turn ids.TurnID) (bool, error) {
+			return o.deps.DB.MarkProductionCheckResumed(ctx, q.key, c.Until, turn)
+		})
 	})
 	fields = withField(fields, "turn", string(turn))
 	switch {
@@ -408,6 +452,34 @@ func (o *orchestrator) resumeProduction(ctx context.Context, q checkedQueue, ws 
 		return
 	}
 	o.productionTurnEnded(ctx, q, ws, c, closed, fields)
+}
+
+// reattachProductionTurn brings span C's told turn on again, under Q's
+// production lock and only while C is still the span owed, then awaits its
+// end. It answers false, bringing nothing on, for a span a pause dropped.
+func (o *orchestrator) reattachProductionTurn(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, c wsm.ProductionCheck, told string, fields dlog.Context) (wsm.TurnClose, bool, error) {
+	var (
+		place  turnPlace
+		closed wsm.TurnClose
+		owed   bool
+		err    error
+	)
+	o.underProductionLock(q.key, func() {
+		var now *wsm.ProductionCheck
+		if now, err = o.deps.DB.ProductionCheckOf(ctx, q.key); err != nil || now == nil || !now.Until.Equal(c.Until) {
+			return
+		}
+		owed = true
+		place, closed, err = o.bringTurnOn(ctx, ws, fields, c.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION)
+	})
+	if err != nil || !owed {
+		return wsm.CloseFailed, false, err
+	}
+	if place == turnEnded {
+		return closed, true, nil
+	}
+	closed, err = o.deps.AwaitTurnEnd(ctx, ws, c.Turn)
+	return closed, true, err
 }
 
 // ProductionSitePath is where the site file of the span ending UNTIL is
@@ -734,6 +806,9 @@ func (o *orchestrator) toldProductionCheck(ctx context.Context, ws ids.Workspace
 		o.deps.Log.Global().Warn(opProduction, "refused a production decision in a repository that checks its production no more", withField(fields, "repo", string(repo)))
 		return checkedQueue{}, wsm.ProductionCheck{}, refuse(ArmNoProductionCheckOwed, ws, "the repository checks its production no more")
 	}
+	if err := o.refuseWhilePaused(ctx, q.key, ws, "decide", fields); err != nil {
+		return checkedQueue{}, wsm.ProductionCheck{}, err
+	}
 	c, err := o.deps.DB.ProductionCheckOf(ctx, q.key)
 	if err != nil {
 		o.deps.Log.Global().Error(opProduction, "could not read the production check to decide", withField(fields, "error", err.Error()))
@@ -896,6 +971,9 @@ func (o *orchestrator) FoldProduction(ctx context.Context, ws, folded, surviving
 	if !isMediator {
 		o.deps.Log.Global().Warn(opProduction, "refused a fold from a workspace that is no repository's production mediator", fields)
 		return refuse(ArmNotProductionMediator, ws, "this workspace is no repository's production mediator")
+	}
+	if err := o.refuseWhilePaused(ctx, repo, ws, "fold", fields); err != nil {
+		return err
 	}
 	for _, side := range []ids.WorkspaceID{folded, surviving} {
 		child, found, err := o.deps.DB.ProductionChildOf(ctx, side)

@@ -36,6 +36,14 @@ type fakeDB struct {
 	wsm.DB
 
 	mu sync.Mutex
+	// mediatorOf is the workspace that is mediatorRepo's production
+	// mediator, empty for none; mediatorErr fails the read. productionPause
+	// is the repository's pause, and pauseErr fails its read.
+	mediatorOf      ids.WorkspaceID
+	mediatorRepo    wsm.RepoKey
+	mediatorErr     error
+	productionPause wsm.ProductionPause
+	pauseErr        error
 	// claimed maps an idempotency key to the claim standing on it. It is the
 	// DURABLE state: a subject simulates a restart by building a second
 	// handler over the same fakeDB.
@@ -151,6 +159,27 @@ func (d *fakeDB) RestoreOwedRename(_ context.Context, _ ids.WorkspaceID, name st
 	defer d.mu.Unlock()
 	d.renamed = name
 	return nil
+}
+
+// StandingMediatorRepoOf answers mediatorOf: the workspace is a production
+// mediator of mediatorRepo when it is that workspace; mediatorErr fails it.
+func (d *fakeDB) StandingMediatorRepoOf(_ context.Context, role wsm.MediatorRole, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.mediatorErr != nil {
+		return "", false, d.mediatorErr
+	}
+	if role != wsm.MediatorProduction || ws != d.mediatorOf {
+		return "", false, nil
+	}
+	return d.mediatorRepo, true, nil
+}
+
+// ProductionPauseOf answers productionPause; pauseErr fails it.
+func (d *fakeDB) ProductionPauseOf(context.Context, wsm.RepoKey) (wsm.ProductionPause, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.productionPause, d.pauseErr
 }
 
 // claimOn reads back the claim standing on key, zero when there is none.
@@ -458,12 +487,15 @@ const revisionsBriefText = "<!-- used by: test; placeholders: {{revisions}} -->\
 // renameBriefText is the test corpus's rename brief.
 const renameBriefText = "<!-- used by: test; placeholders: {{name}} -->\nrenamed: {{name}}\n"
 
+// productionPausedBriefText is the test corpus's production-paused brief.
+const productionPausedBriefText = "<!-- used by: test; placeholders: {{since}} -->\npaused since: {{since}}\n"
+
 // contextSummaryBriefDir is a briefs directory holding the context summary's
 // brief and the revisions-told brief.
 func contextSummaryBriefDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for name, text := range map[string]string{BriefContextSummary: contextSummaryBriefText, BriefRevisionsTold: revisionsBriefText, BriefRenameTold: renameBriefText} {
+	for name, text := range map[string]string{BriefContextSummary: contextSummaryBriefText, BriefRevisionsTold: revisionsBriefText, BriefRenameTold: renameBriefText, BriefProductionPaused: productionPausedBriefText} {
 		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(text), 0o600); err != nil {
 			t.Fatalf("write the %s brief: %v", name, err)
 		}

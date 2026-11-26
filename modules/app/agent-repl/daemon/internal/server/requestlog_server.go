@@ -1140,6 +1140,13 @@ func (s *requestLoggingServer) UpdateDeployHold(
 	return serveUnary(s, ctx, "UpdateDeployHold", req, s.server.UpdateDeployHold)
 }
 
+func (s *requestLoggingServer) UpdateProductionPause(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateProductionPauseRequest],
+) (*connect.Response[agentreplv1.UpdateProductionPauseResponse], error) {
+	return serveUnary(s, ctx, "UpdateProductionPause", req, s.server.UpdateProductionPause)
+}
+
 func (s *requestLoggingServer) ReapWorktrees(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReapWorktreesRequest],

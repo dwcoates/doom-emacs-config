@@ -101,6 +101,8 @@ func TestUpdateProductionMediationAnswersTheOrchestratorsRefusalsOnTheirArms(t *
 			got: func(e *agentreplv1.UpdateProductionMediationError) bool {
 				return e.GetChildRefused().GetDetail() == "the name is taken" && e.GetChildRefused().GetChild() == 0
 			}},
+		{name: "paused production checks", err: &merge.RefusalError{Arm: merge.ArmProductionPaused, Reason: "paused"},
+			got: func(e *agentreplv1.UpdateProductionMediationError) bool { return e.GetPaused() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

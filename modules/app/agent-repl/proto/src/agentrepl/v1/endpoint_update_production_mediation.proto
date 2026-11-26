@@ -19,6 +19,10 @@
 //
 // Nothing here holds the queue or a deploy: a production check never blocks
 // anything.
+//
+// THE CHECKS CAN BE PAUSED (endpoint_update_production_pause.proto): while
+// they are, the mediator is told no span and every action here is refused
+// (`paused`).
 
 syntax = "proto3";
 
@@ -186,6 +190,10 @@ message UpdateProductionMediationError {
     // A child's create was refused. Every child created before it in this
     // dispatch was undone, so nothing was created.
     UpdateProductionMediationChildRefused child_refused = 8;
+    // The repository's production checks are paused
+    // (UpdateProductionPause): the mediator decides and folds nothing until
+    // they are resumed, and nothing it asked for was done.
+    UpdateProductionMediationPaused paused = 9;
   }
 }
 // The unknown-workspace refusal. No fields: the caller holds the ref it sent.
@@ -232,3 +240,7 @@ message UpdateProductionMediationChildRefused {
   // The create's refusal, as a sentence the mediator's agent reads.
   string detail = 2;
 }
+// The production checks are paused. Empty: the pause is the repository's,
+// and `agent-repld production-mediation resume` or the topbar's
+// production-checks chip ends it.
+message UpdateProductionMediationPaused {}

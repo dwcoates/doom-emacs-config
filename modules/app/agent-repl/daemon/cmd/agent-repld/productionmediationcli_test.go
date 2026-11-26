@@ -114,12 +114,61 @@ var productionRefusals = func() []describedRefusal {
 			want: "the workspace at /w/c cannot be folded: closed"},
 		{name: "child_refused", err: &agentreplv1.UpdateProductionMediationError{Cause: &agentreplv1.UpdateProductionMediationError_ChildRefused{ChildRefused: &agentreplv1.UpdateProductionMediationChildRefused{Child: 1, Detail: "the name is taken"}}},
 			want: "child 1 could not be made (the name is taken); no child of the dispatch was kept"},
+		{name: "paused", err: &agentreplv1.UpdateProductionMediationError{Cause: &agentreplv1.UpdateProductionMediationError_Paused{Paused: &agentreplv1.UpdateProductionMediationPaused{}}},
+			want: "the repository's production checks are paused: decide, dispatch and fold nothing, and do not work around the pause"},
 	}
+	pause := &agentreplv1.UpdateProductionPauseError{}
 	return []describedRefusal{{name: "production", cases: cases, empty: e, oneof: "cause",
 		describe: func(m proto.Message) (string, error) {
 			return describeProductionRefusal(m.(*agentreplv1.UpdateProductionMediationError))
-		}}}
+		}},
+		{name: "production pause", empty: pause, oneof: "cause",
+			cases: []refusalCase{
+				{name: "already_paused", err: armed(pause, "already_paused", nil), want: "the repository's production checks are already paused"},
+				{name: "not_paused", err: armed(pause, "not_paused", nil), want: "the repository's production checks are not paused"},
+				{name: "unknown_repository", err: armed(pause, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"},
+				{name: "checks_off", err: armed(pause, "checks_off", nil), want: "the repository's lifecycle config turns no production checks on, so there is nothing to pause or resume"},
+			},
+			describe: func(m proto.Message) (string, error) {
+				return describeProductionPauseRefusal(m.(*agentreplv1.UpdateProductionPauseError))
+			}}}
 }()
+
+func TestProductionMediationPausesOrResumesTheNamedRepository(t *testing.T) {
+	tests := []struct {
+		name   string
+		verb   string
+		args   []string
+		code   int
+		resume bool
+	}{
+		{name: "pause", verb: "pause", args: []string{"-repository", "here"}, code: exitSuccess},
+		{name: "resume", verb: "resume", args: []string{"-repository", "here"}, code: exitSuccess, resume: true},
+		{name: "no repository", verb: "pause", code: exitFailure},
+		{name: "a positional", verb: "resume", args: []string{"-repository", "here", "now"}, code: exitFailure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(productionMediationNoun, append([]string{tt.verb}, tt.args...)...)
+
+			// Assert
+			if code != tt.code {
+				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
+			}
+			if tt.code != exitSuccess {
+				return
+			}
+			req := only[*agentreplv1.UpdateProductionPauseRequest](t, f)
+			if req.GetRepository().GetId() != "repo-1" || (req.GetResume() != nil) != tt.resume || (req.GetPause() != nil) == tt.resume {
+				t.Fatalf("request = %v, want the caller's repository, resume %v", req, tt.resume)
+			}
+		})
+	}
+}
 
 func TestDescribeProductionRefusals(t *testing.T) {
 	testDescribedRefusals(t, productionRefusals)

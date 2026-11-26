@@ -96,6 +96,26 @@ type Naming struct {
 	// QueueBypass is the workspace's queue-bypass chip standing, which the
 	// chip draws (queuebypass.go). The zero value is a chip not offered.
 	QueueBypass QueueBypass
+	// ProductionChecks is the workspace's repository's production-check
+	// standing, which the production-checks chip draws (productionchecks.go).
+	// The zero value draws no chip.
+	ProductionChecks ProductionChecks
+}
+
+// ProductionChecks is one repository's production-check standing as a
+// workspace's chip draws it, resolved by the workspace verbs.
+type ProductionChecks struct {
+	// On reports that the repository turns production checks on, the only
+	// repository that draws the chip.
+	On bool
+	// Paused reports that the checks are paused.
+	Paused bool
+	// Mediator names the repository's production mediator, empty while none
+	// is made yet.
+	Mediator string
+	// Repository and RepositoryDir are the repository a click acts on.
+	Repository    ids.RepoID
+	RepositoryDir string
 }
 
 // QueueBypass is one workspace's queue-bypass chip, resolved by the
@@ -176,6 +196,11 @@ type Resolver interface {
 	// workspace verbs, on every UpdateQueueBypassMode, for every workspace of
 	// the repository.
 	SetQueueBypass(ws ids.WorkspaceID, chip QueueBypass)
+	// SetProductionChecks replaces the workspace's production-checks chip
+	// standing, leaving the rest of the naming as it is. Its sole producer is
+	// the workspace verbs, on every UpdateProductionPause, for every
+	// workspace of the repository.
+	SetProductionChecks(ws ids.WorkspaceID, chip ProductionChecks)
 	// SetSummary installs the workspace summary its agent set
 	// (agentrepl.v1.SetWorkspaceSummary): the short summary in the title's
 	// FIRST precedence, above the vendor's ai-title, and the long summary as

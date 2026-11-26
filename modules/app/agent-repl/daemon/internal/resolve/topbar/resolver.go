@@ -298,6 +298,7 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 		PersistentWifi:       persistentWifiChip(r.persistentWifi),
 		RemoteControl:        remoteControlChip(s.naming.RemoteControl),
 		QueueBypass:          queueBypassChip(s.naming.QueueBypass),
+		ProductionChecks:     productionChecksChip(s.naming.ProductionChecks),
 	}, nil
 }
 

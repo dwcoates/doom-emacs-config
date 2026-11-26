@@ -4544,7 +4544,7 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 
   it("holds the pulse still under prefers-reduced-motion", () => {
     expect(stylesheet).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-queue-bypass\[data-settling\],\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-queue-bypass\[data-settling\],\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-production-checks\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
     );
   });
 });
@@ -4553,14 +4553,15 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
  * The rule that names one wifi hook and each of its TWINS' (the same hook on
  * the twin chip), alone: the remote-control chip shares the wifi chip's look
  * and feel (owner ruling, 2026-10-31), and so does the queue-bypass chip
- * (owner request, 2026-11-10), so each of the wifi chip's paint rules is
+ * (owner request, 2026-11-10), and so does the production-checks chip
+ * (owner request, 2026-11-25), so each of the wifi chip's paint rules is
  * theirs too. The mode-on disc is the one paint the queue-bypass chip does not
  * share (it lights in the canonical orange), so that rule names the
  * remote-control twin alone.
  */
 function sharedChipRule(
   wifi: string,
-  twins: readonly string[] = ["topbar-remote-control", "topbar-queue-bypass"],
+  twins: readonly string[] = ["topbar-remote-control", "topbar-queue-bypass", "topbar-production-checks"],
 ): string | undefined {
   const hooks = [wifi, ...twins.map((twin) => wifi.replaceAll("topbar-wifi", twin))];
   return rulesOf(stylesheet).find(
@@ -4593,6 +4594,14 @@ describe("the remote-control chip's paints (owner ruling, 2026-10-31)", () => {
 
   it("takes the right group's quiet button box", () => {
     expect(declarationsOf(".topbar-remote-control-button") ?? "").toMatch(/cursor:\s*pointer/);
+  });
+});
+
+describe("the production-checks chip's own paint (owner request, 2026-11-25)", () => {
+  it("fills the disc green while the checks run, as the wifi chip's mode-on disc", () => {
+    expect(declarationsOf('.topbar-production-checks[data-standing="running"] .topbar-production-checks-disc') ?? "").toMatch(
+      /fill:\s*var\(--wifi-mode-on-disc\)/,
+    );
   });
 });
 

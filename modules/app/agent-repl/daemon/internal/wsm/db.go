@@ -925,7 +925,12 @@ type DB interface {
 	// check to decide and the span before it, its prompt and resumption, its
 	// decision with the children it dispatched, and each child's sites,
 	// fold and ending.
-	OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, bool, error)
+	OweProductionCheck(ctx context.Context, repo RepoKey, at time.Time, version string) (ProductionCheck, ProductionOwing, error)
+	// The production pause (productionpause.go): pausing drops every
+	// undecided check, resuming starts the checks at the next landing.
+	PauseProduction(ctx context.Context, repo RepoKey, at time.Time) ([]ProductionCheck, error)
+	ResumeProduction(ctx context.Context, repo RepoKey, at time.Time) error
+	ProductionPauseOf(ctx context.Context, repo RepoKey) (ProductionPause, error)
 	DropProductionCheck(ctx context.Context, repo RepoKey, at time.Time) (bool, error)
 	MarkProductionChecksDue(ctx context.Context, repo RepoKey, at time.Time) (int, error)
 	ProductionCheckOf(ctx context.Context, repo RepoKey) (*ProductionCheck, error)

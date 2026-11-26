@@ -56,6 +56,8 @@ import (
 type fakeDB struct {
 	// resumeMarkErr fails recording that an undecided intake is resumed.
 	resumeMarkErr error
+	// productionPauseErr fails every read and write of the production pause.
+	productionPauseErr error
 
 	// links are each workspace's stored links, and linksErr fails their read.
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
@@ -644,8 +646,36 @@ func (f *fakeDB) MarkMediatorBriefed(ctx context.Context, repo wsm.RepoKey) erro
 	return f.checks.MarkMediatorBriefed(ctx, repo)
 }
 
-func (f *fakeDB) OweProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (wsm.ProductionCheck, bool, error) {
+func (f *fakeDB) OweProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (wsm.ProductionCheck, wsm.ProductionOwing, error) {
 	return f.checks.OweProductionCheck(ctx, repo, at, version)
+}
+
+// pauseErr answers productionPauseErr.
+func (f *fakeDB) pauseErr() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.productionPauseErr
+}
+
+func (f *fakeDB) PauseProduction(ctx context.Context, repo wsm.RepoKey, at time.Time) ([]wsm.ProductionCheck, error) {
+	if err := f.pauseErr(); err != nil {
+		return nil, err
+	}
+	return f.checks.PauseProduction(ctx, repo, at)
+}
+
+func (f *fakeDB) ResumeProduction(ctx context.Context, repo wsm.RepoKey, at time.Time) error {
+	if err := f.pauseErr(); err != nil {
+		return err
+	}
+	return f.checks.ResumeProduction(ctx, repo, at)
+}
+
+func (f *fakeDB) ProductionPauseOf(ctx context.Context, repo wsm.RepoKey) (wsm.ProductionPause, error) {
+	if err := f.pauseErr(); err != nil {
+		return wsm.ProductionPause{}, err
+	}
+	return f.checks.ProductionPauseOf(ctx, repo)
 }
 
 func (f *fakeDB) DropProductionCheck(ctx context.Context, repo wsm.RepoKey, at time.Time) (bool, error) {
@@ -3282,6 +3312,11 @@ type fakeQueue struct {
 	// its answer.
 	deliverAsked []ids.WorkspaceID
 	deliverErr   error
+	// superseded are the turns Supersede was asked to retire; supersedeRetired
+	// and supersedeErr are its answer.
+	superseded       []ids.TurnID
+	supersedeRetired bool
+	supersedeErr     error
 }
 
 // FlushHeld records the flush and answers flushErr.
@@ -5516,8 +5551,11 @@ func forgetTakeBackAtCleanup(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	})
 }
 
-func (q *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
-	return false, nil
+func (q *fakeQueue) Supersede(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.superseded = append(q.superseded, turn)
+	return q.supersedeRetired, q.supersedeErr
 }
 
 // startHold is one recorded HoldStarts, or its release.

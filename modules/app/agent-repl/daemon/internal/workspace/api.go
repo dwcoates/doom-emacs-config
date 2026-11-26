@@ -782,6 +782,10 @@ type Verbs interface {
 	// (LetQueueThroughAfterBypassTurn lets it through), and the workspace switched to
 	// the conversation that lands the way the mode says (queuebypass.go).
 	UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange, bypassContext QueueBypassContext) (bool, error)
+	// RestateProductionChecks states the production-check standing of the
+	// repository SCOPE names on the topbar chip of each of its open
+	// workspaces, after a pause or a resume changed it (productionchecks.go).
+	RestateProductionChecks(ctx context.Context, scope merge.RepositoryScope) error
 	// SetDefaultModel makes a model the topbar's selector served the default
 	// of the LOGIN the workspace's session spends as: every new session on
 	// that account root starts under it. No running session changes.

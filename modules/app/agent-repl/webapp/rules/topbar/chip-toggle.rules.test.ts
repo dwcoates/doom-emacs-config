@@ -20,6 +20,6 @@ describe("the toggle chips' one click path", () => {
 
   it("is what every toggle chip sends through", () => {
     const callers = sources.filter((s) => s.text.includes("sendChipToggle(")).map((s) => s.file).sort();
-    expect(callers).toEqual(["persistent-wifi.ts", "queue-bypass.ts", "remote-control.ts"]);
+    expect(callers).toEqual(["persistent-wifi.ts", "production-checks.ts", "queue-bypass.ts", "remote-control.ts"]);
   });
 });

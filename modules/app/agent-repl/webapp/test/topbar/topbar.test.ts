@@ -169,6 +169,23 @@ describe("drawTopbarView", () => {
     expect(childClasses(row, ".topbar-status")).toEqual(["topbar-queue-bypass", "topbar-remote-control", "topbar-wifi"]);
   });
 
+  it("closes the status run with the production-checks chip, right of persistent wifi, when the repository checks its production", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(
+      view({
+        productionChecks: create(TopbarViewSchema, {
+          productionChecks: {
+            standing: { case: "running", value: {} },
+            repository: { id: "repo-1", dir: "/repos/one" },
+            tooltip: { text: "production checks running" },
+          },
+        }).productionChecks,
+      }),
+      tc,
+    );
+    expect(childClasses(row, ".topbar-status")).toEqual(["topbar-remote-control", "topbar-wifi", "topbar-production-checks"]);
+  });
+
   it("orders the right group model, effort, permission mode, context", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(view(), tc);

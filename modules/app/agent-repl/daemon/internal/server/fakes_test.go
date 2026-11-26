@@ -520,6 +520,10 @@ func (v *fakeVerbs) PassColdGate(_ context.Context, ws ids.WorkspaceID) error {
 
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
+	// restatedProduction records every RestateProductionChecks, and
+	// restateErr fails it.
+	restatedProduction []merge.RepositoryScope
+	restateErr         error
 	// catalogChecked records every model RequireCatalogModel checked, and
 	// catalogErr refuses it.
 	catalogChecked []string
@@ -892,6 +896,12 @@ func (f *fakeVerbs) UpdateRemoteControlMode(_ context.Context, ws ids.WorkspaceI
 	f.remoteChanges = append(f.remoteChanges, change)
 	f.remoteWorkspaces = append(f.remoteWorkspaces, ws)
 	return f.remoteOn, f.remoteErr
+}
+
+// RestateProductionChecks records the scope and answers restateErr.
+func (f *fakeVerbs) RestateProductionChecks(_ context.Context, scope merge.RepositoryScope) error {
+	f.restatedProduction = append(f.restatedProduction, scope)
+	return f.restateErr
 }
 
 func (f *fakeVerbs) UpdateQueueBypassMode(_ context.Context, _ ids.WorkspaceID, change workspace.QueueBypassChange, bypassContext workspace.QueueBypassContext) (bool, error) {
@@ -1469,6 +1479,13 @@ type fakeMerge struct {
 	// escalationReleaseErr what each answers.
 	releasedEscalations  []merge.RepositoryScope
 	escalationReleaseErr error
+	// productionPauseScopes and productionResumeScopes are every pause and
+	// resume asked; productionPaused answers a pause and productionPauseErr
+	// fails either.
+	productionPauseScopes  []merge.RepositoryScope
+	productionResumeScopes []merge.RepositoryScope
+	productionPaused       merge.ProductionPaused
+	productionPauseErr     error
 	merge.Orchestrator
 	// observedRuns is every ObserveTestRun asked.
 	observedRuns []fakeObservedRun
@@ -1734,6 +1751,19 @@ func (f *fakeMerge) Place(_ context.Context, ws ids.WorkspaceID, place merge.Mov
 func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) error {
 	f.moves = append(f.moves, fakeMove{ws: ws, move: move})
 	return f.moveErr
+}
+
+// PauseProduction records the scope and answers productionPaused and
+// productionPauseErr.
+func (f *fakeMerge) PauseProduction(_ context.Context, scope merge.RepositoryScope) (merge.ProductionPaused, error) {
+	f.productionPauseScopes = append(f.productionPauseScopes, scope)
+	return f.productionPaused, f.productionPauseErr
+}
+
+// ResumeProduction records the scope and answers productionPauseErr.
+func (f *fakeMerge) ResumeProduction(_ context.Context, scope merge.RepositoryScope) error {
+	f.productionResumeScopes = append(f.productionResumeScopes, scope)
+	return f.productionPauseErr
 }
 
 func (f *fakeMerge) HoldDeploys(_ context.Context, scope merge.RepositoryScope) error {

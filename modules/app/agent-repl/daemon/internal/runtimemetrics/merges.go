@@ -67,7 +67,8 @@ const (
 	// (reopened).
 	RaceFindingsName = "agentrepl_merge_queue_race_findings_total"
 	// ProductionChecksName counts the production checks decided, by how
-	// each ended: nothing_to_do, dispatched or unanswered.
+	// each ended: nothing_to_do, dispatched or unanswered; and the spans a
+	// production pause left unreviewed, as paused.
 	ProductionChecksName = "agentrepl_production_checks_total"
 	// ProductionChildrenName counts the production mediator's children by
 	// event: dispatched (each child a dispatch made), folded, landed and
@@ -156,7 +157,7 @@ func newMerges() merges {
 			Name: MediatorRunsName, Help: "Deploy mediator runs, from a deploy's hot reload to the approval or finish that ended it, by how it ended.",
 		}, []string{"outcome"}),
 		productionChecks: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: ProductionChecksName, Help: "Production checks decided, by how each ended.",
+			Name: ProductionChecksName, Help: "Production checks decided, by how each ended, and spans a pause left unreviewed.",
 		}, []string{"outcome"}),
 		raceFindings: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: RaceFindingsName, Help: "The merge queue's race findings: a test that failed in a merge gate and passed on the same inputs, by event: new, recurred, reopened.",
