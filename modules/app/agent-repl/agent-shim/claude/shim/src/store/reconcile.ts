@@ -512,18 +512,10 @@ interface UnitRows {
 function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conversationv1.AgentActivityId): UnitRows {
   let call: UnitEntry | undefined;
   let subagent: UnitEntry | undefined;
-  let announced: string | undefined;
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
     const result = entry.value.result;
-    if (result.case === "detachedWork") {
-      const kind = result.value.kind?.kind;
-      if (announced === undefined && result.value.work?.value === unit.value && kind?.case === "subagent") {
-        announced = statedAgent(kind.value.agentId);
-      }
-      continue;
-    }
     if (result.case !== "update") continue;
     const update = result.value.update;
     if (update.case !== "activity") continue;
@@ -536,6 +528,8 @@ function unitRows(entries: readonly conversationv1.HistoryEntryAt[], unit: conve
   if (call !== undefined) return { own: call, settled: true };
   if (subagent === undefined || subagent.item.case !== "subagent") return { own: undefined, settled: false };
   const spawned = subagentId(unit.value).value;
+  const kind = announcedKindOf(entries, create(conversationv1.DetachedWorkIdSchema, { value: unit.value }));
+  const announced = kind?.case === "subagent" ? statedAgent(kind.value.agentId) : undefined;
   const named = [statedCreatedAgent(subagent.item.value), announced].filter((agent) => agent !== undefined);
   if (named.some((agent) => agent !== spawned)) return { own: undefined, settled: false };
   return { own: subagent, settled: named.length > 0 };
@@ -612,13 +606,24 @@ export function findAnnouncedKind(
   entries: readonly conversationv1.HistoryEntryAt[],
   handle: conversationv1.DetachedWorkId,
 ): conversationv1.DetachedWorkKind["kind"]["case"] {
+  return announcedKindOf(entries, handle)?.case;
+}
+
+/**
+ * The kind the first announcement of HANDLE in this book that states one
+ * states, with what it says (a subagent's agent); undefined when none does.
+ */
+function announcedKindOf(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  handle: conversationv1.DetachedWorkId,
+): conversationv1.DetachedWorkKind["kind"] | undefined {
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
     const result = entry.value.result;
     if (result.case !== "detachedWork" || result.value.work?.value !== handle.value) continue;
-    const kind = result.value.kind?.kind.case;
-    if (kind !== undefined) return kind;
+    const kind = result.value.kind?.kind;
+    if (kind?.case !== undefined) return kind;
   }
   return undefined;
 }

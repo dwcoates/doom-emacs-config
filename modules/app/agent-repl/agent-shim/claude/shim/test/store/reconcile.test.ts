@@ -1157,6 +1157,23 @@ describe("the unit's own row beside the run a send resumed", () => {
     });
   }
 
+  it("reads the handle's agent past an announcement that states no kind, as findAnnouncedKind reads its kind", () => {
+    // Arrange: the older announcement, written before every one carried its kind, is served first.
+    const kindless = frameAt("2", {
+      case: "detachedWork",
+      value: create(conversationv1.AgentDetachedWorkSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: SEND.value }),
+      }),
+    });
+    const book = [beat(), kindless, announcing("toolu_spawn")];
+
+    // Act, Assert.
+    expect([
+      findAnnouncedKind(book, create(conversationv1.DetachedWorkIdSchema, { value: SEND.value })),
+      findUnit(book, SEND),
+    ]).toEqual(["subagent", undefined]);
+  });
+
   it("hands a send's handle to the resume path rather than describing the run's row as a spawn", () => {
     // Arrange.
     const undescribed: string[] = [];
