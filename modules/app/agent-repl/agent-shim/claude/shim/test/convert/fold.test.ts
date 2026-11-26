@@ -3309,3 +3309,69 @@ describe("a streamed unit the turn cut", () => {
     expect(cutTerminals(entries).size).toBe(0);
   });
 });
+
+describe("a task notification whose start only a predecessor process saw", () => {
+  const TASK = "ae5578ba696980988";
+  const SPAWN = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+  const notification = {
+    type: "system",
+    subtype: "task_notification",
+    uuid: "uuid-notification",
+    session_id: "session-1",
+    task_id: TASK,
+    status: "completed",
+    summary: "done",
+  } as unknown as SdkMessage;
+
+  it("awaits the store for the call it does not state", () => {
+    expect(createFold().taskAwaitingCall(notification, foldContext())).toBe(TASK);
+  });
+
+  it("settles the unit the store's agent names once the store answered", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskCall(TASK, { kind: "found", agent: SPAWN, commission: undefined });
+
+    // Act.
+    const output = fold.onSdkMessage(notification, foldContext());
+
+    // Assert.
+    expect(output.entries.map((entry) => entry.source.discriminator)).toContain("activity.subagent.success");
+  });
+
+  it("asks the store no second time once it answered", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskCall(TASK, { kind: "found", agent: SPAWN, commission: undefined });
+
+    // Act, Assert.
+    expect(fold.taskAwaitingCall(notification, foldContext())).toBeUndefined();
+  });
+
+  it("keeps the WARN and settles nothing when the store holds no record", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskCall(TASK, { kind: "not_found" });
+    const before = logSinkMark();
+
+    // Act.
+    const output = fold.onSdkMessage(notification, foldContext());
+
+    // Assert.
+    expect(output.entries.map((entry) => entry.source.discriminator)).not.toContain("activity.subagent.success");
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "warn")
+        .map((record) => [record.message, record.context.task_id]),
+    ).toEqual([["a task notification names no originating call; its unit cannot be settled", TASK]]);
+  });
+
+  it("asks the store no second time after it held no record", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskCall(TASK, { kind: "not_found" });
+
+    // Act, Assert.
+    expect(fold.taskAwaitingCall(notification, foldContext())).toBeUndefined();
+  });
+});

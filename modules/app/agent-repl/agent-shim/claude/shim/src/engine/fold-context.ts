@@ -206,6 +206,14 @@ export interface EngineFold {
    */
   taskAwaitingAgent(message: SdkMessage, context: FoldContext): string | undefined;
   /**
+   * The task whose ORIGINATING CALL the store must state before `message` is
+   * folded — a notification, which states none, of a task whose start this
+   * process never saw — or `undefined`. A read: it records nothing.
+   */
+  taskAwaitingCall(message: SdkMessage, context: FoldContext): string | undefined;
+  /** Hand the fold the store's answer for a task {@link EngineFold.taskAwaitingCall} named. */
+  learnTaskCall(taskId: string, answer: VendorTaskAnswer): void;
+  /**
    * The task whose KIND the store must state before `message` is folded — a
    * task message that names no kind the fold holds (a notification never
    * states one) — and the unit it is asked by, or `undefined`. A read: it
@@ -281,6 +289,8 @@ export function turnBoundaryOnlyFold(): EngineFold {
     learnTaskAgent: (): void => undefined,
     taskAwaitingCommission: (): undefined => undefined,
     noteCommissionAwaited: (): void => undefined,
+    taskAwaitingCall: (): undefined => undefined,
+    learnTaskCall: (): void => undefined,
     taskAwaitingKind: (): undefined => undefined,
     learnTaskKind: (): void => undefined,
     // CONVERTS NO PATCH, so a request has nothing to name.

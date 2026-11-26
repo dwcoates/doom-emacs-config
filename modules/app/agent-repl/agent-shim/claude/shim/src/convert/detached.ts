@@ -1263,6 +1263,39 @@ export function taskAwaitingKind(
 }
 
 /**
+ * THE TASK WHOSE ORIGINATING CALL THE STORE MUST STATE BEFORE THIS NOTIFICATION
+ * IS FOLDED, or `undefined` when the fold holds it (or the message needs none).
+ *
+ * A `task_notification` states no `tool_use_id` of its own, and the call
+ * is learned from the task's start, which a shim that restarted since never saw
+ * (2026-11-25, workspace hash ca544ff6: the start reached the predecessor
+ * process, the notification the next one 1s later). A subagent's task id is its
+ * agent's locator, and the store pairs the locator with the agent, whose id IS
+ * the spawning call's `tool_use_id` under the cross-plane minting rule, so the
+ * engine asks the store (`store.v1.GetAgentByVendorTask`) and hands the answer
+ * back through `learnTaskCall` before folding.
+ *
+ * Asked once per task, for a notification only, when nothing this process holds
+ * names the call or the agent. A PURE READ: it records nothing.
+ */
+export function taskAwaitingCall(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+): string | undefined {
+  if (message.type !== "system") return undefined;
+  const raw = message as unknown as RawTask;
+  if (raw.subtype !== "task_notification" || raw.skip_transcript === true) return undefined;
+  const taskId = raw.task_id;
+  if (typeof taskId !== "string" || taskId === "") return undefined;
+  const known = context.liveTask(taskId);
+  const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
+  if (toolUseId !== undefined && toolUseId !== "") return undefined;
+  if (taskKinds.storeAnswerOf(taskId) !== undefined) return undefined;
+  return taskId;
+}
+
+/**
  * THE TASK WHOSE AGENT THE STORE MUST NAME BEFORE THIS MESSAGE IS FOLDED, or
  * `undefined` when the fold can name it itself (or need not name one at all).
  *

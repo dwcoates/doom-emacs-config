@@ -40,6 +40,7 @@ import {
   startedInForeground,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingCall,
   taskAwaitingCommission,
   agentNamingSubagentTask,
   taskAwaitingKind,
@@ -3565,5 +3566,37 @@ describe("agentNamingSubagentTask: the reading both store asks share", () => {
       [true, false],
       [true, false],
     ]);
+  });
+});
+
+describe("taskAwaitingCall: the notification whose call the store must state", () => {
+  const NOTIFICATION = { subtype: "task_notification", task_id: "ae5578ba696980988", status: "completed" };
+  const awaitingCall = (fields: Record<string, unknown>, registry = createTaskKindRegistry()): string | undefined =>
+    taskAwaitingCall(taskMessage(fields), foldContext({}), registry);
+
+  it("names a notification that states no call and whose call nothing here holds", () => {
+    expect(awaitingCall(NOTIFICATION)).toBe("ae5578ba696980988");
+  });
+
+  it("names nothing for a notification that states its call", () => {
+    expect(awaitingCall({ ...NOTIFICATION, tool_use_id: "toolu_1" })).toBeUndefined();
+  });
+
+  it("names nothing for a notification whose call the task's start left here", () => {
+    const registry = createTaskKindRegistry();
+    registry.rememberToolUse("ae5578ba696980988", "toolu_1");
+
+    expect(awaitingCall(NOTIFICATION, registry)).toBeUndefined();
+  });
+
+  it("names nothing for a task the store was already asked about", () => {
+    const registry = createTaskKindRegistry();
+    registry.rememberStoreAnswer("ae5578ba696980988", "not_found");
+
+    expect(awaitingCall(NOTIFICATION, registry)).toBeUndefined();
+  });
+
+  it("names nothing for any message but a notification", () => {
+    expect(awaitingCall({ subtype: "task_progress", task_id: "ae5578ba696980988" })).toBeUndefined();
   });
 });

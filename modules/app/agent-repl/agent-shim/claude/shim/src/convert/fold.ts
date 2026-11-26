@@ -82,6 +82,7 @@ import {
   restateTaskMessage,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingCall,
   taskAwaitingCommission,
   taskAwaitingKind,
   vendorTaskTypeOf,
@@ -223,6 +224,19 @@ interface Fold {
    * it; any other answer is kept for the refusal record that follows.
    */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /**
+   * The vendor task whose originating call the STORE must state before
+   * `message` is folded, or `undefined` (convert/detached.ts
+   * `taskAwaitingCall`). A read: it records nothing.
+   */
+  taskAwaitingCall(message: SdkMessage, context: FoldContext): string | undefined;
+  /**
+   * The store's answer for a task {@link Fold.taskAwaitingCall} named: a found
+   * agent becomes the task's join AND its spawning call (the agent's id is the
+   * call's `tool_use_id`), exactly as a start seen here would have made them;
+   * any other answer is kept, so the task is asked once.
+   */
+  learnTaskCall(taskId: string, answer: VendorTaskAnswer): void;
   /** The task whose commission the engine waits for (convert/detached.ts `taskAwaitingCommission`). A read. */
   taskAwaitingCommission(message: SdkMessage, context: FoldContext): string | undefined;
   /** The engine started the wait for a task {@link Fold.taskAwaitingCommission} named. */
@@ -283,6 +297,22 @@ export function createFold(): Fold {
     compaction: compactionTracker(),
   };
 
+  /** A store answer for a task's agent, kept as the join a spawn seen here would have made. */
+  function learnAgent(taskId: string, answer: VendorTaskAnswer): void {
+    if (answer.kind === "found") {
+      state.taskKinds.rememberAgent(taskId, answer.agent);
+      if (answer.commission !== undefined) {
+        state.taskKinds.rememberCommission(taskId, answer.commission);
+        return;
+      }
+      // THE AGENT IS NAMED, ITS COMMISSION IS NOT: the miss rides the record
+      // an announcement that cannot state one writes next.
+      state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
+      return;
+    }
+    state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
+  }
+
   return {
     onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput {
       try {
@@ -331,19 +361,11 @@ export function createFold(): Fold {
     retireUserDetach: (toolUseId, why) => state.taskKinds.retireUserDetach(toolUseId, why),
     restateTaskMessage: (message) => restateTaskMessage(message, state.taskKinds, state.calls),
     taskAwaitingAgent: (message, context) => taskAwaitingAgent(message, context, state.taskKinds, state.calls),
-    learnTaskAgent(taskId, answer) {
-      if (answer.kind === "found") {
-        state.taskKinds.rememberAgent(taskId, answer.agent);
-        if (answer.commission !== undefined) {
-          state.taskKinds.rememberCommission(taskId, answer.commission);
-          return;
-        }
-        // THE AGENT IS NAMED, ITS COMMISSION IS NOT: the miss rides the record
-        // an announcement that cannot state one writes next.
-        state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
-        return;
-      }
-      state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
+    learnTaskAgent: learnAgent,
+    taskAwaitingCall: (message, context) => taskAwaitingCall(message, context, state.taskKinds),
+    learnTaskCall(taskId, answer) {
+      if (answer.kind === "found") state.taskKinds.rememberToolUse(taskId, answer.agent.value);
+      learnAgent(taskId, answer);
     },
     taskAwaitingCommission: (message, context) => taskAwaitingCommission(message, context, state.taskKinds, state.calls),
     noteCommissionAwaited: (taskId) => state.taskKinds.rememberCommissionAwaited(taskId),
