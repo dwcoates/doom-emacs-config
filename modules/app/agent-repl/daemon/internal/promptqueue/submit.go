@@ -362,6 +362,13 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     repository's config once the workspace asked to finish.
 //   - A Slack thread's digest, which the daemon composed from messages it
 //     already took off the thread's pending table.
+//   - A deploy or production mediator's brief, which the daemon composed;
+//     nobody is there to send it again until the next pass, and passes are
+//     event driven (a deploy's end, a fixer's turn end). The gate on a
+//     standing mediator is answered automatically at its raise (the deploy
+//     checks' own answer), so the held brief goes on the moment that answer
+//     resumes the session (2026-11-26 02:06:04Z: the production mediator's
+//     brief refused at a 369,551-token gate, the span left due).
 //
 // A prompt the user types is still refused, so the user knows it did not go,
 // and so is one an agent sent, whose refusal its command prints.
@@ -378,6 +385,8 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION,
 		// A NEW WORKSPACE'S INITIAL PROMPT waits at its cold gate (a fork of a
 		// conversation whose prompt cache is cold): refused, it undid the
 		// create the user asked for, removing the worktree under the editor's
