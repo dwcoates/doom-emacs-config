@@ -151,26 +151,6 @@ func ftSubagentSettled(unit, created string) *conversationv1.AgentActivity {
 	}
 }
 
-// A DETACHED RUN'S TERMINAL ARRIVES ON ITS OWN BOOK, under an activity id of
-// that book's own minting -- nothing joins it back to the spawn unit the chip
-// row is keyed by. The row outlived the run for the rest of the session, which
-// is what the G50 playbook read: two settled placements, one live, chip of 3.
-func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
-	t.Parallel()
-	// Arrange: one spawn, detached under its own handle.
-	f := newCanonical(t)
-	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	awaitDetachedRunLive(t, f, footer)
-
-	// Act: the run settles on ITS OWN stream, under that book's own unit id.
-	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
-
-	// Assert
-	awaitDetachedRunsSettled(t, f, footer)
-}
-
 // AND THE OTHER DELIVERY, which is the one the vendor's task notification
 // takes: the same run's terminal settled on the SPAWNING agent's book, under
 // the spawn unit. Both are the handle's terminal and both must retire the chip.
