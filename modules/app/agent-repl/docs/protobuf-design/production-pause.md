@@ -91,3 +91,25 @@ click.
 
 Nothing became obviated: every message added is new and every existing one
 keeps its consumers.
+
+## Implementation notes
+
+- The store owns the pause (`daemon/internal/wsm/productionpause.go`, layout
+  217). No undecided check exists while a repository is paused: the pause
+  deletes them in the write that takes it, and no span is owed while it
+  stands, so every mark, resumption or decision of a span during a pause finds
+  nothing to touch.
+- The merge orchestrator marks and submits every span brief under the
+  repository's production lock, and the pause takes the same lock to drop the
+  spans and retire a brief still held in the mediator's prompt queue. It
+  interrupts the mediator's running turn after.
+- Accepted edge: a brief the prompt queue is delivering at the very moment of
+  the pause is neither retirable nor yet a running turn, so it may start a
+  turn after the interrupt. That turn's note-free brief cannot be acted on:
+  every decision and fold is refused with `paused`.
+- The note a paused mediator's prompts open with is read from the standing
+  pause on every prompt that carries workspace notes, never owed, so it can
+  neither outlive the pause nor miss a prompt. Daemon-born briefs carry no
+  workspace note, and none is sent during a pause.
+- Spans a pause leaves unreviewed are counted under
+  `agentrepl_production_checks_total{outcome="paused"}`.
