@@ -35,28 +35,22 @@ func normalizeDir(dir string) (string, error) {
 // column added to the row can never be decoded by only some of them.
 //
 // The last three columns are DERIVED, not stored on the row: whether the
-// workspace's creation job asked for the one-shot form, whether a merge
-// queue entry stands for it -- its own, or that of a merge workspace forked
-// for its detached merge (`merge_of` names it), which is where its merge
-// stands once handed off -- and when its last turn ended. Every read selects
-// FROM workspaces unaliased, so the correlated subqueries name
-// `workspaces.id`.
+// workspace's creation job asked for the one-shot form, whether its own merge
+// queue entry stands, and when its last turn ended. Every read selects FROM
+// workspaces unaliased, so the correlated subqueries name `workspaces.id`.
 //
-// THE QUEUE COLUMN IS TWO KEYED LOOKUPS, never a scan: merge_queue_by_workspace
-// finds a queue row by its workspace and workspaces_by_merge_of a workspace's
-// merge workspaces (layout 75). Spelled as one EXISTS with an IN over the
-// registry, it scanned every workspace for each queue row of each workspace,
-// and listing ~800 workspaces held the store's one connection for over a
+// THE QUEUE COLUMN IS A KEYED LOOKUP, never a scan: merge_queue_by_workspace
+// finds a queue row by its workspace (layout 75). Spelled as a scan over the
+// registry, listing ~800 workspaces held the store's one connection for over a
 // second, every read (2026-10-24).
 //
 // THE LAST TURN END IS READ OFF THE TURNS THEMSELVES rather than stamped on
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, closure_how, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, backlogged, backlogged_at, landing_compact_requester, landing_close_after, landing_cleanup_dir, landing_profile_gate, landed_head, landed_at, commit_count, place, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, closure_how, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_requested_at, close_requested_by, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, last_work_at, viewed_status, last_interacted_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
-	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
-	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
+	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
@@ -105,13 +99,10 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawned       sql.NullInt64
 		created       int64
 		end           sql.NullString
-		mergeOf       sql.NullString
-		request       sql.NullString
-		forkHead      sql.NullString
 		compact       bool
 		closes        sql.NullString
-		cleanup       bool
 		cleanDir      sql.NullString
+		profileGate   bool
 		landHead      sql.NullString
 		landAt        sql.NullInt64
 		commits       sql.NullInt64
@@ -148,7 +139,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		spawnedStart  sql.NullInt64
 		visibility    string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &closedHow, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld, &ws.Intake); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &ws.Backlogged, &backloggedAt, &compact, &closes, &cleanDir, &profileGate, &landHead, &landAt, &commits, &ws.Place, &lapsesAt, &gated, &closedAt, &closedBy, &closedHow, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &closeAt, &closeBy, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &lastWork, &viewedStatus, &interacted, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &visibility, &ws.Mediator, &ws.EmojiAck, &ws.FinishPlacement, &ws.QueueBypassHeld, &ws.Intake); err != nil {
 		return Workspace{}, err
 	}
 	v, err := parseVisibility(visibility)
@@ -159,18 +150,8 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	if ws.Kind, err = decodeWorkspaceKind(ws.ID, kind); err != nil {
 		return Workspace{}, err
 	}
-	if mergeOf.Valid != request.Valid {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_of", Err: errors.New("a merge workspace records both its requester and its request")}
-	}
-	if mergeOf.Valid {
-		ws.MergeOf = &MergeOrigin{Requester: WorkspaceID(mergeOf.String), Request: DetachedMergeID(request.String), ForkHead: forkHead.String, CompactAfter: compact,
-			CloseOnLanding: WorkspaceID(closes.String), CleanupWorktree: cleanup, CleanupDir: cleanDir.String}
-	} else if closes.Valid || cleanup || cleanDir.Valid {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_close_on_landing", Err: errors.New("only a merge workspace carries an async merge's landing effects")}
-	} else if forkHead.Valid {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_fork_head", Err: errors.New("only a merge workspace records a fork head")}
-	} else if compact {
-		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_compact_after", Err: errors.New("only a merge workspace compacts its requester after it lands")}
+	if effects := (LandingEffects{CloseAfter: WorkspaceID(closes.String), CleanupDir: cleanDir.String, CompactRequester: compact, ProfileGate: profileGate}); !effects.Zero() {
+		ws.Effects = &effects
 	}
 	landed, err := decodeLanding(ws.ID, landHead, landAt)
 	if err != nil {
@@ -351,10 +332,8 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		// A NEW CHILD IS ONLY EVER MADE UNDER AN OPEN PARENT (family.go). A
-		// merge workspace is exempt: it is drawn nowhere until revealed, so it
-		// is no open child of the requester it forks.
-		if facts.Parent != nil && facts.MergeOf == nil {
+		// A NEW CHILD IS ONLY EVER MADE UNDER AN OPEN PARENT (family.go).
+		if facts.Parent != nil {
 			if err := requireOpenParent(ctx, tx, *facts.Parent); err != nil {
 				return err
 			}
@@ -396,28 +375,22 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Parent:       facts.Parent,
 			Priority:     facts.Priority,
 			CreatedAt:    time.Now().UTC(),
-			MergeOf:      facts.MergeOf,
+			Effects:      facts.Effects,
 			OneShot:      facts.OneShot,
 			ContextFrom:  facts.ContextFrom,
 			RequestedBy:  facts.RequestedBy,
 			LandsInto:    facts.LandsInto,
 		}
-		var mergeOf, request, forkHead, closeOnLanding, cleanupDir any
-		compactAfter, cleanupWorktree := false, false
-		if out.MergeOf != nil {
-			compactAfter = out.MergeOf.CompactAfter
-			cleanupWorktree = out.MergeOf.CleanupWorktree
-			closeOnLanding = nullableText(string(out.MergeOf.CloseOnLanding))
-			cleanupDir = nullableText(out.MergeOf.CleanupDir)
-			mergeOf, request = string(out.MergeOf.Requester), string(out.MergeOf.Request)
-			if out.MergeOf.ForkHead != "" {
-				forkHead = out.MergeOf.ForkHead
-			}
+		var closeAfter, cleanupDir any
+		compactRequester, profileGate := false, false
+		if e := out.Effects; e != nil {
+			closeAfter, cleanupDir = nullableText(string(e.CloseAfter)), nullableText(e.CleanupDir)
+			compactRequester, profileGate = e.CompactRequester, e.ProfileGate
 		}
 		// THE PLACEMENT IS JUDGED BEFORE ANY ROW IS WRITTEN.
 		var placed *resolvedPlacement
 		if facts.Placement != nil {
-			resolved, err := checkPlacement(ctx, tx, repo, *facts.Placement, facts.Parent, facts.MergeOf != nil)
+			resolved, err := checkPlacement(ctx, tx, repo, *facts.Placement, facts.Parent)
 			if err != nil {
 				return err
 			}
@@ -443,9 +416,9 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			closureAt, closureBy, closureHow = nanos(facts.Closure.At), string(facts.Closure.By), facts.Closure.How.String()
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, context_from, requested_by, closure_at, closure_by, closure_how)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy, closureHow)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, landing_compact_requester, landing_close_after, landing_cleanup_dir, landing_profile_gate, place, context_from, requested_by, closure_at, closure_by, closure_how)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), compactRequester, closeAfter, cleanupDir, profileGate, out.Place, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy, closureHow)
 		if err != nil {
 			return err
 		}
@@ -985,11 +958,9 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 // taking it back to revise what it landed, so the same statement retires the
 // merge's settlement: merged_at (the row leaves Recently Merged for its
 // groupings), the count the merge landed (commit_count goes back to "never
-// counted", and the next turn close recounts it live), the detached merge's
-// landing (landed_head, landed_at), which would otherwise have the merge
-// workspace sweep retire it again, and, for a merge workspace, its hiding: a
-// merge workspace the user opened is revealed, never drawn nowhere. A row that
-// is not merged keeps every one of those columns as it stands.
+// counted", and the next turn close recounts it live), and the landing
+// (landed_head, landed_at). A row that is not merged keeps every one of those
+// columns as it stands.
 //
 // A CLOSED WORKSPACE WHOSE PARENT IS NOT OPEN IS NOT RE-OPENED: the family
 // rules refuse it with ParentNotOpenError, and nothing is written (family.go).
@@ -1005,9 +976,8 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
-		var mergeOf sql.NullString
 		var backlogged, closed bool
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, backlogged, closed", &merged, &mergeOf, &backlogged, &closed); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, backlogged, closed", &merged, &backlogged, &closed); err != nil {
 			return err
 		}
 		// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (family.go).
@@ -1037,9 +1007,6 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 				workspaceColumn{name: "commit_count", value: nil},
 				workspaceColumn{name: "landed_head", value: nil},
 				workspaceColumn{name: "landed_at", value: nil})
-			if mergeOf.Valid {
-				columns = append(columns, workspaceColumn{name: "merge_revealed", value: true})
-			}
 		}
 		return updateWorkspaceColumns(ctx, tx, id, columns...)
 	})

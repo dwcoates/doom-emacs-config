@@ -290,9 +290,7 @@ func (s *store) UnsubscribeWorkspace(ctx context.Context, subscriber, followed W
 //
 // A CHILD'S OPEN PARENT IS GIVEN ONE UPDATE WITHOUT A ROW (ParentFollowedEvents). The
 // following is read off the child's recorded parent in the same read, never
-// stored, so a reparent or a close can never leave a stale follow behind. A
-// merge workspace's requester is its parent too, but follows nothing: the
-// merge reports to it on its own path.
+// stored, so a reparent or a close can never leave a stale follow behind.
 func (s *store) WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error) {
 	var out []WorkspaceSubscription
 	err := s.read(ctx, "daemon.wsm.workspace_subscribers", dlog.Context{"followed": string(followed)}, func(ctx context.Context) error {
@@ -330,7 +328,7 @@ func (s *store) WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) 
 		err = s.q(ctx).QueryRowContext(ctx, `SELECT parent.id, child.parent_updated_at,
 			EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = child.id AND creation_jobs.one_shot = 1)
 			FROM workspaces child JOIN workspaces parent ON parent.id = child.parent_id
-			WHERE child.id = ? AND child.merge_of IS NULL AND parent.closed = 0 AND parent.id != child.id`, followed).Scan(&parent, &updated, &oneShot)
+			WHERE child.id = ? AND parent.closed = 0 AND parent.id != child.id`, followed).Scan(&parent, &updated, &oneShot)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:

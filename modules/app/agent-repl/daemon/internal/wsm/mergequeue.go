@@ -60,8 +60,8 @@ func (s *store) RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, 
 func (s *store) RequestOneShotMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
 	const op = "daemon.wsm.request_one_shot_merge"
 	if !source.IsOneShot() {
-		err := fmt.Errorf("a one-shot merge is an own-branch merge that runs in place and closes the requester, not a %s source with keep_open %v and detach %q",
-			source.Kind, source.KeepOpen, source.Detach)
+		err := fmt.Errorf("a one-shot merge is an own-branch merge that runs in place and closes the requester, not a %s source with keep_open %v",
+			source.Kind, source.KeepOpen)
 		s.log.Error(op, "refused a one-shot merge request whose source is no one-shot", withError(dlog.Context{
 			"repo": string(repo), "workspace": string(id), "source": source.Kind.String()}, err))
 		return fmt.Errorf("wsm: one-shot merge request for %s: %w", id, err)
@@ -99,13 +99,6 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		s.log.Error(op, "refused a merge request whose source contradicts itself", withError(fields, err))
 		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
 	}
-	// AN ASYNC REQUEST IS NEVER A QUEUE ROW: it is recorded on its own
-	// (RequestAsyncMerge), so every merge_queue row is a workspace's own merge.
-	if source.Detach != "" {
-		err := fmt.Errorf("an async merge request (detach %q) is recorded by RequestAsyncMerge, never on the requester's queue row", source.Detach)
-		s.log.Error(op, "refused to record an async merge request on the requester's queue row", withError(fields, err))
-		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
-	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		if err := refuseQueued(ctx, tx, key, id); err != nil {
 			return err
@@ -120,11 +113,11 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		// A MERGE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN (family.go):
 		// every workspace its landing closes is checked in this transaction,
 		// so no child can be made under it between the check and the row.
-		origin, err := mergeOriginOf(ctx, tx, id)
+		effects, err := landingEffectsOf(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		for _, closes := range source.Closes(id, origin) {
+		for _, closes := range source.Closes(id, effects) {
 			if err := refuseOpenChildren(ctx, tx, closes); err != nil {
 				return err
 			}
@@ -143,30 +136,18 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 // request placed behind another records the wait (MergeQueueEntry.WaitsOn)
 // with the row, so the wait stands from the request on, before the merge is
 // even in line, and a restart reads it back. It
-// is the one shape a request row is written in, for a request the user or an
-// agent made (RequestMerge) and for the merge workspace a detached request
-// hands off to (HandOffDetachedMerge).
+// is the one shape a request row is written in.
 func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
 	next, err := nextSeq(ctx, tx, key)
 	if err != nil {
 		return err
 	}
-	before, err := encodeHooks(source.Hooks.PreDeploy)
-	if err != nil {
-		return err
-	}
-	after, err := encodeHooks(source.Hooks.PostDeploy)
-	if err != nil {
-		return err
-	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, waits_on, waits_on_name, source_profile_gate)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_front, source_version_part, source_changelog_line, source_behind, waits_on, waits_on_name, source_profile_gate)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key, id, next, int(MergeRequested), nanos(at),
-		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)), source.Front,
-		nullableText(source.DetachName), nullableText(source.Pick), nullNanos(source.PickStartedAt), nullableText(string(source.PickTurn)), source.CompactAfter,
-		nullableText(string(source.CloseOnLanding)), source.CleanupWorktree, nullableText(source.CleanupDir), versionPart(source.Version), versionLine(source.Version),
-		before, after, nullableText(string(source.DetachMaker)), source.DetachTargetMaker, nullableText(string(source.Behind)),
+		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), source.Front,
+		versionPart(source.Version), versionLine(source.Version), nullableText(string(source.Behind)),
 		nullableText(string(source.Behind)), nullableText(source.BehindName), source.ProfileGate)
 	return err
 }
@@ -1183,25 +1164,11 @@ func settleWaitsOn(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 	if cause == "" {
 		return 0, fmt.Errorf("wsm: the merge of workspace %s in repo %q left its queue with no cause to settle the merges behind it by", id, key)
 	}
-	// A REQUEST NOT YET HANDED OFF waits too (async_merge_requests): it is
-	// settled in the same write, and carries the settlement onto its merge
-	// workspace at the hand-off.
-	var settled int64
-	for _, stmt := range []string{
-		`UPDATE merge_queue SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`,
-		`UPDATE async_merge_requests SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`,
-	} {
-		res, err := tx.ExecContext(ctx, stmt, cause, key, id)
-		if err != nil {
-			return 0, err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return 0, err
-		}
-		settled += n
+	res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`, cause, key, id)
+	if err != nil {
+		return 0, err
 	}
-	return settled, nil
+	return res.RowsAffected()
 }
 
 // logSettledWaits records the waits a committed removal settled, if any.
@@ -1364,7 +1331,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, clock_phase, clock_since, clock_waited, clock_held, waits_on, waits_on_name, waits_on_left, cold_gated, resolved_tip, resolved_branch_head, resolved_turn, ` + requestColumns
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, slot, slot_since, aside, clock_phase, clock_since, clock_waited, clock_held, waits_on, waits_on_name, waits_on_left, cold_gated, resolved_tip, resolved_branch_head, resolved_turn, ` + requestColumns
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1385,8 +1352,6 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			ledger    sql.NullString
 			front     bool
 			behind    sql.NullString
-			picked    sql.NullInt64
-			pickTurn  sql.NullString
 			slot      int64
 			slotSince int64
 			aside     int64
@@ -1402,7 +1367,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			resTurn   sql.NullString
 			req       requestScan
 		)
-		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &phase, &since, &waited, &held, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated, &resTip, &resHead, &resTurn}, req.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &slot, &slotSince, &aside, &phase, &since, &waited, &held, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated, &resTip, &resHead, &resTurn}, req.targets()...)...); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1412,7 +1377,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		}
 		// THE REQUEST DECODES AS IT DOES OFF THE QUEUE (requestScan); the
 		// place's columns ride on top of it.
-		req.front, req.behind, req.picked, req.pickTurn = front, behind, picked, pickTurn
+		req.front, req.behind = front, behind
 		source, err := req.source("merge_queue", row)
 		if err != nil {
 			return nil, err

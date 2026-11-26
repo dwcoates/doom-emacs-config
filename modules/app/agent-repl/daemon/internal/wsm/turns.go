@@ -12,7 +12,7 @@ import (
 )
 
 // turnColumns is the one select list every turn read shares.
-const turnColumns = `id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind, sent_by, thread_question, thread_parent`
+const turnColumns = `id, workspace_id, text, origin, address, displaced, started_at, closed_at, close_kind, sent_by, thread_question, thread_parent`
 
 // scanTurn decodes one turn all-or-nothing. A turn's close is a whole: a close
 // kind without an instant (or the reverse) is corruption, and an undeclared
@@ -21,7 +21,6 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 	var (
 		t        Turn
 		address  sql.NullString
-		mirror   sql.NullString
 		sentBy   sql.NullString
 		started  int64
 		closed   sql.NullInt64
@@ -29,7 +28,7 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 		question sql.NullString
 		parent   []byte
 	)
-	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &mirror, &t.Displaced, &started, &closed, &kind, &sentBy, &question, &parent); err != nil {
+	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &t.Displaced, &started, &closed, &kind, &sentBy, &question, &parent); err != nil {
 		return Turn{}, err
 	}
 	id := string(t.ID)
@@ -44,13 +43,6 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 			return Turn{}, err
 		}
 		t.Address = addr
-	}
-	if mirror.Valid {
-		m, err := decodeMirror("turns", id, mirror.String)
-		if err != nil {
-			return Turn{}, err
-		}
-		t.Mirror = m
 	}
 	from, err := decodeSentBy("turns", id, t.Origin, sentBy)
 	if err != nil {
@@ -129,11 +121,6 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		s.log.Error(op, "refused an unencodable turn address", withError(fields, err))
 		return err
 	}
-	mirror, err := encodeMirror(t.Mirror)
-	if err != nil {
-		s.log.Error(op, "refused an unencodable turn mirror", withError(fields, err))
-		return err
-	}
 	// A TURN CLOSES ONLY THROUGH THE PROMPT QUEUE'S DOOR, which draws the
 	// turn's ending in the feed with the close. A record carrying a close is
 	// refused, and the upsert below never touches the close columns, so a
@@ -159,14 +146,14 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		// a put naming another workspace's turn changes nothing and is refused,
 		// rather than moving the turn out from under its workspace.
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO turns (id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind, sent_by, thread_question, thread_parent)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+			`INSERT INTO turns (id, workspace_id, text, origin, address, displaced, started_at, closed_at, close_kind, sent_by, thread_question, thread_parent)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			   text = excluded.text, origin = excluded.origin,
-			   address = excluded.address, mirror = excluded.mirror, displaced = excluded.displaced, started_at = excluded.started_at,
+			   address = excluded.address, displaced = excluded.displaced, started_at = excluded.started_at,
 			   sent_by = excluded.sent_by, thread_question = excluded.thread_question, thread_parent = excluded.thread_parent
 			 WHERE turns.workspace_id = excluded.workspace_id`,
-			t.ID, t.Workspace, t.Text, t.Origin, address, mirror, t.Displaced, nanos(t.StartedAt), sentByColumn(t.SentBy), questionText, questionParent)
+			t.ID, t.Workspace, t.Text, t.Origin, address, t.Displaced, nanos(t.StartedAt), sentByColumn(t.SentBy), questionText, questionParent)
 		if err != nil {
 			return err
 		}

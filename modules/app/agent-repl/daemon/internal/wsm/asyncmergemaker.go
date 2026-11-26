@@ -1,14 +1,5 @@
 package wsm
 
-import (
-	"context"
-	"database/sql"
-	"fmt"
-	"time"
-
-	"agent-repld/internal/dlog"
-)
-
 // asyncMergeMakerDDL is the layout-61 addition: an async request's MAKER and
 // TARGET (agentrepl.v1.CreateWorkspaceAsyncMerge), carried on the requester's
 // detached request until its hand-off forks the merge workspace.
@@ -27,26 +18,3 @@ ALTER TABLE merge_queue ADD COLUMN source_detach_maker TEXT;
 ALTER TABLE merge_queue ADD COLUMN source_detach_target_maker INTEGER NOT NULL DEFAULT 0;
 UPDATE merge_queue SET source_detach_maker = workspace_id WHERE source_detach_id IS NOT NULL;
 `
-
-// ClearMergePick records that a merge workspace's pick SUCCEEDED while its
-// merge stands in line: the instruction and the begun pick leave its row, so
-// the next admission admits the merge itself rather than starting the pick
-// again. A row with no begun pick is a defect in the caller, refused.
-func (s *store) ClearMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) error {
-	const op = "daemon.wsm.clear_merge_pick"
-	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
-	if err != nil {
-		return err
-	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id), "cleared_at": at}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE merge_queue SET source_pick = NULL, pick_started_at = NULL, pick_turn = NULL
-			  WHERE repo_key = ? AND workspace_id = ? AND state = ? AND source_pick IS NOT NULL AND pick_started_at IS NOT NULL`,
-			key, id, int(MergeQueued))
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: begun pick of queued workspace %s", id))
-	})
-}

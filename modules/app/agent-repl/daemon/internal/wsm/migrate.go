@@ -420,6 +420,7 @@ var migrations = []migration{
 	{To: 219, Name: "closure_how", Kind: MigrationAdditive, DDL: closureHowDDL},
 	// IT IS ADDITIVE: one new table the previous build never names.
 	{To: 220, Name: "log_site_marks", Kind: MigrationAdditive, DDL: logSiteMarksDDL},
+	{To: 221, Name: "retired_async_merges", Kind: MigrationContract, DDL: retiredAsyncMergesDDL, Rewrite: retireAsyncMergeRows},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

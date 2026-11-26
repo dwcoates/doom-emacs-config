@@ -98,7 +98,16 @@ func (ws Workspace) KeptWarm(mergeQueued bool) bool {
 	// A BACKLOGGED WORKSPACE IS KEPT WARM FOR ONE LAST BEAT, as a closed one
 	// is (owner ruling, 2026-11-24): the keeper's schedule spends that beat
 	// and then holds its keep-alives (KeepaliveHeld).
-	return !ws.MergeHidden()
+	return true
+}
+
+// ListedOpen reports whether the workspace is listed in the sidebar's Open
+// section and has a tab: neither closed nor backlogged (OPEN BEATS MERGED, so a
+// merge time alone does not take it out). THE ONE STATEMENT of an open row:
+// the roster draws by it, and the arrangement resolves a dragged row by it
+// (standing).
+func (ws Workspace) ListedOpen() bool {
+	return !ws.Closed && !ws.Backlogged
 }
 
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
@@ -157,9 +166,6 @@ func (ws Workspace) LetsCacheLapse() bool {
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 	if ws.Visibility.Visible() || mergeQueued || ws.AlwaysShown() {
 		return true
-	}
-	if ws.MergeHidden() {
-		return false
 	}
 	if ws.Withheld(folded) != WithheldCollapsed {
 		return false
