@@ -139,6 +139,7 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	if kind == kindWrite || kind == kindEdit {
 		c.lastChangeUnit = call.activityID
 		c.lastChangeWasEdit = kind == kindEdit
+		c.lastChangeInherited = c.recordInherited
 	}
 
 	c.log.With(at.ctxFor("tool-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).

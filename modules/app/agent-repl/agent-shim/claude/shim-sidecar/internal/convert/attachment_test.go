@@ -414,3 +414,104 @@ func TestInjectedMemoryKeyIsScopedToItsBook(t *testing.T) {
 		t.Fatalf("book A page agent = %q, want toolu_A", got)
 	}
 }
+
+// inheritedEditLines is an Edit call and its result as the vendor's fork copies
+// them from the parent: settled under the unit toolu_parent_edit.
+func inheritedEditLines(t *testing.T) []string {
+	t.Helper()
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_parent_edit", "Edit", `{"file_path":"/f.ts"}`))
+	result := toolResultLine("u1", "toolu_parent_edit", ts2, `[{"type":"text","text":"edited"}]`,
+		`{"filePath":"/f.ts","structuredPatch":[],"userModified":false}`)
+	return []string{forkedLine(t, call, "p-a1"), forkedLine(t, result, "p-u1")}
+}
+
+// TestDiagnosticsNeverJoinAChangeAcrossTheForkBoundary covers a fork whose last
+// write or edit is one its copied context settled: that unit's row lives in the
+// parent's book, so a report of the fork's own is kept whole rather than landed
+// on it (the store would skip that write as a row moving between books on every
+// report). A change of the fork's own, and a report the fork copied, still join.
+func TestDiagnosticsNeverJoinAChangeAcrossTheForkBoundary(t *testing.T) {
+	ownCall := assistantWith("a2", "msg_2", ts2, toolCall("toolu_fork_edit", "Edit", `{"file_path":"/g.ts"}`))
+	ownResult := toolResultLine("u2", "toolu_fork_edit", ts2, `[{"type":"text","text":"edited"}]`,
+		`{"filePath":"/g.ts","structuredPatch":[],"userModified":false}`)
+	diag := attachmentLineOf("diag-1", `{"type":"diagnostics","isNew":true,"files":[{"uri":"/f.ts","diagnostics":[]}]}`)
+
+	cases := []struct {
+		name          string
+		lines         func(t *testing.T) []string
+		wantKey       string
+		wantResidue   bool
+		wantNoEntries bool
+	}{
+		{
+			name: "the fork's own report after only an inherited edit is kept whole",
+			lines: func(t *testing.T) []string {
+				return append(inheritedEditLines(t), diag)
+			},
+			wantResidue: true,
+		},
+		{
+			name: "the fork's own report after the fork's own edit joins that edit",
+			lines: func(t *testing.T) []string {
+				return append(inheritedEditLines(t), ownCall, ownResult, diag)
+			},
+			wantKey: ActivityKey("toolu_fork_edit"),
+		},
+		{
+			name: "a report the fork copied after an inherited edit stores nothing",
+			lines: func(t *testing.T) []string {
+				return append(inheritedEditLines(t), forkedLine(t, diag, "p-diag-1"))
+			},
+			wantNoEntries: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			lines := tc.lines(t)
+			convertLines(t, c, lines[:len(lines)-1]...)
+
+			// Act.
+			entries := convertLines(t, c, lines[len(lines)-1])
+
+			// Assert.
+			switch {
+			case tc.wantNoEntries:
+				if len(entries) != 0 {
+					t.Fatalf("entries = %v, want none stored for a copied record", allKeys(entries))
+				}
+			case tc.wantResidue:
+				if len(entries) != 1 || vendorKindOf(entries[0]) != "attachment/diagnostics" {
+					t.Fatalf("entries = %v, want exactly one attachment/diagnostics residue", allKeys(entries))
+				}
+			default:
+				if len(entries) != 1 || entries[0].GetUpsertKey() != tc.wantKey {
+					t.Fatalf("entries = %v, want one frame keyed %q", allKeys(entries), tc.wantKey)
+				}
+			}
+		})
+	}
+}
+
+// TestDiagnosticsAfterOnlyAnInheritedChangeAreRecordedAtDebug asserts the one
+// record the cross-book branch leaves: debug, since a fork that has not yet
+// changed a file of its own is an ordinary shape, and naming the parent's unit.
+func TestDiagnosticsAfterOnlyAnInheritedChangeAreRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	c, sink := loggedConverter(t)
+	convertLines(t, c, inheritedEditLines(t)...)
+
+	// Act.
+	convertLines(t, c, attachmentLineOf("diag-1", `{"type":"diagnostics","isNew":true,"files":[]}`))
+
+	// Assert.
+	rec := recordForMessage(t, sink, "follow no write or edit of this fork's own")
+	if got := rec["level"]; got != "debug" {
+		t.Fatalf("the cross-book diagnostics record was recorded at %v, want debug", got)
+	}
+	fields, _ := rec["context"].(map[string]any)
+	if got := fields["activity_id"]; got != "toolu_parent_edit" {
+		t.Fatalf("activity_id = %v, want the parent's unit the report did not join", got)
+	}
+}
