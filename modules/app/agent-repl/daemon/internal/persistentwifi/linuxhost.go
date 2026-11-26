@@ -255,10 +255,36 @@ func (h *linuxHost) RadioPower(ctx context.Context, _ string) (string, error) {
 	return "", fmt.Errorf("%s radio wifi named no power state: %q", h.tools.Nmcli, strings.TrimSpace(out))
 }
 
-// PreferredNetworks lists the SSIDs of NetworkManager's saved Wi-Fi
+// JoinHotspot joins the saved connection whose SSID is hotspot (sameNetwork:
+// a saved name may spell the apostrophe either way), or the configured name
+// as given when none matches or the saved list cannot be read, the error
+// then saying why.
+func (h *linuxHost) JoinHotspot(ctx context.Context, device, hotspot string) (hotspotJoin, error) {
+	ssid, note := hotspot, ""
+	saved, err := h.savedNetworks(ctx)
+	switch {
+	case err != nil:
+		note = "the saved networks could not be read (" + err.Error() + "), so the configured name was tried as given"
+	default:
+		note = "no saved network matches " + hotspot + ", so the configured name was tried as given"
+		for _, name := range saved {
+			if sameNetwork(name, hotspot) {
+				ssid, note = name, ""
+				break
+			}
+		}
+	}
+	join := hotspotJoin{network: ssid, steps: dlog.Context{}}
+	if err := h.joinSaved(ctx, device, ssid); err != nil {
+		return join, errors.New(withNote(err.Error(), note))
+	}
+	return join, nil
+}
+
+// savedNetworks lists the SSIDs of NetworkManager's saved Wi-Fi
 // connections: `nmcli -t -f NAME,TYPE connection show`, then each Wi-Fi
 // connection's SSID (`nmcli -g 802-11-wireless.ssid connection show id NAME`).
-func (h *linuxHost) PreferredNetworks(ctx context.Context, _ string) ([]string, error) {
+func (h *linuxHost) savedNetworks(ctx context.Context) ([]string, error) {
 	out, err := run(ctx, h.runner, h.tools.Nmcli, "-t", "-f", "NAME,TYPE", "connection", "show")
 	if err != nil {
 		return nil, err
@@ -280,9 +306,9 @@ func (h *linuxHost) PreferredNetworks(ctx context.Context, _ string) ([]string, 
 	return ssids, nil
 }
 
-// JoinNetwork: `nmcli device wifi connect SSID ifname DEVICE`, which uses the
+// joinSaved: `nmcli device wifi connect SSID ifname DEVICE`, which uses the
 // saved connection for the SSID.
-func (h *linuxHost) JoinNetwork(ctx context.Context, device, ssid string) error {
+func (h *linuxHost) joinSaved(ctx context.Context, device, ssid string) error {
 	_, err := run(ctx, h.runner, h.tools.Nmcli, "device", "wifi", "connect", ssid, "ifname", device)
 	return err
 }

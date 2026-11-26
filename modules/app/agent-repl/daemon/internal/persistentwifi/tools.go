@@ -42,8 +42,9 @@ const EnvToolsDir = "AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR"
 // EnvHotspot names the phone hotspot turning the mode on joins and turning it
 // off leaves. It is per-user and has no default: unset leaves the hotspot step
 // unconfigured, which every mode change answers as a failed hotspot step
-// pointing at the user guide. Either apostrophe spelling joins, because the
-// join resolves the name against the saved networks (savedHotspot).
+// pointing at the user guide. Either apostrophe spelling joins: the Wi-Fi
+// helper matches the phone's name either way (wifi-helper/hotspot.swift), as
+// Linux matches the saved connections (linuxHost.JoinHotspot).
 const EnvHotspot = "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"
 
 // Tools are the absolute paths of every host tool the package runs.

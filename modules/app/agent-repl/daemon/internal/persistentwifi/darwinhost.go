@@ -86,25 +86,41 @@ func parseBluetoothPower(out string) (string, error) {
 	}
 }
 
-func (h *darwinHost) PreferredNetworks(ctx context.Context, device string) ([]string, error) {
-	out, err := run(ctx, h.runner, h.tools.Networksetup, "-listpreferredwirelessnetworks", device)
+// JoinHotspot is the helper's hotspot verb (runHelper; wifi-helper/
+// hotspot.swift): it asks the phone through sharingd to start its hotspot,
+// then joins the network sharingd names with the password it gives, which
+// never leaves the helper. An idle iPhone stops broadcasting its hotspot, so
+// a join by name alone found nothing (owner ruling, 2026-11-26).
+func (h *darwinHost) JoinHotspot(ctx context.Context, _, hotspot string) (hotspotJoin, error) {
+	var answer hotspotAnswer
+	waitLost, err := h.runHelper(ctx, verbHotspot, []string{"--name", hotspot}, &answer)
+	join := hotspotJoin{network: hotspot, steps: dlog.Context{}}
 	if err != nil {
-		return nil, err
+		return join, err
 	}
-	return preferredNetworks(out), nil
-}
-
-// JoinNetwork: `networksetup -setairportnetwork` prints nothing on success and
-// a sentence on failure, whatever its exit code, so both are read.
-func (h *darwinHost) JoinNetwork(ctx context.Context, device, ssid string) error {
-	out, err := run(ctx, h.runner, h.tools.Networksetup, "-setairportnetwork", device, ssid)
-	if err != nil {
-		return err
+	if waitLost != "" {
+		join.steps["launch_wait_lost"] = waitLost
 	}
-	if said := strings.TrimSpace(out); said != "" {
-		return errSaid(said)
+	if answer.Error != "" {
+		return join, fmt.Errorf("the Wi-Fi helper's %s", answer.Error)
 	}
-	return nil
+	j := answer.Hotspot
+	if j == nil {
+		return join, errors.New("the Wi-Fi helper's hotspot answer named no join")
+	}
+	if j.Network != "" {
+		join.network = j.Network
+	}
+	join.steps["stage"] = j.Stage
+	for key, ms := range map[string]*int64{"browse_ms": j.BrowseMs, "enable_ms": j.EnableMs, "scan_ms": j.ScanMs, "join_ms": j.JoinMs} {
+		if ms != nil {
+			join.steps[key] = *ms
+		}
+	}
+	if j.Stage == hotspotJoined {
+		return join, nil
+	}
+	return join, hotspotJoinFailed(hotspot, answer)
 }
 
 func (h *darwinHost) CanDisconnect() error {

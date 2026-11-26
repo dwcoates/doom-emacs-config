@@ -90,7 +90,6 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	// (withPowerSource, hearSource): a closed lid then sets Low Power Mode.
 	h.c.powerSource = powerSourceFact{kind: powerSourceBattery}
 	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
-	h.r.on(argPreferred, answer{out: preferred(hotspot)})
 	// A loss's record reads the radio's power; it is powered unless a test
 	// says otherwise.
 	h.r.on(argRadioPower, answer{out: radioPowered})
@@ -103,7 +102,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	h.r.on(argRadioOn, answer{})
 	// The hotspot is out of reach, and every scan sees nothing with the
 	// machine on no hotspot, unless a test says otherwise.
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	h.sight(inSight(""))
 	return h
 }
@@ -408,7 +407,7 @@ func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndSleepsTheDisplay
 	h.r.on(argPmsetRead, answer{out: pmsetIn(false, energyModeHighPower)}, answer{out: pmsetIn(true, energyModeLowPower)})
 	h.r.on(argPorts, answer{out: ports})
 	h.r.on(argSummary, answer{out: summary(true, "Home")}, answer{out: summary(true, hotspot)})
-	h.r.on(argJoin, answer{})
+	h.r.on(argJoin, hotspotJoins)
 	scriptPower(h.r, "1")
 
 	// Act.
@@ -457,7 +456,7 @@ func TestUpdateMovesTheEnergyModeOnlyWithTheQuietState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t).standing(tc.pmset, summary(true, "Home")).withLid(tc.lid)
-			h.r.on(argJoin, answer{})
+			h.r.on(argJoin, hotspotJoins)
 			h.r.on(argDisplaySleep, answer{})
 			h.r.on(argDisplayWake, answer{})
 			h.r.on(argPowerMode(energyModeHighPower), answer{})
@@ -552,7 +551,7 @@ func TestUpdateOnSkipsAJoinWhenAlreadyOnTheHotspot(t *testing.T) {
 func TestUpdateOnRunsThePowerStepWhenTheJoinFails(t *testing.T) {
 	// Arrange.
 	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	scriptPower(h.r, "1")
 
 	// Act.
@@ -560,7 +559,7 @@ func TestUpdateOnRunsThePowerStepWhenTheJoinFails(t *testing.T) {
 
 	// Assert.
 	failed := resp.GetSuccess().GetHotspot().GetFailed()
-	if failed == nil || failed.GetDetail() != "Could not find network Test Hotspot." {
+	if failed == nil || failed.GetDetail() != outOfSightDetail {
 		t.Fatalf("hotspot = %v, want failed with the tool's sentence", resp.GetSuccess().GetHotspot())
 	}
 	if h.r.count(argPower("disablesleep", "1")) != 1 {
@@ -728,7 +727,7 @@ func TestUpdateOffLeavesNothingItCannotIdentify(t *testing.T) {
 func TestUpdateAnswersARefusedPowerStepAsAnErrorAndSkipsTheDisplay(t *testing.T) {
 	// Arrange.
 	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
-	h.r.on(argJoin, answer{})
+	h.r.on(argJoin, hotspotJoins)
 	h.r.on(argPower("disablesleep", "1"), answer{out: "sudo: a password is required", code: 1})
 
 	// Act.
@@ -761,7 +760,7 @@ func TestUpdateToggleTurnsTheReadModeOver(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t).standing(tc.pmset, summary(true, "Home"))
-			h.r.on(argJoin, answer{})
+			h.r.on(argJoin, hotspotJoins)
 			scriptPower(h.r, tc.wantValue)
 
 			// Act.
@@ -858,19 +857,19 @@ const (
 	curlyHotspot    = "Someone\u2019s iPhone"
 )
 
-func TestUpdateOnJoinsTheSavedSpellingOfTheHotspot(t *testing.T) {
-	// Arrange: configured straight, saved curly, on another network now.
+func TestUpdateOnHandsTheHelperTheConfiguredSpellingAndKeepsTheNetworkItJoined(t *testing.T) {
+	// Arrange: configured straight; the helper joins the phone's curly network.
 	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, "Home"))
-	h.r.on(argPreferred, answer{out: preferred("Home", curlyHotspot)})
-	h.r.on("/t/networksetup -setairportnetwork en0 "+curlyHotspot, answer{})
+	h.r.on("/t/open -W -n -g -a /t/AgentReplWifi.app --args hotspot --name "+straightHotspot+" --out OUT",
+		hotspotSays("joined", curlyHotspot, ""))
 	scriptPower(h.r, "1")
 
 	// Act.
 	resp := h.c.Update(context.Background(), update("on"))
 
-	// Assert: the join named the saved SSID exactly.
+	// Assert: the helper matches the spelling; the outcome names what it joined.
 	if got := resp.GetSuccess().GetHotspot().GetJoined().GetNetworkName(); got != curlyHotspot {
-		t.Fatalf("hotspot = %v, want joined to the saved %q", resp.GetSuccess().GetHotspot(), curlyHotspot)
+		t.Fatalf("hotspot = %v, want joined to the phone's %q", resp.GetSuccess().GetHotspot(), curlyHotspot)
 	}
 }
 
@@ -885,23 +884,6 @@ func TestUpdateOnSeesTheOtherSpellingAsAlreadyJoined(t *testing.T) {
 	// Assert.
 	if resp.GetSuccess().GetHotspot().GetAlreadyJoined() == nil {
 		t.Fatalf("hotspot = %v, want already_joined", resp.GetSuccess().GetHotspot())
-	}
-}
-
-func TestUpdateOnTriesTheConfiguredNameWhenNoSavedNetworkMatches(t *testing.T) {
-	// Arrange: nothing saved matches; the join of the configured name fails.
-	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, "Home"))
-	h.r.on(argPreferred, answer{out: preferred("Home")})
-	h.r.on("/t/networksetup -setairportnetwork en0 "+straightHotspot, answer{out: "Could not find network Someone's iPhone."})
-	scriptPower(h.r, "1")
-
-	// Act.
-	resp := h.c.Update(context.Background(), update("on"))
-
-	// Assert: the detail says no saved network matched.
-	failed := resp.GetSuccess().GetHotspot().GetFailed()
-	if failed == nil || !strings.Contains(failed.GetDetail(), "no saved network matches") {
-		t.Fatalf("hotspot = %v, want failed naming the missing saved network", resp.GetSuccess().GetHotspot())
 	}
 }
 

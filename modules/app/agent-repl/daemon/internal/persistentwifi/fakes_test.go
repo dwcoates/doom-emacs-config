@@ -2,7 +2,9 @@ package persistentwifi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,9 @@ type answer struct {
 	out  string
 	code int
 	err  error
+	// file, when set, is written to the argv's --out file first: a Wi-Fi
+	// helper verb's answer.
+	file string
 }
 
 // fakeRunner answers each argv from a script. An argv with several answers
@@ -85,13 +90,13 @@ func (f *fakeRunner) on(argv string, answers ...answer) *fakeRunner {
 
 func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
 	f.mu.Lock()
-	hook := f.before[strings.Join(argv, " ")]
+	hook := f.before[scriptKey(argv)]
 	hang := false
 	for prefix := range f.blocking {
-		hang = hang || strings.HasPrefix(strings.Join(argv, " "), prefix)
+		hang = hang || strings.HasPrefix(scriptKey(argv), prefix)
 	}
 	if hang {
-		f.calls = append(f.calls, strings.Join(argv, " "))
+		f.calls = append(f.calls, scriptKey(argv))
 	}
 	f.mu.Unlock()
 	if hang {
@@ -106,7 +111,7 @@ func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string
 	if dir != runDir {
 		f.t.Errorf("Run dir = %q, want %q", dir, runDir)
 	}
-	key := strings.Join(argv, " ")
+	key := scriptKey(argv)
 	f.calls = append(f.calls, key)
 	queue, ok := f.answers[key]
 	if !ok {
@@ -125,7 +130,21 @@ func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string
 	if len(queue) > 1 {
 		f.answers[key] = queue[1:]
 	}
+	if a.file != "" {
+		if err := os.WriteFile(argv[len(argv)-1], []byte(a.file), 0o600); err != nil {
+			f.t.Errorf("write %q's answer file: %v", key, err)
+		}
+	}
 	return a.out, a.code, a.err
+}
+
+// scriptKey is the argv a call is scripted and recorded by: a Wi-Fi helper
+// launch's answer file, a fresh path each launch, reads OUT.
+func scriptKey(argv []string) string {
+	if n := len(argv); n >= 2 && argv[n-2] == "--out" {
+		return strings.Join(append(append([]string(nil), argv[:n-1]...), "OUT"), " ")
+	}
+	return strings.Join(argv, " ")
 }
 
 // ran answers every recorded call, in order.
@@ -218,11 +237,11 @@ func summary(active bool, ssid string) string {
 
 // Argv keys of every tool call.
 const (
-	argPmsetRead  = "/t/pmset -g"
-	argPorts      = "/t/networksetup -listallhardwareports"
-	argSummary    = "/t/ipconfig getsummary en0"
-	argJoin       = "/t/networksetup -setairportnetwork en0 " + hotspot
-	argPreferred  = "/t/networksetup -listpreferredwirelessnetworks en0"
+	argPmsetRead = "/t/pmset -g"
+	argPorts     = "/t/networksetup -listallhardwareports"
+	argSummary   = "/t/ipconfig getsummary en0"
+	// argJoin is the Wi-Fi helper's hotspot join.
+	argJoin       = "/t/open -W -n -g -a /t/AgentReplWifi.app --args hotspot --name " + hotspot + " --out OUT"
 	argDisconnect = "/t/wifi-util disconnect"
 	argRadioOff   = "/t/networksetup -setairportpower en0 off"
 	argRadioOn    = "/t/networksetup -setairportpower en0 on"
@@ -245,14 +264,27 @@ const (
 // argBrightness is one `mac-brightness <level>` call.
 func argBrightness(level string) string { return "/t/mac-brightness " + level }
 
-// preferred composes a `networksetup -listpreferredwirelessnetworks` answer.
-func preferred(names ...string) string {
-	s := "Preferred networks on en0:\n"
-	for _, n := range names {
-		s += "\t" + n + "\n"
+// hotspotSays is the helper's hotspot answer: the join ended at STAGE on
+// NETWORK, with DETAIL as its error.
+func hotspotSays(stage, network, detail string) answer {
+	raw, err := json.Marshal(map[string]any{"verb": "hotspot", "authorization": "authorized",
+		"hotspot": map[string]any{"stage": stage, "network": network, "error": detail, "enable_ms": 1300}})
+	if err != nil {
+		panic(err)
 	}
-	return s
+	return answer{file: string(raw)}
 }
+
+// hotspotJoins and hotspotOutOfSight are the helper's two usual hotspot
+// answers: the join took, or the phone started its hotspot out of range.
+var (
+	hotspotJoins      = hotspotSays("joined", hotspot, "")
+	hotspotOutOfSight = hotspotSays("not_visible", hotspot, "no network named "+hotspot+" is in range")
+)
+
+// outOfSightDetail is the hotspot step's detail for hotspotOutOfSight.
+const outOfSightDetail = "the hotspot join stopped at not_visible: the phone started its hotspot, but " + hotspot +
+	" was not in range: no network named " + hotspot + " is in range"
 
 // argPower is one `sudo -n pmset -a <setting> <value>` call.
 func argPower(setting, value string) string {

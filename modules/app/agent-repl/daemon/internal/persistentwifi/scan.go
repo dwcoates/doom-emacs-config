@@ -113,6 +113,7 @@ const (
 const (
 	verbScan      = "scan"
 	verbAuthorize = "authorize"
+	verbHotspot   = "hotspot"
 )
 
 // helperLaunch is the one argv that runs the Wi-Fi helper's VERB with FLAGS,

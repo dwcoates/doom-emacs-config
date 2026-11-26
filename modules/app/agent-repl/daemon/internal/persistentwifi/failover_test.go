@@ -21,7 +21,7 @@ func lostClosed(t *testing.T) *harness {
 	h := newHarness(t).standing(pmsetOn, summary(false, "")).withLid(lidClosed)
 	h.c.quiet = true
 	// The hotspot is out of reach unless a test says otherwise.
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	return h
 }
 
@@ -78,11 +78,12 @@ func (h *harness) scanCount() int {
 	return n
 }
 
-// joinCalls answers every network join and radio power call, in order.
+// joinCalls answers every hotspot join (the Wi-Fi helper's hotspot verb) and
+// radio power call, in order.
 func (h *harness) joinCalls() []string {
 	var out []string
 	for _, c := range h.r.ran() {
-		if strings.Contains(c, "-setairportnetwork") || strings.Contains(c, "-setairportpower") {
+		if strings.Contains(c, "--args "+verbHotspot+" ") || strings.Contains(c, "-setairportpower") {
 			out = append(out, c)
 		}
 	}
@@ -159,7 +160,7 @@ func TestAJoinedHotspotEndsTheFailoverAndIsKept(t *testing.T) {
 	// Arrange: no saved network but the hotspot, which joins.
 	h := lostClosed(t)
 	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
-	h.r.on(argJoin, answer{})
+	h.r.on(argJoin, hotspotJoins)
 
 	// Act.
 	h.tickAt(0)
@@ -227,7 +228,7 @@ func TestTheHotspotIsJoinedWhenTheReadBeforeTheJoinStillFindsWifiLost(t *testing
 func TestTheFailoverNeverPowerCyclesTheRadio(t *testing.T) {
 	// Arrange: nothing ever joins.
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	h.sight(inSight(""))
 
 	// Act: the loss, then attempts over ten minutes.
@@ -247,7 +248,7 @@ func TestTheFailoverNeverPowerCyclesTheRadio(t *testing.T) {
 func TestTheLidOpeningStandsTheFailoverDown(t *testing.T) {
 	// Arrange: one failed attempt with the lid closed.
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	h.tickAt(0)
 
 	// Act: the lid opens, Wi-Fi still lost.
@@ -267,7 +268,7 @@ func TestTheLidOpeningStandsTheFailoverDown(t *testing.T) {
 func TestAFailedAttemptIsRetriedOnTheScheduleAndRecordedOnceAsTransient(t *testing.T) {
 	// Arrange.
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	h.tickAt(0)
 
 	// Act: a beat before the retry is due, then the beat it falls due.
@@ -280,7 +281,7 @@ func TestAFailedAttemptIsRetriedOnTheScheduleAndRecordedOnceAsTransient(t *testi
 		t.Fatalf("joins = %d before the retry and %d after, want 1 and 2", before, h.r.count(argJoin))
 	}
 	infos := h.failoverRecords("info", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule")
-	if len(infos) != 1 || infos[0]["cause"] != "Could not find network Test Hotspot." || infos[0][dlog.TransientKey] != true {
+	if len(infos) != 1 || infos[0]["cause"] != outOfSightDetail || infos[0][dlog.TransientKey] != true {
 		t.Fatalf("records = %+v, want one transient INFO for the standing cause", infos)
 	}
 	if warns := h.failoverRecords("warn", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule"); len(warns) != 0 {
@@ -500,7 +501,7 @@ func TestTickRecordsALossOncePerLoss(t *testing.T) {
 func TestAFailoverJoinRunsWithTheControllerLockFree(t *testing.T) {
 	// Arrange: the hotspot join looks at the lock as it runs.
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 	h.sight(inSight(""))
 	held := false
 	h.r.whileRunning(argJoin, func(context.Context) {
@@ -574,7 +575,7 @@ func TestALidOpeningCancelsTheJoinInFlight(t *testing.T) {
 func TestEachFailoverAttemptRecordsItsStart(t *testing.T) {
 	// Arrange
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.r.on(argJoin, hotspotOutOfSight)
 
 	// Act
 	h.tickAt(0)
@@ -620,8 +621,8 @@ func TestEachAttemptsSurveyRecordsTheHotspotsSighting(t *testing.T) {
 			// Arrange: the hotspot configured with a straight apostrophe.
 			h := newHarnessFor(t, "Test's Phone").standing(pmsetIn(true, energyModeLowPower), summary(false, "")).withLid(lidClosed)
 			h.c.quiet, h.c.displayAsleep = true, true
-			h.r.on(argPreferred, answer{out: preferred()})
-			h.r.on("/t/networksetup -setairportnetwork en0 Test's Phone", answer{out: "Could not find network Test's Phone."})
+			h.r.on("/t/open -W -n -g -a /t/AgentReplWifi.app --args hotspot --name Test's Phone --out OUT",
+				hotspotSays("no_phone", "", ""))
 			h.sight(tc.scan)
 
 			// Act: two attempts with the same cause.
@@ -713,7 +714,7 @@ func TestEachAttemptsSurveyRecordsBluetooth(t *testing.T) {
 func TestEveryHotspotJoinRecordsItsExactOutcome(t *testing.T) {
 	// Arrange: the hotspot will not join on the first attempt, then joins.
 	h := lostClosed(t)
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."}, answer{})
+	h.r.on(argJoin, hotspotOutOfSight, hotspotJoins)
 	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
 		answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
 
@@ -726,7 +727,7 @@ func TestEveryHotspotJoinRecordsItsExactOutcome(t *testing.T) {
 	if len(tries) != 2 {
 		t.Fatalf("hotspot join records = %+v, want one per attempt", tries)
 	}
-	if tries[0]["outcome"] != "failed" || tries[0]["joined"] != false || tries[0]["error"] != "Could not find network Test Hotspot." ||
+	if tries[0]["outcome"] != "failed" || tries[0]["joined"] != false || tries[0]["error"] != outOfSightDetail ||
 		tries[0]["network"] != hotspot || tries[0]["attempt"] != 1 || tries[0]["took_bound"] != false {
 		t.Fatalf("failed join record = %+v, want the failure and its detail", tries[0])
 	}
@@ -762,7 +763,7 @@ func TestHotspotJoinRecordNamesAnOutcomeWithoutAJoin(t *testing.T) {
 		NoWifiInterface: &agentreplv1.UpdatePersistentWifiModeHotspotNoWifiInterface{}}}
 
 	// Act.
-	got := hotspotJoinRecord("", 3, hotspot, outcome, 0, false)
+	got := hotspotJoinRecord("", 3, hotspot, hotspotStep{outcome: outcome}, 0)
 
 	// Assert.
 	if got["outcome"] != "no_wifi_interface" || got["joined"] != false || got["error"] != "no_wifi_interface" || got["attempt"] != 3 {
@@ -772,24 +773,29 @@ func TestHotspotJoinRecordNamesAnOutcomeWithoutAJoin(t *testing.T) {
 
 func TestHotspotJoinRecord(t *testing.T) {
 	cases := []struct {
-		name    string
-		outcome *agentreplv1.UpdatePersistentWifiModeHotspot
-		want    map[string]any
+		name string
+		step hotspotStep
+		want map[string]any
 	}{
-		{name: "a join names the network joined",
-			outcome: &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: &agentreplv1.UpdatePersistentWifiModeHotspot_Joined{
+		{name: "a join names the network joined and each step's time",
+			step: hotspotStep{outcome: &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: &agentreplv1.UpdatePersistentWifiModeHotspot_Joined{
 				Joined: &agentreplv1.UpdatePersistentWifiModeHotspotJoined{NetworkName: hotspot}}},
+				steps: dlog.Context{"stage": "joined", "enable_ms": int64(1300)}},
 			want: map[string]any{"device": "en0", "network": hotspot, "took_ms": int64(1500), "took_bound": false, "joined": true,
-				"attempt": 2, "hotspot": hotspot, "outcome": "joined"}},
+				"attempt": 2, "hotspot": hotspot, "outcome": "joined", "stage": "joined", "enable_ms": int64(1300)}},
 		{name: "a failed join names the network and its error",
-			outcome: &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed(hotspot, "Could not find network Test Hotspot.")},
+			step: hotspotStep{outcome: &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed(hotspot, outOfSightDetail)}},
 			want: map[string]any{"device": "en0", "network": hotspot, "took_ms": int64(1500), "took_bound": false, "joined": false,
-				"attempt": 2, "hotspot": hotspot, "outcome": "failed", "error": "Could not find network Test Hotspot."}},
+				"attempt": 2, "hotspot": hotspot, "outcome": "failed", "error": outOfSightDetail}},
+		{name: "a join its bound cut says so",
+			step: hotspotStep{outcome: &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed(hotspot, "cut")}, cut: true},
+			want: map[string]any{"device": "en0", "network": hotspot, "took_ms": int64(1500), "took_bound": true, "joined": false,
+				"attempt": 2, "hotspot": hotspot, "outcome": "failed", "error": "cut"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := hotspotJoinRecord("en0", 2, hotspot, tc.outcome, 1500*time.Millisecond, false)
+			got := hotspotJoinRecord("en0", 2, hotspot, tc.step, 1500*time.Millisecond)
 
 			// Assert.
 			if len(got) != len(tc.want) {

@@ -265,13 +265,6 @@ func (c *Controller) abandonFailoverLocked() {
 	}
 }
 
-// joinBound bounds one `networksetup -setairportnetwork`. NOT YET MEASURED on
-// this host (a join changes the network, which no measurement may do): every
-// join records its duration (joinNamed), and the bound is to be set to 2-3
-// times the healthy worst case those records show (org/todo.md). Until then
-// it is generous, so a slow join is never cut.
-const joinBound = 30 * time.Second
-
 // joinHotspotStep is the failover's step: join the configured hotspot. A join that does not take, or a hotspot that is not configured,
 // schedules the next attempt. It runs off the lock (attemptFailover).
 func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
@@ -296,10 +289,9 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 	c.log.Info(opFailover, "joining the hotspot after Wi-Fi was lost", dlog.Context{
 		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": attempt.number,
 	})
-	bounded, cancel := context.WithTimeout(ctx, joinBound)
-	defer cancel()
 	start := c.clock.Now()
-	outcome := c.joinHotspot(bounded, rd)
+	step := c.joinHotspot(ctx, rd)
+	outcome := step.outcome
 	took := c.clock.Now().Sub(start)
 	if ctx.Err() != nil {
 		c.stillWanted(attempt, "hotspot_outcome")
@@ -307,7 +299,7 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 	}
 	// EVERY HOTSPOT JOIN'S EXACT OUTCOME IS RECORDED (owner request,
 	// 2026-11-20), whatever the de-duplicated cause record below says.
-	c.log.Info(opFailover, "joined the hotspot, or tried to", hotspotJoinRecord(rd.device, attempt.number, c.cfg.Hotspot, outcome, took, bounded.Err() != nil))
+	c.log.Info(opFailover, "joined the hotspot, or tried to", hotspotJoinRecord(rd.device, attempt.number, c.cfg.Hotspot, step, took))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if joined := outcome.GetJoined(); joined != nil {
@@ -376,8 +368,10 @@ func (c *Controller) stillLost(attempt failoverAttempt) (reading, bool) {
 
 // hotspotJoinRecord is THE ONE record of a hotspot join: the interface, the
 // SSID it named, how long the join took and whether its bound cut it, whether
-// it joined, the outcome's arm, and its detail when it failed.
-func hotspotJoinRecord(device string, attempt int, hotspot string, outcome *agentreplv1.UpdatePersistentWifiModeHotspot, took time.Duration, cut bool) dlog.Context {
+// it joined, the outcome's arm, its detail when it failed, and what each of
+// the host's join steps took.
+func hotspotJoinRecord(device string, attempt int, hotspot string, step hotspotStep, took time.Duration) dlog.Context {
+	outcome := step.outcome
 	network, cause := "", ""
 	switch {
 	case outcome.GetJoined() != nil:
@@ -387,8 +381,11 @@ func hotspotJoinRecord(device string, attempt int, hotspot string, outcome *agen
 	default:
 		cause = hotspotArm(outcome)
 	}
-	record := dlog.Context{"device": device, "network": network, "took_ms": took.Milliseconds(), "took_bound": cut,
+	record := dlog.Context{"device": device, "network": network, "took_ms": took.Milliseconds(), "took_bound": step.cut,
 		"joined": cause == "", "attempt": attempt, "hotspot": hotspot, "outcome": hotspotArm(outcome)}
+	for k, v := range step.steps {
+		record[k] = v
+	}
 	if cause != "" {
 		record["error"] = cause
 	}

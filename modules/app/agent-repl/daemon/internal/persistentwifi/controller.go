@@ -120,6 +120,9 @@ type Controller struct {
 	// bluetoothBound bounds each Bluetooth read (bluetoothBound, the
 	// constant; a test shortens it).
 	bluetoothBound time.Duration
+	// hotspotJoinBound bounds each hotspot join (hotspotJoinBound, the
+	// constant; a test shortens it).
+	hotspotJoinBound time.Duration
 	// scanCause is why the last Wi-Fi scan named no networks; empty while
 	// scans name them (recordStandingCause).
 	scanCause string
@@ -179,7 +182,7 @@ func New(d Deps) (*Controller, error) {
 		onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, sourceWatch: d.PowerSource, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
-		scanBound: scanBound, bluetoothBound: bluetoothBound,
+		scanBound: scanBound, bluetoothBound: bluetoothBound, hotspotJoinBound: hotspotJoinBound,
 	}
 	d.Freezer.OnChange(c.frozenChanged)
 	return c, nil
@@ -354,7 +357,7 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 	case c.cfg.Hotspot == "":
 		hotspotOutcome = c.noHotspotConfigured(on)
 	case on:
-		hotspotOutcome = c.joinHotspot(ctx, before)
+		hotspotOutcome = c.joinHotspot(ctx, before).outcome
 	default:
 		hotspotOutcome = c.leaveHotspot(ctx, before)
 	}

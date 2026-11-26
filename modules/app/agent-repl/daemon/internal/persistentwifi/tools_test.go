@@ -167,16 +167,6 @@ func TestSameNetworkFoldsTheApostropheSpellings(t *testing.T) {
 	}
 }
 
-func TestPreferredNetworksParsesTheIndentedSSIDs(t *testing.T) {
-	// Act.
-	got := preferredNetworks("Preferred networks on en0:\n\tHome\n\tSomeone’s iPhone\n")
-
-	// Assert.
-	if len(got) != 2 || got[0] != "Home" || got[1] != "Someone’s iPhone" {
-		t.Fatalf("preferredNetworks = %q, want the two saved SSIDs", got)
-	}
-}
-
 // homeTools is the production layout for HOME /home/owner.
 func homeTools() Tools {
 	t := DefaultTools()

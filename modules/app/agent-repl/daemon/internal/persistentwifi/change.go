@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"agentrepl/logging/hostpower"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -44,11 +45,31 @@ func (c *Controller) noHotspotConfigured(on bool) *agentreplv1.UpdatePersistentW
 	return &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed("", err.Error())}
 }
 
-// joinHotspot is the ON half of the hotspot step. A failure to join is an
-// outcome, never an error: staying awake on whatever network is present is
-// still what was asked for.
-func (c *Controller) joinHotspot(ctx context.Context, before reading) *agentreplv1.UpdatePersistentWifiModeHotspot {
+// hotspotJoinBound bounds one hotspot join (Host.JoinHotspot). Measured
+// 2026-11-26 13:07:49-13:08:03 on this host, lid closed: the helper's ask of
+// the phone, its scan for the hotspot and its join took 14s together; the
+// bound is three times that. The helper bounds each of its steps inside it
+// (wifi-helper/hotspot.swift's HotspotBounds).
+const hotspotJoinBound = 42 * time.Second
+
+// hotspotJoinMeasured is the join's measured healthy time hotspotJoinBound is
+// sized from.
+const hotspotJoinMeasured = "14s"
+
+// hotspotStep is the ON half of the hotspot step's say: its outcome, what the
+// host's join steps took, and whether hotspotJoinBound cut the join.
+type hotspotStep struct {
+	outcome *agentreplv1.UpdatePersistentWifiModeHotspot
+	steps   dlog.Context
+	cut     bool
+}
+
+// joinHotspot is the ON half of the hotspot step, bounded by
+// hotspotJoinBound. A failure to join is an outcome, never an error: staying
+// awake on whatever network is present is still what was asked for.
+func (c *Controller) joinHotspot(ctx context.Context, before reading) hotspotStep {
 	h := &agentreplv1.UpdatePersistentWifiModeHotspot{}
+	step := hotspotStep{outcome: h}
 	switch {
 	case before.wifiErr != nil:
 		h.Outcome = hotspotFailed(c.cfg.Hotspot, "the Wi-Fi interface could not be read: "+before.wifiErr.Error())
@@ -61,51 +82,23 @@ func (c *Controller) joinHotspot(ctx context.Context, before reading) *agentrepl
 			AlreadyJoined: &agentreplv1.UpdatePersistentWifiModeHotspotAlreadyJoined{NetworkName: before.link.name},
 		}
 	default:
-		// THE JOIN NAMES THE SAVED SSID EXACTLY. `-setairportnetwork` matches
-		// byte for byte, and an iPhone names its hotspot with a curly
-		// apostrophe the configured name may spell straight.
-		ssid, note := c.savedHotspot(ctx, before.device)
-		if err := c.host.JoinNetwork(ctx, before.device, ssid); err != nil {
-			h.Outcome = hotspotFailed(ssid, withNote(err.Error(), note))
-		} else {
+		bounded, cancel := context.WithTimeout(ctx, c.hotspotJoinBound)
+		defer cancel()
+		join, err := c.host.JoinHotspot(bounded, before.device, c.cfg.Hotspot)
+		step.steps, step.cut = join.steps, bounded.Err() != nil && ctx.Err() == nil
+		switch {
+		case step.cut:
+			h.Outcome = hotspotFailed(join.network, fmt.Sprintf("the hotspot join did not answer within %s (measured %s): %v",
+				c.hotspotJoinBound, hotspotJoinMeasured, err))
+		case err != nil:
+			h.Outcome = hotspotFailed(join.network, err.Error())
+		default:
 			h.Outcome = &agentreplv1.UpdatePersistentWifiModeHotspot_Joined{
-				Joined: &agentreplv1.UpdatePersistentWifiModeHotspotJoined{NetworkName: ssid},
+				Joined: &agentreplv1.UpdatePersistentWifiModeHotspotJoined{NetworkName: join.network},
 			}
 		}
 	}
-	return h
-}
-
-// savedHotspot resolves the configured hotspot against the interface's saved
-// (preferred) networks and answers the EXACT saved SSID to join. When the list
-// cannot be read or names no match, the configured name is tried as given, and
-// the note says why, for the failed outcome's detail.
-func (c *Controller) savedHotspot(ctx context.Context, device string) (ssid, note string) {
-	networks, err := c.host.PreferredNetworks(ctx, device)
-	if err != nil {
-		return c.cfg.Hotspot, "the saved networks could not be read (" + err.Error() + "), so the configured name was tried as given"
-	}
-	for _, saved := range networks {
-		if sameNetwork(saved, c.cfg.Hotspot) {
-			return saved, ""
-		}
-	}
-	return c.cfg.Hotspot, "no saved network matches " + c.cfg.Hotspot + ", so the configured name was tried as given"
-}
-
-// preferredNetworks parses `networksetup -listpreferredwirelessnetworks`: a
-// header line ("Preferred networks on en0:") and one indented SSID per line.
-func preferredNetworks(out string) []string {
-	var names []string
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, " ") {
-			continue
-		}
-		if name := strings.TrimSpace(line); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
+	return step
 }
 
 // apostrophes folds the apostrophe spellings a network name takes -- the ASCII

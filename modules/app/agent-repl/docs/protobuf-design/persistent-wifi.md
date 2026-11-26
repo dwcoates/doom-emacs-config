@@ -368,3 +368,34 @@ quiet state, not the switch.
     whose survey began while the link was down joined the hotspot six
     seconds after the Mac was back on a network, and the join dropped it.
 
+### 14. The hotspot is joined through Instant Hotspot (2026-11-26, no wire change)
+
+- WHAT: every hotspot join, the mode turning on and the failover alike, is
+  the Wi-Fi helper's `hotspot` verb (`Host.JoinHotspot`;
+  `wifi-helper/hotspot.swift`, `wifi-helper/sharing.swift`): sharingd's
+  Instant Hotspot (`SFRemoteHotspotSession`, a private API) asks the phone
+  over Bluetooth to start its hotspot and answers its network name and
+  current password, and CoreWLAN joins that network with that password. The
+  password never leaves the helper. Linux keeps `nmcli` against its saved
+  connections.
+- WHY (2026-11-26 diagnosis): in 14 days, 198 of 199 lid-closed failover
+  surveys found the hotspot `not_visible`, and every one of 198 joins by name
+  failed. An idle iPhone stops broadcasting its hotspot; macOS's own
+  auto-hotspot was refused with the lid closed (`Hotspot is not allowed ...
+  error=(45 'Screen is locked or Device sleeping')`); and the one join that
+  saw the hotspot failed `-3900 tmpErr`, the saved password dating from
+  2023. A probe drove sharingd with the lid closed and the screen off: five
+  asks succeeded in 1.1-1.6s with no user activity declared, and a join with
+  the password sharingd gave took the hotspot and was online.
+- Consequences:
+  - THE PRIVATE API IS CHECKED, NEVER WORKED AROUND (owner ruling,
+    2026-11-26): every class and selector is checked before use, and a
+    missing one is a join stopped at `browse_failed`, recorded with the
+    failover's join record and its de-duplicated cause.
+  - Each join's record names the stage it stopped at (`browse_failed`,
+    `no_phone`, `enable_failed`, `not_visible`, `join_failed`, `joined`)
+    and each step's milliseconds (`browse_ms`, `enable_ms`, `scan_ms`,
+    `join_ms`).
+  - A join is bounded at 42s, three times the 14s measured end to end; the
+    helper bounds each step inside it (browse 6s, ask 4s, scan 9s, join 20s).
+

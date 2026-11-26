@@ -32,11 +32,10 @@ type Host interface {
 	// BluetoothPower reads whether Bluetooth is powered: "on" or "off";
 	// errNoBluetoothReader when the host has no way to read it.
 	BluetoothPower(ctx context.Context) (string, error)
-	// PreferredNetworks lists the networks the machine has saved for device,
-	// in the order it joins them.
-	PreferredNetworks(ctx context.Context, device string) ([]string, error)
-	// JoinNetwork joins device to the saved network named ssid.
-	JoinNetwork(ctx context.Context, device, ssid string) error
+	// JoinHotspot joins device to the phone hotspot named hotspot (either
+	// apostrophe spelling), answering the network it joined or tried and
+	// each step's record; an error is why it did not join.
+	JoinHotspot(ctx context.Context, device, hotspot string) (hotspotJoin, error)
 	// Disconnect leaves device's network with the radio left on;
 	// errNoDisconnect when the host has no way to (CanDisconnect).
 	Disconnect(ctx context.Context, device string) error
@@ -102,4 +101,11 @@ func NewHost(cfg Config, runner Runner, exists func(string) bool, scanDir string
 	default:
 		return nil, fmt.Errorf("persistentwifi: no host drives persistent wifi on %q (darwin and linux do)", cfg.Platform)
 	}
+}
+
+// hotspotJoin is a host's hotspot join: the network it joined or tried, and
+// what each of its steps took, for the join's record (hotspotJoinRecord).
+type hotspotJoin struct {
+	network string
+	steps   dlog.Context
 }
