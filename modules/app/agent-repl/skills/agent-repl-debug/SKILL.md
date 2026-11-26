@@ -90,6 +90,7 @@ For runtime investigations:
    running processes.
 3. Resolve the identity spine from workspace through session and process.
 4. Read canonical logs through the resolver rather than guessing paths.
+   - Records themselves are read with `bin/logs.sh`, by the rules of `modules/app/agent-repl/AGENTS.md` "Logs", "EVERY READ IS A WINDOW, NARROWED BEFORE IT IS DECODED".
    - Which log sites fired across a window, and what is new since a deploy, is read with `agent-repld logs sites -since WHEN [-until WHEN] [-level warn]`.
      - It answers from the daemon's per-deploy tally of every runtime's log sites (`logging-contract.md` "Log sites"), whether or not the log files still exist.
      - Each site carries its template, its count, its first and last sighting, and its latest record.

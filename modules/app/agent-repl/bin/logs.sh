@@ -9,9 +9,10 @@ HELPER_SOURCE="$THIS_DIR/logs-reader.go"
 usage() {
     cat <<'EOF'
 Usage:
-  bin/logs.sh --workspace <id|dir|name> [filters]
-  bin/logs.sh --central [filters]
-  bin/logs.sh --all [filters]
+  bin/logs.sh --workspace <id|dir|name> --since VALUE [filters]
+  bin/logs.sh --central --since VALUE [filters]
+  bin/logs.sh --all --since VALUE [filters]
+  bin/logs.sh --messages FILE [filters]
   bin/logs.sh --harvest <from> <to>
 
 Selectors:
@@ -19,11 +20,17 @@ Selectors:
   --central          read genuinely workspace-free Emacs, daemon, store, sidecar, zettel, and test service logs
   --all              read every daemon-known workspace plus the central logs
 
+Every read of --workspace, --central, or --all names its window with --since:
+a read with no window reads every record ever kept (gigabytes for --all).
+
 Filters:
-  --since VALUE      inclusive RFC3339 instant or lookback duration such as 15m
+  --since VALUE      inclusive RFC3339 instant or lookback duration such as 15m; required with a selector
   --until RFC3339    inclusive RFC3339 instant
   --level LEVEL      minimum debug, info, warn, or error level
   --runtime A,B      comma-separated runtimes
+  --match REGEX      keep only lines this Go regular expression matches as written (raw JSONL, so a
+                     quote inside a value is \"), tested before a line is decoded; use it, never a pipe
+                     to grep, which runs only after every record was read
   --follow           keep reading current generations after the merged history (not with --tally/--sample)
   --json             emit the original JSONL instead of the compact human format; the escape hatch, not the default
   --messages FILE    include a captured Emacs *Messages* text snapshot, scraped for warn/error-shaped lines
@@ -33,6 +40,8 @@ Compact query modes (--sample composes with --tally; the rest are exclusive of e
   --sample N         print up to N representative records per group, one per line; with --tally, follows the table
   --fields a,b,c     project only the named top-level or context fields, one line per record, nothing else
   --timeline         print one compact time/level/operation/message line per record, in time order
+                     (--json, the human format, --fields, and --timeline fail past a million records:
+                     narrow the read, or count it with --tally)
   --width N          truncate the message shown by --sample/--timeline (default 120)
 
 Harvest:
@@ -86,6 +95,7 @@ timeline=0
 width=120
 width_set=0
 messages_path=""
+match=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -129,6 +139,13 @@ while [ "$#" -gt 0 ]; do
             require_values 1 "$1" "$@"
             [ -z "$runtimes" ] || fail '--runtime may be specified once'
             runtimes="$2"
+            shift 2
+            ;;
+        --match)
+            require_values 1 "$1" "$@"
+            [ -z "$match" ] || fail '--match may be specified once'
+            [ -n "$2" ] || fail '--match requires a regular expression'
+            match="$2"
             shift 2
             ;;
         --follow)
@@ -223,10 +240,15 @@ if [ "$harvest" -eq 1 ]; then
     [ -z "$fields" ] || fail '--harvest cannot be combined with --fields'
     [ "$timeline" -eq 0 ] || fail '--harvest cannot be combined with --timeline'
     [ -z "$messages_path" ] || fail '--harvest cannot be combined with --messages'
+    [ -z "$match" ] || fail '--harvest cannot be combined with --match'
     scope=all
     format=harvest
 else
     [ -n "$scope" ] || [ -n "$messages_path" ] || fail 'choose --workspace, --central, --all, or --harvest'
+    # EVERY SELECTOR READS A WINDOW: a windowless --all read decoded every
+    # record of 6.2 GB of logs and grew its reader to 22 GB (2026-11-24).
+    [ -z "$scope" ] || [ -n "$since" ] ||
+        fail "--$scope reads only a window: add --since (a lookback such as 15m, or an RFC3339 instant)"
 fi
 
 if [ "$format" = human ]; then
@@ -434,6 +456,7 @@ helper_args+=(--workspace-logs-dir "$state_root/logs")
 [ -z "$since" ] || helper_args+=(--since "$since")
 [ -z "$until" ] || helper_args+=(--until "$until")
 [ -z "$runtimes" ] || helper_args+=(--runtime "$runtimes")
+[ -z "$match" ] || helper_args+=(--match "$match")
 [ "$follow" -eq 0 ] || helper_args+=(--follow)
 [ -z "$fields" ] || helper_args+=(--fields "$fields")
 if [ "$harvest" -eq 1 ]; then

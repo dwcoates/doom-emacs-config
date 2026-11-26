@@ -129,18 +129,46 @@ just an ordinary echo line nobody cares about
 Wrong type argument: stringp, nil
 EOF
 
+# EVERY SELECTOR NEEDS A WINDOW (--since), and every fixture record is
+# stamped after 2000, so a case that is not about the window reads all of
+# them through this one. A case about the window passes its own --since, and
+# run_logs_unwindowed reads with none.
+fixture_since=2000-01-01T00:00:00Z
+
 run_logs() {
-    PATH="$bin:$PATH" \
-        HOME="$home" \
-        TMPDIR="$runtime_tmp" \
-        GOCACHE="$TMP/go-cache" \
-        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
-        AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}" \
-        AGENT_REPL_STATE_DIR="$state" \
-        XDG_CACHE_HOME="${XDG_CACHE_HOME_OVERRIDE:-$cache}" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
-        TZ=UTC \
-        "$LOGS" "$@"
+    local arg selector=0 windowed=0
+    for arg in "$@"; do
+        case "$arg" in
+            --workspace|--central|--all) selector=1 ;;
+            --since) windowed=1 ;;
+        esac
+    done
+    if [ "$selector" -eq 1 ] && [ "$windowed" -eq 0 ]; then
+        set -- "$@" --since "$fixture_since"
+    fi
+    run_logs_unwindowed "$@"
+}
+
+# logs_env sets LOGS_ENV to the environment every logs.sh run of the
+# harness gets, read at the call so a case's overrides apply.
+logs_env() {
+    LOGS_ENV=(
+        PATH="$bin:$PATH"
+        HOME="$home"
+        TMPDIR="$runtime_tmp"
+        GOCACHE="$TMP/go-cache"
+        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build"
+        AGENT_REPL_LOGS_TEST_ROWS="${AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE:-$rows}"
+        AGENT_REPL_STATE_DIR="$state"
+        XDG_CACHE_HOME="${XDG_CACHE_HOME_OVERRIDE:-$cache}"
+        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}"
+        TZ=UTC
+    )
+}
+
+run_logs_unwindowed() {
+    logs_env
+    env "${LOGS_ENV[@]}" "$LOGS" "$@"
 }
 
 test_workspace_directory_and_default_format() {
@@ -1115,17 +1143,8 @@ EOF
     # Opening both ends here lets startup itself remain under read's deadline;
     # a read-only open would block before the follower opened its writer.
     exec {follow_fd}<>"$pipe"
-    PATH="$bin:$PATH" \
-        HOME="$home" \
-        TMPDIR="$runtime_tmp" \
-        GOCACHE="$TMP/go-cache" \
-        AGENT_REPL_LOGS_BUILD_DIR="$TMP/build" \
-        AGENT_REPL_LOGS_TEST_ROWS="$rows" \
-        AGENT_REPL_STATE_DIR="$state" \
-        XDG_CACHE_HOME="$cache" \
-        AGENT_REPL_EMACS_GLOBAL_LOG="${AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE-$emacs_global}" \
-        TZ=UTC \
-        "$LOGS" --workspace "$workspace" --runtime daemon --follow --json \
+    logs_env
+    env "${LOGS_ENV[@]}" "$LOGS" --workspace "$workspace" --runtime daemon --since "$fixture_since" --follow --json \
         >"$pipe" 2>"$TMP/follow.err" &
     pid=$!
     if read_follow_pattern 'daemon.follow.initial' "$follow_fd" "$TMP/follow.out"; then
@@ -1361,6 +1380,199 @@ EOF
     fi
 }
 
+# A SELECTOR READS ONLY A WINDOW: a windowless --all read decoded 6.2 GB of
+# logs and grew its reader to 22 GB (2026-11-24).
+test_a_selector_without_a_window_is_refused() {
+    local selector rc err
+    for selector in "--workspace alpha" --central --all; do
+        rc=0
+        # shellcheck disable=SC2086 # the selector and its value are two words
+        err="$(run_logs_unwindowed $selector --json 2>&1 >/dev/null)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep_in "$err" -q -- "${selector%% *} reads only a window: add --since"; then
+            pass "${selector%% *} without --since is refused"
+        else
+            fail "${selector%% *} without --since is refused" "rc=$rc $err"
+        fi
+    done
+}
+
+test_a_messages_snapshot_alone_needs_no_window() {
+    local out rc=0
+    out="$(run_logs_unwindowed --messages "$messages_file" --fields operation,level 2>/dev/null)" || rc=$?
+    if [ "$rc" -eq 0 ] && grep_in "$out" -q 'operation=messages level=warn'; then
+        pass "a --messages snapshot alone reads with no window"
+    else
+        fail "a --messages snapshot alone reads with no window" "rc=$rc $out"
+    fi
+}
+
+test_match_keeps_only_matching_lines() {
+    local out
+    out="$(run_logs --workspace "$workspace_a" --runtime daemon --match '"order":[23]' --fields operation,order)"
+    if [ "$out" = $'operation=daemon.warning order=2\noperation=daemon.third order=3' ]; then
+        pass "--match keeps only the lines it matches, in time order"
+    else
+        fail "--match keeps only the lines it matches, in time order" "$out"
+    fi
+}
+
+test_match_passes_over_a_malformed_line_it_does_not_match() {
+    local workspace="$TMP/workspaces/match-malformed" target="$targets/match-malformed.log" out rc=0
+    mkdir -p "$workspace/.claude/emacs"
+    printf '%s\n' 'not-json' \
+        '{"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"daemon","pid":10,"level":"info","verbosity":"normal","operation":"daemon.wanted","message":"wanted","context":{}}' >"$target"
+    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    out="$(run_logs --workspace "$workspace" --runtime daemon --match 'daemon\.wanted' --fields operation 2>"$TMP/match-malformed.err")" || rc=$?
+    if [ "$rc" -eq 0 ] && [ "$out" = 'operation=daemon.wanted' ]; then
+        pass "a line --match does not match is passed over undecoded"
+    else
+        fail "a line --match does not match is passed over undecoded" "rc=$rc $out $(cat "$TMP/match-malformed.err")"
+    fi
+}
+
+test_match_applies_to_text_sinks() {
+    local out
+    out="$(run_logs --central --runtime store --match heartbeat --fields operation,message)"
+    if [ "$out" = 'operation=stderr message=heartbeat skipped this cycle' ]; then
+        pass "--match filters a stderr sink's lines"
+    else
+        fail "--match filters a stderr sink's lines" "$out"
+    fi
+}
+
+test_an_invalid_match_is_refused() {
+    local rc=0 err
+    err="$(run_logs --central --match '(' --json 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -ne 0 ] && grep_in "$err" -q 'invalid --match'; then
+        pass "an invalid --match expression is refused"
+    else
+        fail "an invalid --match expression is refused" "rc=$rc $err"
+    fi
+}
+
+test_harvest_refuses_match() {
+    local rc=0 err
+    err="$(run_logs --harvest 2026-09-10T10:00:00Z 2026-09-10T10:10:00Z --match x 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -eq 2 ] && grep_in "$err" -q -- '--harvest cannot be combined with --match'; then
+        pass "--harvest refuses --match"
+    else
+        fail "--harvest refuses --match" "rc=$rc $err"
+    fi
+}
+
+# The reader run directly on one central file, so a case can set its
+# ordered limit and its TMPDIR.
+run_reader_on() {
+    local file="$1" reader
+    shift
+    reader="$(ls "$TMP"/build/logs-reader-* | sed -n 1p)"
+    TZ=UTC "$reader" --since "$fixture_since" "$@" --base "$file" --base-runtime daemon \
+        --base-workspace-id '' --base-workspace-dir '' --base-kind file --base-format jsonl
+}
+
+ordered_limit_fixture() {
+    local file="$TMP/ordered-limit.log"
+    printf '%s\n' \
+        '{"timestamp":"2026-09-10T10:02:00.000000Z","runtime":"daemon","pid":1,"level":"info","verbosity":"normal","operation":"daemon.second","message":"second","context":{}}' \
+        '{"timestamp":"2026-09-10T10:01:00.000000Z","runtime":"daemon","pid":1,"level":"info","verbosity":"normal","operation":"daemon.first","message":"first","context":{}}' \
+        '{"timestamp":"2026-09-10T10:03:00.000000Z","runtime":"daemon","pid":1,"level":"info","verbosity":"normal","operation":"daemon.first","message":"third","context":{}}' >"$file"
+    printf '%s\n' "$file"
+}
+
+test_an_ordered_read_past_its_limit_fails_before_printing() {
+    local out rc=0 err="$TMP/ordered-limit.err"
+    out="$(run_reader_on "$(ordered_limit_fixture)" --mode json --ordered-limit 2 2>"$err")" || rc=$?
+    if [ "$rc" -eq 2 ] && [ -z "$out" ] &&
+        grep -q 'matched more than 2 records, the most an ordered read holds' "$err"; then
+        pass "an ordered read matching more than its limit fails before it prints"
+    else
+        fail "an ordered read matching more than its limit fails before it prints" "rc=$rc $out $(cat "$err")"
+    fi
+}
+
+test_an_ordered_read_within_its_limit_prints_in_time_order() {
+    local out
+    out="$(run_reader_on "$(ordered_limit_fixture)" --mode fields --fields message --ordered-limit 3 2>/dev/null)"
+    if [ "$out" = $'message=first\nmessage=second\nmessage=third' ]; then
+        pass "an ordered read within its limit prints every record in time order"
+    else
+        fail "an ordered read within its limit prints every record in time order" "$out"
+    fi
+}
+
+test_a_tally_is_not_bound_by_the_ordered_limit() {
+    local out
+    out="$(run_reader_on "$(ordered_limit_fixture)" --mode tally --ordered-limit 1 2>/dev/null)"
+    if grep_in "$out" -q '^2  *info  *daemon  *daemon.first$' && grep_in "$out" -q '^1  *info  *daemon  *daemon.second$'; then
+        pass "a tally counts past the ordered limit, holding only its groups"
+    else
+        fail "a tally counts past the ordered limit, holding only its groups" "$out"
+    fi
+}
+
+test_a_sample_keeps_each_groups_earliest_records() {
+    local out
+    out="$(run_reader_on "$(ordered_limit_fixture)" --mode sample --sample-n 1 --ordered-limit 1 2>/dev/null)"
+    if [ "$out" = $'10:01:00.000000 INFO  daemon  daemon.first first\n10:02:00.000000 INFO  daemon  daemon.second second' ]; then
+        pass "a sample keeps each group's earliest records, whatever order they were read in"
+    else
+        fail "a sample keeps each group's earliest records, whatever order they were read in" "$out"
+    fi
+}
+
+test_the_reader_refuses_a_non_positive_ordered_limit() {
+    local rc=0 err
+    err="$(run_reader_on "$(ordered_limit_fixture)" --mode json --ordered-limit 0 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -eq 2 ] && grep_in "$err" -q 'ordered-limit must be positive'; then
+        pass "the reader refuses an ordered limit below one"
+    else
+        fail "the reader refuses an ordered limit below one" "rc=$rc $err"
+    fi
+}
+
+test_an_ordered_read_leaves_no_spill_file() {
+    local spill_tmp="$TMP/spill-tmp" left
+    mkdir -p "$spill_tmp"
+    TMPDIR="$spill_tmp" run_reader_on "$(ordered_limit_fixture)" --mode json >/dev/null 2>&1
+    left="$(ls -A "$spill_tmp")"
+    if [ -z "$left" ]; then
+        pass "an ordered read leaves no spill file behind"
+    else
+        fail "an ordered read leaves no spill file behind" "$left"
+    fi
+}
+
+test_the_readers_go_unit_tests_pass() {
+    local out
+    if out="$(cd "$THIS_DIR" && GOCACHE="$TMP/go-cache" TMPDIR="$runtime_tmp" go test logs-reader.go logs-reader_test.go 2>&1)"; then
+        pass "the reader's Go unit tests pass"
+    else
+        fail "the reader's Go unit tests pass" "$out"
+    fi
+}
+
+# logs_env is the one environment every logs.sh run gets: a case running
+# logs.sh with an environment of its own would drift from it unseen.
+test_every_logs_run_takes_the_harness_environment() {
+    local hand_rolled
+    hand_rolled="$(grep -n '"\$LOGS"' "${BASH_SOURCE[0]}" | grep -v 'env "\${LOGS_ENV\[@\]}" "\$LOGS"' | grep -v '^[0-9]*:LOGS=' || true)"
+    if [ -z "$hand_rolled" ]; then
+        pass "every logs.sh run takes the harness's one environment"
+    else
+        fail "every logs.sh run takes the harness's one environment" "$hand_rolled"
+    fi
+}
+
+test_an_ordered_read_fails_when_it_cannot_make_its_spill_file() {
+    local rc=0 err
+    err="$(TMPDIR="$TMP/no-such-tmp" run_reader_on "$(ordered_limit_fixture)" --mode json 2>&1 >/dev/null)" || rc=$?
+    if [ "$rc" -eq 2 ] && grep_in "$err" -q 'create the ordering spill file'; then
+        pass "an ordered read fails loudly when it cannot make its spill file"
+    else
+        fail "an ordered read fails loudly when it cannot make its spill file" "rc=$rc $err"
+    fi
+}
+
 test_workspace_directory_and_default_format
 test_workspace_id
 test_workspace_name
@@ -1429,5 +1641,21 @@ test_a_read_merges_a_log_and_its_warnings_file_in_time_order
 test_a_runtime_that_never_warned_reads_as_an_empty_sink
 test_an_absent_central_warnings_file_is_no_finding
 test_a_gone_workspaces_warnings_targets_are_read_by_its_id
+test_a_selector_without_a_window_is_refused
+test_a_messages_snapshot_alone_needs_no_window
+test_match_keeps_only_matching_lines
+test_match_passes_over_a_malformed_line_it_does_not_match
+test_match_applies_to_text_sinks
+test_an_invalid_match_is_refused
+test_harvest_refuses_match
+test_an_ordered_read_past_its_limit_fails_before_printing
+test_an_ordered_read_within_its_limit_prints_in_time_order
+test_a_tally_is_not_bound_by_the_ordered_limit
+test_a_sample_keeps_each_groups_earliest_records
+test_the_reader_refuses_a_non_positive_ordered_limit
+test_an_ordered_read_leaves_no_spill_file
+test_an_ordered_read_fails_when_it_cannot_make_its_spill_file
+test_the_readers_go_unit_tests_pass
+test_every_logs_run_takes_the_harness_environment
 
 harness_finish
