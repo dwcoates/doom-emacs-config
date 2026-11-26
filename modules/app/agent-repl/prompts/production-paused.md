@@ -1,0 +1,4 @@
+<!-- used by: daemon/internal/prompthandler (handler.openWithProductionPause: opens every prompt a repository's production mediator receives while that repository's production checks are paused); placeholders: {{since}} -->
+Production mediation is paused for this repository, since {{since}}. While it is paused the daemon tells you no span, and refuses `agent-repld production-mediation decide`, `dispatch` and `fold`. Dispatch nothing, and do not work around the pause: create no child or workspace yourself, fix nothing yourself, and read no span to act on later. The owner resumes the checks with the topbar's production-checks chip or `agent-repld production-mediation resume`, and the first span you are told after that starts at the first landing after the resume.
+
+The message this note opens follows. Answer it as it asks, within the pause.

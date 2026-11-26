@@ -33,6 +33,10 @@ const BriefContextSummary = "queue-bypass-context-summary"
 // final responses now say is composed from.
 const BriefRevisionsTold = "response-revision-told"
 
+// BriefProductionPaused is the brief the note telling a production mediator
+// its repository's production checks are paused is composed from.
+const BriefProductionPaused = "production-paused"
+
 // BriefRenameTold is the brief the note telling the agent the workspace's new
 // name is composed from.
 const BriefRenameTold = "workspace-renamed"
@@ -52,6 +56,9 @@ const (
 	// opRenameTold files the new name a workspace's next prompt tells its
 	// agent.
 	opRenameTold = "daemon.prompthandler.rename_told"
+	// opProductionPaused files the note a paused repository's production
+	// mediator's every prompt opens with.
+	opProductionPaused = "daemon.prompthandler.production_paused"
 	// opPlacementTold files the subsection placement note a prompt-less
 	// root's next prompt carries.
 	opPlacementTold = "daemon.prompthandler.placement_told"
@@ -222,7 +229,7 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		}
 	}
 	for _, open := range []func(context.Context, ids.WorkspaceID, *conversationv1.UserSaid, bool, dlog.Logger) (*conversationv1.UserSaid, func(), error){
-		h.closeWithOwedPlacement, h.openWithContextSummary, h.openWithOwedRevisions, h.openWithOwedRename,
+		h.closeWithOwedPlacement, h.openWithContextSummary, h.openWithOwedRevisions, h.openWithOwedRename, h.openWithProductionPause,
 	} {
 		opened, restore, err := open(ctx, ws, said, carries, log)
 		if err != nil {
@@ -506,6 +513,55 @@ func contextSummaryNote(promptsDir, summary string) (string, error) {
 	note, err := brief.Splice(map[string]string{"summary": summary})
 	if err != nil {
 		return "", fmt.Errorf("splice the %s brief: %w", BriefContextSummary, err)
+	}
+	return prompts.Wrap(note + "\n\n"), nil
+}
+
+// openWithProductionPause opens SAID with the note telling a production
+// mediator its repository's production checks are paused, on every prompt
+// that carries a workspace note while the pause stands
+// (agentrepl.v1.UpdateProductionPause): the note is read from the standing
+// pause, never owed, so it can never outlive the pause or miss a prompt.
+func (h *handler) openWithProductionPause(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, log dlog.Logger) (*conversationv1.UserSaid, func(), error) {
+	none := func() {}
+	if !carries {
+		return said, none, nil
+	}
+	repo, isMediator, err := h.deps.DB.StandingMediatorRepoOf(ctx, wsm.MediatorProduction, ws)
+	if err != nil {
+		log.Error(opProductionPaused, "could not read whether the workspace is a production mediator; the prompt was not forwarded", dlog.Context{"cause": err.Error()})
+		return nil, none, fmt.Errorf("read whether %q is a production mediator: %w", ws, err)
+	}
+	if !isMediator {
+		return said, none, nil
+	}
+	pause, err := h.deps.DB.ProductionPauseOf(ctx, repo)
+	if err != nil {
+		log.Error(opProductionPaused, "could not read whether the production mediator's checks are paused; the prompt was not forwarded", dlog.Context{"cause": err.Error(), "repo": string(repo)})
+		return nil, none, fmt.Errorf("read whether %q's production checks are paused: %w", repo, err)
+	}
+	if !pause.Paused {
+		return said, none, nil
+	}
+	note, err := productionPausedNote(h.deps.PromptsDir, pause.Since)
+	if err != nil {
+		log.Error(opProductionPaused, "could not compose the note saying production mediation is paused; the prompt was not forwarded", dlog.Context{"cause": err.Error(), "repo": string(repo)})
+		return nil, none, err
+	}
+	log.Info(opProductionPaused, "the production mediator's prompt opens with the note that its checks are paused", dlog.Context{"repo": string(repo), "brief": BriefProductionPaused})
+	return withNote(said, note, noteOpens), none, nil
+}
+
+// productionPausedNote composes the meta-wrapped note saying production
+// mediation is paused, since SINCE.
+func productionPausedNote(promptsDir string, since time.Time) (string, error) {
+	brief, err := prompts.Load(promptsDir, BriefProductionPaused)
+	if err != nil {
+		return "", fmt.Errorf("read the %s brief: %w", BriefProductionPaused, err)
+	}
+	note, err := brief.Splice(map[string]string{"since": since.UTC().Format(time.RFC3339)})
+	if err != nil {
+		return "", fmt.Errorf("splice the %s brief: %w", BriefProductionPaused, err)
 	}
 	return prompts.Wrap(note + "\n\n"), nil
 }
