@@ -467,9 +467,7 @@ func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, 
 		return
 	}
 	state := q.state(sub.WS)
-	state.verdicts.Lock()
-	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
-		state.verdicts.Unlock()
+	if !state.lockFreshVerdict(sub.Turn, epoch, c, log) {
 		return
 	}
 	q.record(ctx, sub, c, log)
@@ -498,9 +496,7 @@ func (q *queue) settleInterject(ctx context.Context, sub Submission, running ids
 	d := q.lockDelivery(sub.WS)
 	defer d.unlock()
 	state := d.state
-	state.verdicts.Lock()
-	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
-		state.verdicts.Unlock()
+	if !state.lockFreshVerdict(sub.Turn, epoch, c, log) {
 		return
 	}
 	if !q.isRunning(sub.WS, running) {
@@ -797,6 +793,20 @@ func routeArm(route classifier.Route) wsm.ClassificationArm {
 	default:
 		panic(fmt.Sprintf("promptqueue: classifier route %d has no verdict arm", int(route)))
 	}
+}
+
+// lockFreshVerdict takes the verdict lock and keeps it while a verdict judged
+// at EPOCH is about the content that still stands, reporting true. A stale
+// verdict is discarded (verdictStaleLocked records it) with the lock released
+// again, reporting false. THE ONE way a verdict is settled under the lock
+// (TestEveryVerdictSettlesThroughLockFreshVerdict).
+func (state *wsState) lockFreshVerdict(turn ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) bool {
+	state.verdicts.Lock()
+	if state.verdictStaleLocked(turn, epoch, c, log) {
+		state.verdicts.Unlock()
+		return false
+	}
+	return true
 }
 
 // verdictStaleLocked reports whether a verdict judged at EPOCH is about

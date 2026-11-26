@@ -140,9 +140,7 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 	d := q.lockDelivery(sub.WS)
 	defer d.unlock()
 	state := d.state
-	state.verdicts.Lock()
-	if state.verdictStaleLocked(sub.Turn, epoch, c, log) {
-		state.verdicts.Unlock()
+	if !state.lockFreshVerdict(sub.Turn, epoch, c, log) {
 		return false
 	}
 	if route == classifier.RouteQueue {

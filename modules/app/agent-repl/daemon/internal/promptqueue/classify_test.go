@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1964,5 +1967,61 @@ func TestAnInterruptVerdictForAPromptRetiredWhileItWasReachedSendsNoKill(t *test
 		if r.Operation == opInterject {
 			t.Fatalf("an interject record was written for a prompt no longer held: %s: %s", r.Level, r.Message)
 		}
+	}
+}
+
+func TestLockFreshVerdictHoldsTheVerdictLockOnlyForAFreshVerdict(t *testing.T) {
+	tests := []struct {
+		name      string
+		judged    uint64
+		wantFresh bool
+	}{
+		{name: "the content still stands, so the lock stays held", judged: 2, wantFresh: true},
+		{name: "an edit replaced the content, so the lock is released", judged: 1, wantFresh: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			state := &wsState{epochs: map[ids.TurnID]uint64{"t1": 2}}
+			log := dlog.NewTestSurfaces()
+
+			// Act
+			fresh := state.lockFreshVerdict("t1", tt.judged, wsm.Classification{Arm: wsm.ArmInterject}, log.Global())
+
+			// Assert
+			released := state.verdicts.TryLock()
+			state.verdicts.Unlock()
+			if fresh != tt.wantFresh || released == tt.wantFresh {
+				t.Fatalf("fresh = %v, lock released = %v; want fresh %v with the lock held exactly when fresh", fresh, released, tt.wantFresh)
+			}
+		})
+	}
+}
+
+func TestEveryVerdictSettlesThroughLockFreshVerdict(t *testing.T) {
+	// Arrange
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	var callers []string
+	// Act
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", path, err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, ".verdictStaleLocked(") {
+				callers = append(callers, fmt.Sprintf("%s:%d", path, i+1))
+			}
+		}
+	}
+	// Assert
+	if len(callers) != 1 || !strings.HasPrefix(callers[0], "classify.go:") {
+		t.Fatalf("verdictStaleLocked callers = %v, want only lockFreshVerdict's in classify.go", callers)
 	}
 }
