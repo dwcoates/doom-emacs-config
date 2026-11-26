@@ -223,27 +223,17 @@ type shimclientEffort interface {
 // applyEffort sends one SetSessionEffort and answers the level now in effect,
 // or the shim's typed refusal.
 //
-// A REFUSAL FROM A SHIM THIS DAEMON IS STANDING DOWN IS THE SHIM GOING, not
-// the vendor's verdict on the level: ending the session closes the vendor's
-// query, and a switch in flight is answered vendor_refused "Query closed
-// before response received". It is answered as ErrStandDownOrdered, the same
-// answer as a call the stand-down cut (switchFoundNoShim), the refusal kept
-// in the chain; the pick, recorded first, stands for the replacement
-// (reapplyEffort). 2026-11-25 18:02:50, prod-mediator: a deploy check's
-// switch met the shim a skills_changed bounce was standing down, and was
-// recorded at ERROR while the replacement came up at the pick.
+// A refusal from a shim this daemon is standing down is the stand-down
+// (shimRefused); the pick, recorded first, stands for the replacement
+// (reapplyEffort).
 func applyEffort(ctx context.Context, client shimclientEffort, level conversationv1.AgentEffortLevel) (conversationv1.AgentEffortLevel, error) {
 	response, err := client.SetSessionEffort(ctx, &shimv1.SetSessionEffortRequest{Effort: level})
 	if err != nil {
 		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED, err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		refusal := &ShimRefusal{Verb: "SetSessionEffort", Arm: setEffortArm(failure), Detail: failure.GetDetail()}
-		if client.StandingDown() {
-			return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED,
-				fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, refusal)
-		}
-		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED, refusal
+		return conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED,
+			shimRefused(client, "SetSessionEffort", setEffortArm(failure), failure.GetDetail())
 	}
 	effective := response.GetSuccess().GetEffortChanged().GetEffectiveEffort()
 	if effective == conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {

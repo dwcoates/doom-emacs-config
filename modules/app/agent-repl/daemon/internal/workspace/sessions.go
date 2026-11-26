@@ -4152,7 +4152,7 @@ func (a *shimAdapter) updateAgent(ctx context.Context, agent *conversationv1.Age
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "UpdateAgent", Arm: updateAgentArm(failure), Detail: failure.GetDetail()}
+		return shimRefused(a.client, "UpdateAgent", updateAgentArm(failure), failure.GetDetail())
 	}
 	return nil
 }
@@ -4163,7 +4163,7 @@ func (a *shimAdapter) StopBash(ctx context.Context, work *conversationv1.Detache
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "StopBash", Arm: stopBashArm(failure), Detail: failure.GetDetail()}
+		return shimRefused(a.client, "StopBash", stopBashArm(failure), failure.GetDetail())
 	}
 	return nil
 }

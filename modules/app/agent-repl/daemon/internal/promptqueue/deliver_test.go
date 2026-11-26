@@ -1343,3 +1343,27 @@ func TestCloseRecordedClosesTheTurnAsWithdrawnAndRecordsTheLostDeliveryAtError(t
 		t.Fatalf("close = (%v, %v), record = (%+v, %v); want withdrawn and the lost delivery at ERROR", how, closed, record, logged)
 	}
 }
+
+func TestDeliverRecordsAnAgentPromptTheShimsStandDownCutAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sender.promptErr = fmt.Errorf("%w: shim UpdateAgent refused: unspecified", ErrShimStoodDown)
+	sub := submission("t1", "keep going")
+	sub.Target = &feedid.Ref{WS: theWorkspace, Feed: feedid.Feed{Agent: &conversationv1.AgentId{Value: "sub-agent"}}}
+
+	// Act.
+	_, err := h.q.Submit(context.Background(), sub)
+
+	// Assert.
+	if !errors.Is(err, ErrShimStoodDown) {
+		t.Fatalf("err = %v, want the stand-down surfaced", err)
+	}
+	if !logged(h.log.Records(), "info", opDeliver, "this daemon stood the shim down under the agent-addressed prompt; it was not delivered") {
+		t.Fatalf("records = %+v, want the stand-down at info", h.log.Records())
+	}
+	for _, r := range h.log.Records() {
+		if r.Operation == opDeliver && r.Level == "error" {
+			t.Fatalf("error record %+v, want none for the stand-down", r)
+		}
+	}
+}

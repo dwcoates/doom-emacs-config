@@ -19,6 +19,7 @@ import (
 // vendorTaskResolver is the one shim call ResolveVendorTask needs.
 type vendorTaskResolver interface {
 	ResolveVendorTask(ctx context.Context, req *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error)
+	standingDowner
 }
 
 // ResolveVendorTask asks WS's shim which agent of SESSION's lineage VENDORTASKID
@@ -42,7 +43,7 @@ func resolveVendorTask(ctx context.Context, client vendorTaskResolver, session, 
 		return feed.VendorTaskAgent{}, err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return feed.VendorTaskAgent{}, &ShimRefusal{Verb: "ResolveVendorTask", Arm: resolveVendorTaskArm(failure), Detail: failure.GetDetail()}
+		return feed.VendorTaskAgent{}, shimRefused(client, "ResolveVendorTask", resolveVendorTaskArm(failure), failure.GetDetail())
 	}
 	success := response.GetSuccess()
 	switch answer := success.GetAgent().(type) {

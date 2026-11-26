@@ -260,3 +260,29 @@ func TestHeldAgainDropsTheOldEntrysRetirementAndSchedule(t *testing.T) {
 		t.Fatalf("held again = %+v, want no schedule, retirement, verdict or hold carried over", again)
 	}
 }
+
+func TestACutTheShimsStandDownCutLeavesTheTriedTurnAndIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newVendorBlockHarness(t)
+	triedUnderBlock(t, h)
+	h.footer.standVendorBlock("usage_limit")
+	h.sender.rollBackErr = fmt.Errorf("%w: shim RollBackSession refused: unspecified", ErrShimStoodDown)
+
+	// Act.
+	endTried(h, wsm.CloseFailed)
+
+	// Assert.
+	for _, held := range standingInOrder(t, h) {
+		if saidText(held.Said) == "prompt t1" {
+			t.Fatalf("t1's prompt was re-held as %+v, want it left as the turn it was", held)
+		}
+	}
+	if !logged(h.log.Records(), "info", opTurnEnded, "the vendor blocked the tried prompt and this daemon stood its shim down under the cut; it stays the failed turn it was, so it is never said twice") {
+		t.Fatalf("records = %+v, want the stand-down at info", h.log.Records())
+	}
+	for _, r := range h.log.Records() {
+		if r.Operation == opTurnEnded && (r.Level == "warn" || r.Level == "error") {
+			t.Fatalf("record %+v, want no warn or error for the stand-down", r)
+		}
+	}
+}

@@ -1,14 +1,21 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/shimclient"
 )
 
 func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {
@@ -469,5 +476,214 @@ func TestRefusedNoSession(t *testing.T) {
 				t.Fatalf("refusedNoSession(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestShimRefusedAnswersARefusalFromAShimStandingDownAsTheStandDown(t *testing.T) {
+	tests := []struct {
+		name          string
+		standingDown  bool
+		wantStoodDown bool
+	}{
+		{name: "a shim this daemon is standing down", standingDown: true, wantStoodDown: true},
+		{name: "a shim left serving", standingDown: false, wantStoodDown: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			client := &fakeSenderClient{standingDown: tt.standingDown}
+
+			// Act.
+			err := shimRefused(client, "SetSessionModel", "vendor_refused", "Query closed before response received")
+
+			// Assert.
+			refusal, ok := AsShimRefusal(err)
+			if !ok || refusal.Verb != "SetSessionModel" || refusal.Arm != "vendor_refused" || refusal.Detail != "Query closed before response received" {
+				t.Fatalf("err = %v, want the refusal kept whole in the chain", err)
+			}
+			if got := errors.Is(err, shimclient.ErrStandDownOrdered); got != tt.wantStoodDown {
+				t.Fatalf("errors.Is(err, ErrStandDownOrdered) = %v, want %v", got, tt.wantStoodDown)
+			}
+		})
+	}
+}
+
+// stoodDownFailureDetail is the shim's words for a call its session's end cut.
+const stoodDownFailureDetail = "Query closed before response received"
+
+// fakeStopBashTransport answers StopBash with a scripted response.
+type fakeStopBashTransport struct {
+	shimclient.Client
+	resp *shimv1.StopBashResponse
+}
+
+func (c *fakeStopBashTransport) StopBash(context.Context, *shimv1.StopBashRequest) (*shimv1.StopBashResponse, error) {
+	return c.resp, nil
+}
+
+// StandingDown answers that this daemon is standing the fake down.
+func (c *fakeStopBashTransport) StandingDown() bool { return true }
+
+// TestEveryShimVerbAnswersARefusalFromAShimStandingDownAsTheStandDown holds
+// every verb that reads a typed refusal to the one reading (shimRefused): a
+// shim this daemon is standing down refuses a call because it is going, and
+// each verb answers that as the stand-down, its refusal kept. The queue's
+// verbs answer it as promptqueue.ErrShimStoodDown too (forQueue).
+func TestEveryShimVerbAnswersARefusalFromAShimStandingDownAsTheStandDown(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		verb     string
+		call     func(t *testing.T) error
+		forQueue bool
+	}{
+		{name: "SetSessionEffort", verb: "SetSessionEffort", call: func(*testing.T) error {
+			_, err := applyEffort(ctx, &fakeClient{stoodDown: true, effortResponse: effortFailure(&shimv1.SetSessionEffortFailure{Detail: stoodDownFailureDetail})}, effortLow)
+			return err
+		}},
+		{name: "ResolvePeerDelivery", verb: "ResolvePeerDelivery", call: func(*testing.T) error {
+			_, err := resolvePeerDelivery(ctx, &fakePeerDeliveryResolver{standingDown: true, resp: &shimv1.ResolvePeerDeliveryResponse{
+				Result: &shimv1.ResolvePeerDeliveryResponse_Failure{Failure: &shimv1.ResolvePeerDeliveryFailure{Detail: stoodDownFailureDetail}},
+			}}, "delivery-1")
+			return err
+		}},
+		{name: "ResolveVendorTask", verb: "ResolveVendorTask", call: func(*testing.T) error {
+			_, err := resolveVendorTask(ctx, &fakeVendorTaskResolver{standingDown: true, resp: &shimv1.ResolveVendorTaskResponse{
+				Result: &shimv1.ResolveVendorTaskResponse_Failure{Failure: &shimv1.ResolveVendorTaskFailure{Detail: stoodDownFailureDetail}},
+			}}, "main", "task-1")
+			return err
+		}},
+		{name: "SetSessionRemoteControl", verb: "SetSessionRemoteControl", call: func(t *testing.T) error {
+			f, ws := startedFleet(t)
+			f.client.stoodDown = true
+			f.client.remoteControlResponse = &shimv1.SetSessionRemoteControlResponse{Result: &shimv1.SetSessionRemoteControlResponse_Failure{
+				Failure: &shimv1.SetSessionRemoteControlFailure{Detail: stoodDownFailureDetail},
+			}}
+			return f.fleet.applyRemoteControl(ctx, f.log.logger, ws.ID, f.client, true)
+		}},
+		{name: "RollBackSession", verb: "RollBackSession", call: func(*testing.T) error {
+			_, err := rollBackSession(ctx, &fakeRollBackTransport{standingDown: true, resp: &shimv1.RollBackSessionResponse{
+				Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{Detail: stoodDownFailureDetail}},
+			}}, []ids.TurnID{"turn-1"}, false)
+			return err
+		}},
+		{name: "KillTurn", verb: "KillTurn", call: func(*testing.T) error {
+			return killTurn(ctx, &fakeSenderClient{standingDown: true, killTurn: &shimv1.KillTurnResponse{
+				Result: &shimv1.KillTurnResponse_Failure{Failure: &shimv1.KillTurnFailure{Detail: stoodDownFailureDetail}},
+			}}, "turn-1", false, nil)
+		}},
+		{name: "UpdateAgent through the verbs' adapter", verb: "UpdateAgent", call: func(*testing.T) error {
+			adapter := &shimAdapter{client: &fakeUpdateAgentTransport{standingDown: true, resp: &shimv1.UpdateAgentResponse{
+				Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{Detail: stoodDownFailureDetail}},
+			}}}
+			return adapter.Answer(ctx, &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentAnswer{})
+		}},
+		{name: "StopBash", verb: "StopBash", call: func(*testing.T) error {
+			adapter := &shimAdapter{client: &fakeStopBashTransport{resp: &shimv1.StopBashResponse{
+				Result: &shimv1.StopBashResponse_Failure{Failure: &shimv1.StopBashFailure{Detail: stoodDownFailureDetail}},
+			}}}
+			return adapter.StopBash(ctx, &conversationv1.DetachedWorkId{Value: "shell-1"})
+		}},
+		{name: "StartTurn", verb: "StartTurn", forQueue: true, call: func(*testing.T) error {
+			_, err := newTestSender(&fakeSenderClient{standingDown: true, startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
+					Detail: stoodDownFailureDetail, Kind: &shimv1.StartTurnFailure_QueryDead{QueryDead: &shimv1.StartTurnQueryDead{}},
+				}},
+			}}).StartTurn(ctx, "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+			return err
+		}},
+		{name: "UpdateAgent through the queue's sender", verb: "UpdateAgent", forQueue: true, call: func(*testing.T) error {
+			return newTestSender(&fakeSenderClient{standingDown: true, updateAgent: &shimv1.UpdateAgentResponse{
+				Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{Detail: stoodDownFailureDetail}},
+			}}).PromptAgent(ctx, &conversationv1.AgentId{Value: "sub-1"}, nil)
+		}},
+		{name: "KillTurn through the queue's sender", verb: "KillTurn", forQueue: true, call: func(*testing.T) error {
+			return newTestSender(&fakeSenderClient{standingDown: true, killTurn: &shimv1.KillTurnResponse{
+				Result: &shimv1.KillTurnResponse_Failure{Failure: &shimv1.KillTurnFailure{Detail: stoodDownFailureDetail}},
+			}}).KillTurn(ctx, "turn-1", false, nil)
+		}},
+		{name: "SetSessionModel", verb: "SetSessionModel", forQueue: true, call: func(*testing.T) error {
+			return newTestSender(&fakeSenderClient{standingDown: true, setModel: &shimv1.SetSessionModelResponse{
+				Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{Detail: stoodDownFailureDetail}},
+			}}).SetModel(ctx, "claude-opus-5-5")
+		}},
+		{name: "SetSessionPermissionMode", verb: "SetSessionPermissionMode", forQueue: true, call: func(*testing.T) error {
+			return newTestSender(&fakeSenderClient{standingDown: true, setMode: &shimv1.SetSessionPermissionModeResponse{
+				Result: &shimv1.SetSessionPermissionModeResponse_Failure{Failure: &shimv1.SetSessionPermissionModeFailure{Detail: stoodDownFailureDetail}},
+			}}).SetPermissionMode(ctx, "default")
+		}},
+		{name: "RollBackSession through the queue's sender", verb: "RollBackSession", forQueue: true, call: func(*testing.T) error {
+			return newTestSender(&fakeSenderClient{standingDown: true, rollBack: &shimv1.RollBackSessionResponse{
+				Result: &shimv1.RollBackSessionResponse_Failure{Failure: &shimv1.RollBackSessionFailure{Detail: stoodDownFailureDetail}},
+			}}).RollBackTurn(ctx, "turn-1")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: each row's shim is being stood down and refuses. Act.
+			err := tt.call(t)
+
+			// Assert.
+			refusal, ok := AsShimRefusal(err)
+			if !ok || refusal.Verb != tt.verb || refusal.Detail != stoodDownFailureDetail {
+				t.Fatalf("err = %v, want %s's refusal kept in the chain", err, tt.verb)
+			}
+			if !errors.Is(err, shimclient.ErrStandDownOrdered) {
+				t.Fatalf("err = %v, want the stand-down", err)
+			}
+			if got := errors.Is(err, promptqueue.ErrShimStoodDown); got != tt.forQueue {
+				t.Fatalf("errors.Is(err, promptqueue.ErrShimStoodDown) = %v, want %v", got, tt.forQueue)
+			}
+		})
+	}
+}
+
+// TestEveryTypedShimRefusalIsReadThroughShimRefused pins the extraction: a
+// ShimRefusal is built by hand only where no shim answered (the daemon's own
+// no-session answers) or where the stand-down cannot apply, so a verb that
+// reads a shim's refusal without shimRefused fails here.
+func TestEveryTypedShimRefusalIsReadThroughShimRefused(t *testing.T) {
+	// Arrange: every literal a non-test source may hold, by its text.
+	allowed := []string{
+		// shimRefused itself.
+		`&ShimRefusal{Verb: verb, Arm: arm, Detail: detail}`,
+		// The daemon's own answers for a workspace with no session or shim.
+		`Arm: ArmShimNoSession, Detail: "the workspace has no live session"}`,
+		`Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}`,
+		`Arm: ArmShimNoSession, Detail: err.Error()}`,
+		`Arm: ArmShimNoSession, Detail: "the workspace has no running session"}`,
+		// KillSession raises the latch itself (shimRefused's comment).
+		`&ShimRefusal{Verb: "KillSession", Arm: killSessionArm(failure), Detail: failure.GetDetail()}`,
+		// An arm the daemon does not name is a contract fault, never the stand-down.
+		`&ShimRefusal{Verb: "SendKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}`,
+	}
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act.
+	var strays []string
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		text, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatalf("read %s: %v", source, err)
+		}
+		for i, line := range strings.Split(string(text), "\n") {
+			if !strings.Contains(line, "&ShimRefusal{") {
+				continue
+			}
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.Contains(line, a) }) {
+				strays = append(strays, fmt.Sprintf("%s:%d: %s", source, i+1, strings.TrimSpace(line)))
+			}
+		}
+	}
+
+	// Assert.
+	if len(strays) != 0 {
+		t.Fatalf("typed refusals built without shimRefused:\n%s", strings.Join(strays, "\n"))
 	}
 }

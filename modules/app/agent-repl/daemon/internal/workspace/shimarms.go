@@ -7,6 +7,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/shimclient"
 )
 
 // The shim's own refusal arm names, spelled exactly as the shim.v1 failure
@@ -95,6 +96,35 @@ type ShimRefusal struct {
 	Arm string
 	// Detail is the shim's own sentence, kept as evidence.
 	Detail string
+}
+
+// standingDowner is the slice of a shim client that says whether this daemon
+// is standing it down (shimclient.Client.StandingDown).
+type standingDowner interface {
+	StandingDown() bool
+}
+
+// shimRefused is THE ONE READING of a shim verb's typed refusal: VERB refused
+// with ARM and the shim's DETAIL, answered by CLIENT.
+//
+// A REFUSAL FROM A SHIM THIS DAEMON IS STANDING DOWN IS THE SHIM GOING, not
+// the vendor's verdict: ending the session closes the vendor's query, and a
+// call in flight is refused for it (2026-11-25 18:02:50, prod-mediator: a
+// SetSessionEffort was answered vendor_refused "Query closed before response
+// received" by the shim a skills_changed bounce was standing down). It is
+// answered as shimclient.ErrStandDownOrdered, the same answer as a call the
+// stand-down cut at the transport, with the refusal kept in the chain, so
+// every caller that reads the arm (AsShimRefusal, ShimRefusal.Is) still
+// reads it and every caller that reads the stand-down records it at INFO.
+//
+// KillSession's refusal never goes through here: the kill itself raises the
+// latch, so its every refusal would read as the stand-down it is refusing.
+func shimRefused(client standingDowner, verb, arm, detail string) error {
+	refusal := &ShimRefusal{Verb: verb, Arm: arm, Detail: detail}
+	if client.StandingDown() {
+		return fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, refusal)
+	}
+	return refusal
 }
 
 // refusedNoSession reports whether ERR is a shim's refusal because it holds

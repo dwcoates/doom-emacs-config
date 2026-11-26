@@ -143,6 +143,7 @@ type shimclientSender interface {
 	SetSessionModel(ctx context.Context, req *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error)
 	SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error)
 	RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error)
+	standingDowner
 }
 
 // StartTurn opens the turn and hands back the shim's success WHOLE: the queue
@@ -207,24 +208,35 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		if errors.Is(err, shimclient.ErrShimDied) {
 			return nil, fmt.Errorf("%w: %w", promptqueue.ErrShimDied, err)
 		}
-		// NOR IS ONE THIS DAEMON STOOD DOWN UNDER THE CALL
-		// (promptqueue.ErrShimStoodDown): a kill or a close whose teardown
-		// reached the shim while the turn was being sent (seen in the merge
-		// gate 2026-11-25: "the shim refused the turn ... the shim was stood
-		// down by this daemon", a KillWorkspace racing a revival's delivery).
-		if errors.Is(err, shimclient.ErrStandDownOrdered) {
-			return nil, fmt.Errorf("%w: %w", promptqueue.ErrShimStoodDown, err)
-		}
-		return nil, err
+		// NOR IS ONE THIS DAEMON STOOD DOWN UNDER THE CALL (forQueue): a kill
+		// or a close whose teardown reached the shim while the turn was being
+		// sent (seen in the merge gate 2026-11-25: "the shim refused the turn
+		// ... the shim was stood down by this daemon", a KillWorkspace racing
+		// a revival's delivery).
+		return nil, forQueue(err)
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return nil, &ShimRefusal{Verb: "StartTurn", Arm: startTurnArm(failure), Detail: failure.GetDetail()}
+		return nil, forQueue(shimRefused(s.client, "StartTurn", startTurnArm(failure), failure.GetDetail()))
 	}
 	success := response.GetSuccess()
 	if success == nil {
 		return nil, fmt.Errorf("shim StartTurn answered neither success nor failure for turn %q", turn)
 	}
 	return success, nil
+}
+
+// forQueue answers ERR, a shim call the queue made, as the queue reads it: a
+// call that ended in a stand-down this daemon ordered, cut at the transport or
+// refused by the shim going (shimRefused), is promptqueue.ErrShimStoodDown,
+// the cause kept. A refusal whose prompt the vendor already recorded stays
+// that answer alone: the stand-down does not unsay it, and the queue retires
+// that prompt as delivered (promptqueue.ErrPromptRecorded) rather than holding
+// it to be said twice.
+func forQueue(err error) error {
+	if errors.Is(err, shimclient.ErrStandDownOrdered) && !errors.Is(err, promptqueue.ErrPromptRecorded) {
+		return fmt.Errorf("%w: %w", promptqueue.ErrShimStoodDown, err)
+	}
+	return err
 }
 
 // startTurnSentBy is the wire form of SENTBY, nil for a prompt no agent sent.
@@ -270,17 +282,17 @@ func (s *sender) PromptAgent(ctx context.Context, agent *conversationv1.AgentId,
 		},
 	})
 	if err != nil {
-		return err
+		return forQueue(err)
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "UpdateAgent", Arm: updateAgentArm(failure), Detail: failure.GetDetail()}
+		return forQueue(shimRefused(s.client, "UpdateAgent", updateAgentArm(failure), failure.GetDetail()))
 	}
 	return nil
 }
 
 // KillTurn interrupts the open turn for an interjection.
 func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
-	return killTurn(ctx, s.client, turn, force, commandedBy)
+	return forQueue(killTurn(ctx, s.client, turn, force, commandedBy))
 }
 
 // RollBackTurn cuts one failed turn's prompt out of the vendor conversation,
@@ -292,13 +304,14 @@ func (s *sender) RollBackTurn(ctx context.Context, turn ids.TurnID) error {
 	if refusal, ok := AsShimRefusal(err); ok && refusal.Arm == ArmShimPromptNotRecorded {
 		return fmt.Errorf("%w: %w", promptqueue.ErrPromptNotRecorded, err)
 	}
-	return err
+	return forQueue(err)
 }
 
 // turnKiller is the one shim call killTurn needs, satisfied by both the queue's
 // narrowed client and the verbs' whole one.
 type turnKiller interface {
 	KillTurn(ctx context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error)
+	standingDowner
 }
 
 // killTurn is THE ONE BUILDER of a KillTurn request and the one reading of its
@@ -318,7 +331,7 @@ func killTurn(ctx context.Context, client turnKiller, turn ids.TurnID, force boo
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "KillTurn", Arm: killTurnArm(failure), Detail: failure.GetDetail()}
+		return shimRefused(client, "KillTurn", killTurnArm(failure), failure.GetDetail())
 	}
 	return nil
 }
@@ -352,10 +365,10 @@ func (s *sender) SetModel(ctx context.Context, model string) error {
 		ColdThresholdTokens: coldThresholdPolicy,
 	})
 	if err != nil {
-		return err
+		return forQueue(err)
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "SetSessionModel", Arm: setModelArm(failure), Detail: failure.GetDetail()}
+		return forQueue(shimRefused(s.client, "SetSessionModel", setModelArm(failure), failure.GetDetail()))
 	}
 	// THE SWITCH IS RECORDED ONLY ONCE THE SHIM HAS MADE IT. Recorded at the
 	// verb instead, a restart while the act still waited in the queue would
@@ -375,10 +388,10 @@ func (s *sender) SetPermissionMode(ctx context.Context, mode string) error {
 		PermissionMode: permissionMode(mode),
 	})
 	if err != nil {
-		return err
+		return forQueue(err)
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return &ShimRefusal{Verb: "SetSessionPermissionMode", Arm: setPermissionModeArm(failure), Detail: failure.GetDetail()}
+		return forQueue(shimRefused(s.client, "SetSessionPermissionMode", setPermissionModeArm(failure), failure.GetDetail()))
 	}
 	return nil
 }

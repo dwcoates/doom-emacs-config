@@ -14,10 +14,15 @@ import (
 // fakeVendorTaskResolver answers one scripted ResolveVendorTask and records the
 // request.
 type fakeVendorTaskResolver struct {
-	req  *shimv1.ResolveVendorTaskRequest
-	resp *shimv1.ResolveVendorTaskResponse
-	err  error
+	// standingDown is what StandingDown answers: this daemon standing the fake down.
+	standingDown bool
+	req          *shimv1.ResolveVendorTaskRequest
+	resp         *shimv1.ResolveVendorTaskResponse
+	err          error
 }
+
+// StandingDown answers the fake's stand-down latch.
+func (c *fakeVendorTaskResolver) StandingDown() bool { return c.standingDown }
 
 func (f *fakeVendorTaskResolver) ResolveVendorTask(_ context.Context, req *shimv1.ResolveVendorTaskRequest) (*shimv1.ResolveVendorTaskResponse, error) {
 	f.req = req

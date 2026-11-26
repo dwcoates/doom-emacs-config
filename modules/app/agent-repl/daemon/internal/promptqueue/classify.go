@@ -773,6 +773,8 @@ func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnI
 	var replaced interface{ KillRefusedNotTheOpenTurn() bool }
 	notOpen := errors.As(cause, &replaced) && replaced.KillRefusedNotTheOpenTurn()
 	switch {
+	case errors.Is(cause, ErrShimStoodDown):
+		log.Info(opInterject, "this daemon stood the shim down under the interrupt; the jump is stripped and the prompt waits for the turn's end", fields)
 	case errors.As(cause, &ended) && ended.KillFoundNoTurnOpen():
 		log.Info(opInterject, "the running turn had already ended when the interrupt landed; the jump is stripped and the prompt waits for the turn's end", fields)
 	case notOpen && !q.isRunning(sub.WS, running):

@@ -117,6 +117,10 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 		log.Info(opTurnEnded, "the vendor blocked the tried prompt; it was cut out of the vendor conversation", fields)
 	case errors.Is(err, ErrPromptNotRecorded):
 		log.Info(opTurnEnded, "the vendor blocked the tried prompt before recording it; there is nothing to cut", fields)
+	case errors.Is(err, ErrShimStoodDown):
+		log.Info(opTurnEnded, "the vendor blocked the tried prompt and this daemon stood its shim down under the cut; it stays the failed turn it was, so it is never said twice",
+			dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		return
 	default:
 		log.Warn(opTurnEnded, "the vendor blocked the tried prompt and it could not be cut out of the vendor conversation; it stays the failed turn it was, so it is never said twice",
 			dlog.Merge(fields, dlog.Context{"cause": err.Error()}))

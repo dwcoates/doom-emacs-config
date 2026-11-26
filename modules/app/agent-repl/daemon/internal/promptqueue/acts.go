@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -269,6 +270,10 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
 			err = sender.SetModel(ctx, act.Value)
 		})
+		if errors.Is(err, ErrShimStoodDown) {
+			log.Info(opAct, "this daemon stood the shim down under the model change; the model was not changed", dlog.Context{"model": act.Value, "cause": err.Error()})
+			return fmt.Errorf("set model on %q: %w", ws, err)
+		}
 		if err != nil {
 			log.Error(opAct, "the model change failed", dlog.Context{"model": act.Value, "cause": err.Error()})
 			return fmt.Errorf("set model on %q: %w", ws, err)
@@ -279,6 +284,10 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 		d.outside(shimCall{what: "session_act", turn: act.Turn, holds: claims}, log, func() {
 			err = sender.SetPermissionMode(ctx, act.Value)
 		})
+		if errors.Is(err, ErrShimStoodDown) {
+			log.Info(opAct, "this daemon stood the shim down under the permission-mode change; the mode was not changed", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("set permission mode on %q: %w", ws, err)
+		}
 		if err != nil {
 			log.Error(opAct, "the shim refused the permission-mode change", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("set permission mode on %q: %w", ws, err)
