@@ -952,6 +952,17 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		log.Debug(opLapse, "the recorded lapse moved later; it is re-armed", lapseFields(*record.CacheLapse))
 		return false
 	}
+	// THE LAPSE NEVER STANDS A SESSION DOWN UNDER ITS OWN KEEP-ALIVE
+	// (answer.go): the stand-down waits for the answer it awaits, and the
+	// lapse is taken again once that wait is due to have settled. Taken at
+	// once, the lapse cut a keep-alive 1.1s after it was sent, and its wait
+	// ran out its bound as unanswered at WARN (2026-11-25 12:33:53).
+	if by, awaiting := k.answerBy[ws]; awaiting {
+		k.deadlines[ws] = by
+		log.Info(opLapse, "the workspace's cache lapsed while its keep-alive's answer is awaited; the stand-down waits for the answer",
+			dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"answer_by": by}))
+		return false
+	}
 	k.deps.Telemetry.CountLapse(ws, LapseStoodDown)
 	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"backlogged": record.InBacklog(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws, drain.WithheldCacheLapse)

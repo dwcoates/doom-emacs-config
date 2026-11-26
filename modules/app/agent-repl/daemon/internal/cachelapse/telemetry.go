@@ -66,7 +66,7 @@ const (
 
 const (
 	fiveMinuteTTL = 5 * time.Minute
-	oneHourTTL    = time.Hour
+	oneHourTTL    = CacheWindow
 )
 
 // coldGateOutcome names a cold gate's kind: a lapse by the cache lifetime the

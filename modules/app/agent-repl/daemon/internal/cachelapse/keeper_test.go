@@ -1663,3 +1663,53 @@ func TestEveryWithheldStandDownTheKeeperAsksNamesItsTrigger(t *testing.T) {
 		})
 	}
 }
+
+func TestALapseWaitsForAnAwaitedKeepalivesAnswer(t *testing.T) {
+	// Arrange: the cache lapsed while the keep-alive sent a second ago is
+	// awaited.
+	rec := backlogged()
+	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: now.Add(-time.Second)}
+	h := newHarness(t, rec)
+	sent := now.Add(-time.Second)
+	h.keeper.answering[theWorkspace] = sent
+	h.keeper.answerBy[theWorkspace] = sent.Add(AnswerBound)
+
+	// Act
+	took := h.keeper.lapse(context.Background(), theWorkspace, now)
+
+	// Assert
+	if stood := h.stoodDown(); took || stood {
+		t.Fatalf("lapse = %v, stood down = %v; want neither under an awaited keep-alive", took, stood)
+	}
+	if got := h.keeper.deadlines[theWorkspace]; !got.Equal(sent.Add(AnswerBound)) {
+		t.Fatalf("lapse re-armed at %v, want the answer's bound %v", got, sent.Add(AnswerBound))
+	}
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opLapse,
+		Message: "the workspace's cache lapsed while its keep-alive's answer is awaited; the stand-down waits for the answer"}) {
+		t.Fatalf("records = %v, want the deferred lapse at info", h.log.Records())
+	}
+}
+
+func TestALapseDeferredForAnAnswerStandsDownOnceTheWaitSettled(t *testing.T) {
+	// Arrange: the deferred lapse is taken again after the wait settled.
+	rec := backlogged()
+	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: now.Add(-time.Second)}
+	h := newHarness(t, rec)
+	sent := now.Add(-time.Second)
+	h.keeper.answering[theWorkspace] = sent
+	h.keeper.answerBy[theWorkspace] = sent.Add(AnswerBound)
+	h.keeper.lapse(context.Background(), theWorkspace, now)
+	delete(h.keeper.answering, theWorkspace)
+	delete(h.keeper.answerBy, theWorkspace)
+
+	// Act
+	took := h.keeper.lapse(context.Background(), theWorkspace, now.Add(AnswerBound))
+
+	// Assert
+	if !took {
+		t.Fatalf("lapse = false, want the lapse taken once no answer is awaited")
+	}
+	if got := <-h.standDowns.stood; got != theWorkspace {
+		t.Fatalf("stood down %q, want %q", got, theWorkspace)
+	}
+}

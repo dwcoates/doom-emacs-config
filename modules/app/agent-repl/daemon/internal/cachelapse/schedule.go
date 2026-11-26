@@ -38,6 +38,11 @@ const (
 	// window with an eight-minute margin against a slow turn. Deps.Interval
 	// carries it, or a test run's compressed cadence (IntervalFromEnv).
 	KeepaliveInterval = 52 * time.Minute
+	// CacheWindow is how long the vendor keeps a prompt cache bought at the
+	// subscription's hour tier after its last write. A conversation whose
+	// cache clock is this far behind is cold, and no keep-alive can warm it
+	// again (beatPlanFor).
+	CacheWindow = time.Hour
 	// RestoreLead is how long before its beat a parked session is restored.
 	// A shim that takes longer than this to start is a defect of its own
 	// (owner ruling, 2026-10-26).
@@ -213,6 +218,16 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			return false
 		}
 	}
+	// A CACHE PAST ITS WINDOW IS COLD, AND OWES NO BEAT: a keep-alive writes
+	// a cache only while the vendor still holds it, so a beat due after the
+	// window keeps nothing warm. Counted as owed, a backlogged workspace's
+	// one last beat, due 2026-10-14, restored its parked session 41 days
+	// later, at the 2026-11-25 12:33 handover, into a conversation whose
+	// transcript the vendor had long since deleted.
+	now := k.deps.Clock.Now()
+	owed := func(clock time.Time) bool {
+		return !spent(clock) && now.Before(clock.Add(CacheWindow))
+	}
 	plan := beatPlan{sessionParked: session.Parked()}
 	// THE BOUND CONVERSATION, timed from THE CACHE CLOCK, NOT THE TURNS': a
 	// keep-alive writes the cache as a turn does, and timed from the turns
@@ -226,11 +241,11 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if sent, ok := k.sent[ws]; ok && sent.After(at) {
 			at = sent
 		}
-		if !spent(at) {
+		if owed(at) {
 			plan.bound, plan.due = true, at.Add(k.deps.Interval)
 		}
 	}
-	if due, ok := k.parkedDue(ctx, log, ws, spent); ok {
+	if due, ok := k.parkedDue(ctx, log, ws, owed); ok {
 		plan.parked = true
 		if !plan.bound || due.Before(plan.due) {
 			plan.due = due
@@ -243,7 +258,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// A KEEP-LIVE RUN MAKES THE BEAT DUE NOW (keeplive.go): the same plan,
 	// asked for at once, so every reason it owes none still holds.
 	if k.forcing(ws) {
-		plan.due = k.deps.Clock.Now()
+		plan.due = now
 	}
 	plan.idleSince = record.IdleSince()
 	plan.bringUp = session.BringUpHold(record.LastTurnEndedAt, k.deps.Clock.Now())

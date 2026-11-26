@@ -1120,3 +1120,64 @@ func TestABackloggedWorkspaceOwesOneLastBeat(t *testing.T) {
 		})
 	}
 }
+
+func TestACachePastItsWindowOwesNoBeat(t *testing.T) {
+	backloggedLongAfter := func(turnAgo time.Duration) wsm.Workspace {
+		rec := beatable(backlogged(), turnAgo)
+		at := now.Add(-time.Hour)
+		rec.BackloggedAt = &at
+		return rec
+	}
+	tests := []struct {
+		name      string
+		rec       wsm.Workspace
+		parkedAgo time.Duration
+		wantArmed bool
+	}{
+		{name: "a clock inside the window owes its overdue beat", rec: beatable(visible(), CacheWindow-time.Minute), wantArmed: true},
+		{name: "a clock a whole window behind owes none", rec: beatable(visible(), CacheWindow)},
+		{name: "a backlogged workspace's one last beat lapsed weeks ago owes none", rec: backloggedLongAfter(41 * 24 * time.Hour)},
+		{name: "a parked conversation inside the window owes its beat", rec: visible(), parkedAgo: CacheWindow - time.Minute, wantArmed: true},
+		{name: "a parked conversation a whole window behind owes none", rec: visible(), parkedAgo: CacheWindow},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec)
+			if tt.parkedAgo != 0 {
+				withParked(h, tt.parkedAgo)
+			}
+
+			// Act
+			h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+			// Assert
+			if _, armed := h.keeper.beats[theWorkspace]; armed != tt.wantArmed {
+				t.Fatalf("beat armed = %v, want %v", armed, tt.wantArmed)
+			}
+			if _, restore := h.keeper.restores[theWorkspace]; restore && !tt.wantArmed {
+				t.Fatalf("a restore was armed for a cache past its window")
+			}
+		})
+	}
+}
+
+func TestACachePastItsWindowRecordsWhyItOwesNoBeat(t *testing.T) {
+	// Arrange: the 2026-11-25 handover's workspace, its cache last written
+	// 41 days before and backlogged since.
+	rec := beatable(backlogged(), 41*24*time.Hour)
+	at := now.Add(-time.Hour)
+	rec.BackloggedAt = &at
+	h := newHarness(t, rec)
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "the daemon started")
+
+	// Assert
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opDrive, Message: "the workspace owes no keep-alive",
+		Match: func(r dlog.Record) bool {
+			return r.Context["why"] == "neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent"
+		}}) {
+		t.Fatalf("records = %v, want the owes-none decision with its reason", h.log.Records())
+	}
+}
