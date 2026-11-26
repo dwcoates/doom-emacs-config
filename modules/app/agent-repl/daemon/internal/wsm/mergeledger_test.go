@@ -32,6 +32,31 @@ func TestOpenMergeLedgerRecordsTheLease(t *testing.T) {
 	}
 }
 
+// TestOpenMergeLedgerMarksTheLandingsStart pins that a lease's opening is a
+// log site mark: a production span ending at a landing's start is read from
+// the tally exactly.
+func TestOpenMergeLedgerMarksTheLandingsStart(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	lease := NewLeaseID()
+
+	// Act
+	if err := s.OpenMergeLedger(context.Background(), ws.ID, lease); err != nil {
+		t.Fatalf("OpenMergeLedger: %v", err)
+	}
+
+	// Assert
+	ledger, err := s.MergeLedger(context.Background(), ws.ID)
+	if err != nil || len(ledger) != 1 {
+		t.Fatalf("MergeLedger = (%+v, %v), want the one lease", ledger, err)
+	}
+	edge, err := s.LogSiteEdgeAt(context.Background(), ledger[0].OpenedAt)
+	if err != nil || edge != LogSiteEdgeMark {
+		t.Fatalf("LogSiteEdgeAt(opened) = (%v, %v), want a mark", edge, err)
+	}
+}
+
 func TestOpenMergeLedgerIsIdempotent(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

@@ -63,9 +63,10 @@ func (h *mediationHook) orchestrator() merge.Orchestrator {
 	return h.o
 }
 
-// began owes the mediations of the deploy that began now.
-func (h *mediationHook) began() {
-	at := h.now()
+// began owes the mediations of the deploy that began AT: the instant the
+// log site tally recorded it at (logsites.Tallier.DeployBegan), so a span
+// that ends at the deploy's start is read from the tally exactly.
+func (h *mediationHook) began(at time.Time) {
 	h.mu.Lock()
 	h.owed = at
 	h.mu.Unlock()
@@ -73,6 +74,17 @@ func (h *mediationHook) began() {
 		// A mediation that cannot be owed is recorded by the orchestrator.
 		_ = o.OweMediations(h.ctx, at)
 	}
+}
+
+// deployStartedAt is the instant a deploy's mediations are owed at: AT, its
+// tally start, when the tally RECORDED it; NOW otherwise, which the tally
+// failure already recorded at ERROR, so a span ending there is read widened
+// and says so.
+func deployStartedAt(at time.Time, recorded bool, now func() time.Time) time.Time {
+	if recorded {
+		return at
+	}
+	return now()
 }
 
 // crashed owes the check of the predecessor's disorderly death, as a deploy

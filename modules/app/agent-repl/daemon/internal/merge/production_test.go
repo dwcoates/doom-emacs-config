@@ -401,12 +401,51 @@ func TestRenderProductionSitesCountsWhatItLeftOut(t *testing.T) {
 	}
 }
 
+func TestSpanBeforeBaselineSaysHowTheSpanBeforeWasRead(t *testing.T) {
+	prev := wsm.ProductionCheck{Since: time.Date(2026, 11, 25, 19, 37, 44, 0, time.UTC), Until: time.Date(2026, 11, 25, 20, 13, 44, 0, time.UTC)}
+	tests := []struct {
+		name   string
+		answer logsites.Answer
+		want   string
+	}{
+		{name: "a span before read exactly names only its edges", answer: logsites.Answer{From: prev.Since, To: prev.Until},
+			want: "the span before, 2026-11-25T19:37:44Z to 2026-11-25T20:13:44Z"},
+		{name: "a span before read widened says what was read", answer: logsites.Answer{From: prev.Since.Truncate(time.Hour), To: prev.Until.Truncate(time.Hour).Add(time.Hour), Widened: true},
+			want: "the span before, 2026-11-25T19:37:44Z to 2026-11-25T20:13:44Z (read as 2026-11-25T19:00:00Z to 2026-11-25T21:00:00Z: an edge of it splits no tally row, so a site that fired in those hours only outside it counts as seen)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := spanBeforeBaseline(prev, tt.answer)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("spanBeforeBaseline = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiffProductionSitesCarriesWhetherTheSpanWasReadWidened(t *testing.T) {
+	// Arrange
+	span := logsites.Answer{From: deployStarted.Truncate(time.Hour), To: deployStarted, Widened: true}
+
+	// Act
+	got := DiffProductionSites(span, deployStarted, nil, nil, nil, nil)
+
+	// Assert
+	if !got.Widened {
+		t.Fatalf("DiffProductionSites = %+v, want the widening carried", got)
+	}
+}
+
 func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
 	from, to := time.Date(2026, 11, 25, 16, 0, 0, 0, time.UTC), time.Date(2026, 11, 25, 17, 0, 0, 0, time.UTC)
 	c := wsm.ProductionCheck{Since: time.Date(2026, 11, 25, 4, 58, 6, 0, time.UTC), Until: time.Date(2026, 11, 25, 16, 31, 21, 0, time.UTC)}
 	cases := []struct {
 		name       string
 		partial    bool
+		widened    bool
 		unrecorded bool
 		want       string
 		notWant    string
@@ -423,6 +462,12 @@ func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
 			notWant: "Read whole",
 		},
 		{
+			name:    "a span with an edge that splits no tally row says it was read widened",
+			widened: true,
+			want:    "WIDENED: an edge of the span splits no tally row, so it read 2026-11-25T16:00:00Z to 2026-11-25T17:00:00Z; a site listed may have fired in those hours only outside the span, and its counts may hold records from outside it.\n",
+			notWant: "Read whole",
+		},
+		{
 			name:       "a span wholly before the oldest kept row says none of it was read and how to read it",
 			unrecorded: true,
 			want:       "UNRECORDED: the tally keeps no row before 2026-11-25T16:00:00Z, so none of this span was read from it; read the span from the raw logs with `bin/logs.sh --all --level warn --since 2026-11-25T04:58:06Z --until 2026-11-25T16:31:21Z --tally --sample 1`.\n",
@@ -432,7 +477,7 @@ func TestRenderProductionSitesSaysHowMuchOfTheSpanTheTallyRead(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			sites := ProductionSites{Baseline: "no earlier span", From: from, To: to, Partial: tc.partial}
+			sites := ProductionSites{Baseline: "no earlier span", From: from, To: to, Partial: tc.partial, Widened: tc.widened}
 			if tc.unrecorded {
 				sites = ProductionSites{Baseline: "no earlier span", Unrecorded: true, OldestKept: from}
 			}

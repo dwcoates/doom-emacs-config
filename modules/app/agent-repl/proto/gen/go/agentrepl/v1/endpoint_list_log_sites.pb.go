@@ -371,8 +371,11 @@ type ListLogSitesSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Every site that fired in the window, one entry per site and level.
 	Sites []*LogSite `protobuf:"bytes,1,rep,name=sites,proto3" json:"sites,omitempty"`
-	// The hours the answer covers: the window widened outward to whole hours,
-	// and narrowed to the rows the store still keeps.
+	// The span the answer covers: the window, each edge widened outward to its
+	// whole hour unless the store splits its rows there (a whole hour, a mark,
+	// a deploy's start), and narrowed to the rows the store still keeps. A site
+	// whose every record lies outside the window is left out, even in a
+	// widened hour.
 	Covered       *ListLogSitesCovered `protobuf:"bytes,2,opt,name=covered,proto3" json:"covered,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

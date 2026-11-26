@@ -65,15 +65,26 @@ CREATE TABLE log_site_cursors (
 );
 `
 
+// logSiteMarksDDL is the layout-220 addition: the instants tally rows are
+// split at besides their deploy and hour. IT IS ADDITIVE: one new table the
+// previous build never names.
+const logSiteMarksDDL = `
+CREATE TABLE log_site_marks (
+  at INTEGER PRIMARY KEY CHECK (at > 0)
+);
+`
+
 // LogSiteLevels are the levels a tally row is kept at, lowest first.
 var LogSiteLevels = []string{"debug", "info", "warn", "error"}
 
 // LogSiteCount is what one chunk adds to one (deploy, site, level, hour) row.
 type LogSiteCount struct {
-	Deploy   time.Time
-	Site     string
-	Level    string
-	Hour     time.Time
+	Deploy time.Time
+	Site   string
+	Level  string
+	// Bucket is the start of the row's bucket: the later of its records'
+	// hour and the latest mark at or before them.
+	Bucket   time.Time
 	Runtime  string
 	Template string
 	// Operation and the Sample fields are the chunk's latest record's.
@@ -122,32 +133,51 @@ func (s *store) LogSiteDeploys(ctx context.Context) ([]time.Time, error) {
 	return out, err
 }
 
-// LogSiteSnapshot answers, in one write transaction, every kept deploy's
-// start and the instant the transaction read them at. A pass tallies only
-// records written before that instant: a deploy recorded after it is
-// recorded at a later instant (RecordLogSiteDeploy takes its instant inside
-// its own transaction, and the two serialize), so every record the pass
-// credits belongs to a deploy it knows.
-func (s *store) LogSiteSnapshot(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error) {
+// LogSiteBoundaries are the instants a pass splits its rows at besides
+// their hours: every kept deploy's start and every kept mark, each oldest
+// first.
+type LogSiteBoundaries struct {
+	Deploys []time.Time
+	Marks   []time.Time
+}
+
+// LogSiteSnapshot answers, in one write transaction, the boundaries and the
+// instant the transaction read them at. A pass tallies only records written
+// before that instant: a deploy or mark recorded after it is recorded at a
+// later instant (RecordLogSiteDeploy and RecordLogSiteMark take theirs inside
+// their own transactions, and the writes serialize), so every record the pass
+// credits belongs to a deploy it knows and is split at every mark before it.
+func (s *store) LogSiteSnapshot(ctx context.Context, now func() time.Time) (LogSiteBoundaries, time.Time, error) {
 	const op = "daemon.wsm.log_site_snapshot"
 	var (
-		deploys []time.Time
-		at      time.Time
+		out LogSiteBoundaries
+		at  time.Time
 	)
 	err := s.write(ctx, op, dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		deploys, err = logSiteDeploys(ctx, tx)
+		if out.Deploys, err = logSiteDeploys(ctx, tx); err != nil {
+			return err
+		}
+		if out.Marks, err = logSiteMarks(ctx, tx); err != nil {
+			return err
+		}
 		at = now()
-		return err
+		return nil
 	})
-	return deploys, at, err
+	return out, at, err
 }
 
-// logSiteDeploys reads every kept deploy's start, oldest first.
-func logSiteDeploys(ctx context.Context, q interface {
+// logSiteMarks reads every kept mark, oldest first.
+func logSiteMarks(ctx context.Context, tx *sql.Tx) ([]time.Time, error) {
+	return logSiteInstants(ctx, tx, `SELECT at FROM log_site_marks ORDER BY at`)
+}
+
+// logSiteInstants reads the one instant column QUERY selects, in its order:
+// the deploys' and the marks' one reading.
+func logSiteInstants(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}) ([]time.Time, error) {
-	rows, err := q.QueryContext(ctx, `SELECT started_at FROM log_site_deploys ORDER BY started_at`)
+}, query string) ([]time.Time, error) {
+	rows, err := q.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +190,78 @@ func logSiteDeploys(ctx context.Context, q interface {
 		}
 		out = append(out, fromNanos(at))
 	}
-	if err := rows.Err(); err != nil {
+	return out, rows.Err()
+}
+
+// RecordLogSiteMark records a mark at the instant NOW answers inside the
+// transaction, and answers that instant: a window read later from or to it
+// holds exactly the records on its side (LogSiteSnapshot).
+func (s *store) RecordLogSiteMark(ctx context.Context, now func() time.Time) (time.Time, error) {
+	const op = "daemon.wsm.record_log_site_mark"
+	var at time.Time
+	err := s.write(ctx, op, dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+		at = now()
+		return recordLogSiteMark(ctx, tx, at)
+	})
+	return at, err
+}
+
+// recordLogSiteMark records AT as a mark inside TX, which took AT itself.
+// Two marks at one instant are one.
+func recordLogSiteMark(ctx context.Context, tx *sql.Tx, at time.Time) error {
+	if at.IsZero() || nanos(at) <= 0 {
+		return fmt.Errorf("wsm: a log site mark at %v is not after the epoch", at)
+	}
+	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO log_site_marks (at) VALUES (?)`, nanos(at))
+	return err
+}
+
+// LogSiteEdge is what a window's edge is to the tally: what its rows are
+// split at there.
+type LogSiteEdge int
+
+const (
+	// LogSiteEdgeNone splits no row: a row's records may lie on both sides.
+	LogSiteEdgeNone LogSiteEdge = iota
+	// LogSiteEdgeMark splits every row at its bucket's start.
+	LogSiteEdgeMark
+	// LogSiteEdgeDeploy splits every row at its deploy.
+	LogSiteEdgeDeploy
+)
+
+// LogSiteEdgeAt answers what AT is to the tally: a kept deploy's start, a
+// kept mark, or neither. A deploy wins: rows are split at every deploy,
+// including those tallied before marks were.
+func (s *store) LogSiteEdgeAt(ctx context.Context, at time.Time) (LogSiteEdge, error) {
+	const op = "daemon.wsm.log_site_edge_at"
+	out := LogSiteEdgeNone
+	err := s.read(ctx, op, dlog.Context{"at": nanos(at)}, func(ctx context.Context) error {
+		out = LogSiteEdgeNone
+		var n int
+		if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM log_site_deploys WHERE started_at = ?`, nanos(at)).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			out = LogSiteEdgeDeploy
+			return nil
+		}
+		if err := s.q(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM log_site_marks WHERE at = ?`, nanos(at)).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			out = LogSiteEdgeMark
+		}
+		return nil
+	})
+	return out, err
+}
+
+// logSiteDeploys reads every kept deploy's start, oldest first.
+func logSiteDeploys(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) ([]time.Time, error) {
+	out, err := logSiteInstants(ctx, q, `SELECT started_at FROM log_site_deploys ORDER BY started_at`)
+	if err != nil {
 		return nil, err
 	}
 	if len(out) == 0 {
@@ -239,6 +340,9 @@ func (s *store) PruneLogSiteDeploys(ctx context.Context, keep int) (int64, error
 		if removed, err = res.RowsAffected(); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM log_site_marks WHERE at < ?`, cutoff.Int64); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM log_site_deploys WHERE started_at < ?`, cutoff.Int64)
 		return err
 	})
@@ -310,7 +414,7 @@ ON CONFLICT (deploy_at, site, level, hour) DO UPDATE SET
   sample_message   = CASE WHEN excluded.last_seen >= last_seen THEN excluded.sample_message ELSE sample_message END,
   sample_workspace = CASE WHEN excluded.last_seen >= last_seen THEN excluded.sample_workspace ELSE sample_workspace END,
   sample_context   = CASE WHEN excluded.last_seen >= last_seen THEN excluded.sample_context ELSE sample_context END`,
-				nanos(n.Deploy), n.Site, n.Level, nanos(n.Hour), n.Runtime, n.Template, n.Operation, n.Count,
+				nanos(n.Deploy), n.Site, n.Level, nanos(n.Bucket), n.Runtime, n.Template, n.Operation, n.Count,
 				nanos(n.FirstSeen), nanos(n.LastSeen), n.SampleMessage, n.SampleWorkspace, n.SampleContext); err != nil {
 				return err
 			}
@@ -353,8 +457,8 @@ func (s *store) ForgetLogSiteCursors(ctx context.Context, live []string) (int64,
 	return removed, err
 }
 
-// LogSiteRows answers every kept row whose hour lies in [FROM, TO) at a level
-// in LEVELS.
+// LogSiteRows answers every kept row whose bucket starts in [FROM, TO) at a
+// level in LEVELS.
 func (s *store) LogSiteRows(ctx context.Context, from, to time.Time, levels []string) ([]LogSiteRow, error) {
 	const op = "daemon.wsm.log_site_rows"
 	fields := dlog.Context{"from": from, "to": to, "levels": strings.Join(levels, ",")}
@@ -390,7 +494,7 @@ ORDER BY site, level, hour, deploy_at`, args...)
 				&firstSeen, &lastSeen, &r.SampleMessage, &r.SampleWorkspace, &r.SampleContext); err != nil {
 				return err
 			}
-			r.Deploy, r.Hour, r.FirstSeen, r.LastSeen = fromNanos(deploy), fromNanos(hour), fromNanos(firstSeen), fromNanos(lastSeen)
+			r.Deploy, r.Bucket, r.FirstSeen, r.LastSeen = fromNanos(deploy), fromNanos(hour), fromNanos(firstSeen), fromNanos(lastSeen)
 			out = append(out, r)
 		}
 		return rows.Err()
@@ -398,8 +502,8 @@ ORDER BY site, level, hour, deploy_at`, args...)
 	return out, err
 }
 
-// OldestLogSiteHour answers the hour of the oldest kept row, and whether any
-// row is kept.
+// OldestLogSiteHour answers the bucket start of the oldest kept row, and
+// whether any row is kept.
 func (s *store) OldestLogSiteHour(ctx context.Context) (time.Time, bool, error) {
 	const op = "daemon.wsm.oldest_log_site_hour"
 	var (

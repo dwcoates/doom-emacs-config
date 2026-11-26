@@ -877,9 +877,16 @@ type DB interface {
 	// LogSiteDeploys answers every kept deploy's start, oldest first
 	// (logsites.go).
 	LogSiteDeploys(ctx context.Context) ([]time.Time, error)
-	// LogSiteSnapshot answers every kept deploy's start and the instant read
-	// at, in one write transaction a deploy's recording serializes with.
-	LogSiteSnapshot(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error)
+	// LogSiteSnapshot answers every kept deploy's start and mark and the
+	// instant read at, in one write transaction a deploy's or mark's
+	// recording serializes with.
+	LogSiteSnapshot(ctx context.Context, now func() time.Time) (LogSiteBoundaries, time.Time, error)
+	// RecordLogSiteMark records a mark at the instant NOW answers inside its
+	// transaction, and answers it: tally rows are split there.
+	RecordLogSiteMark(ctx context.Context, now func() time.Time) (time.Time, error)
+	// LogSiteEdgeAt answers whether an instant is a kept deploy's start, a
+	// kept mark, or neither.
+	LogSiteEdgeAt(ctx context.Context, at time.Time) (LogSiteEdge, error)
 	// RecordLogSiteDeploy records a deploy beginning at the instant NOW
 	// answers inside its transaction, and answers it.
 	RecordLogSiteDeploy(ctx context.Context, now func() time.Time) (time.Time, error)
@@ -893,7 +900,8 @@ type DB interface {
 	TallyLogSites(ctx context.Context, c LogSiteChunk) (bool, error)
 	// ForgetLogSiteCursors drops the cursor of every file not live.
 	ForgetLogSiteCursors(ctx context.Context, live []string) (int64, error)
-	// LogSiteRows answers the kept rows of the hours [FROM, TO) at LEVELS.
+	// LogSiteRows answers the kept rows whose buckets start in [FROM, TO) at
+	// LEVELS.
 	LogSiteRows(ctx context.Context, from, to time.Time, levels []string) ([]LogSiteRow, error)
 	// OldestLogSiteHour answers the oldest kept row's hour.
 	OldestLogSiteHour(ctx context.Context) (time.Time, bool, error)

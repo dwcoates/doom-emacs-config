@@ -22,12 +22,12 @@ var t0 = time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
 // fakeStore is the real in-memory store with any method replaced.
 type fakeStore struct {
 	Store
-	snapshot func(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error)
+	snapshot func(ctx context.Context, now func() time.Time) (wsm.LogSiteBoundaries, time.Time, error)
 	record   func(ctx context.Context, now func() time.Time) (time.Time, error)
 	tally    func(ctx context.Context, c wsm.LogSiteChunk) (bool, error)
 }
 
-func (f *fakeStore) LogSiteSnapshot(ctx context.Context, now func() time.Time) ([]time.Time, time.Time, error) {
+func (f *fakeStore) LogSiteSnapshot(ctx context.Context, now func() time.Time) (wsm.LogSiteBoundaries, time.Time, error) {
 	if f.snapshot != nil {
 		return f.snapshot(ctx, now)
 	}
@@ -39,6 +39,12 @@ func (f *fakeStore) RecordLogSiteDeploy(ctx context.Context, now func() time.Tim
 		return f.record(ctx, now)
 	}
 	return f.Store.RecordLogSiteDeploy(ctx, now)
+}
+
+// RecordLogSiteMark records a mark in the real store, as the orchestrator
+// and the merge ledger do; the tally itself records none.
+func (f *fakeStore) RecordLogSiteMark(ctx context.Context, now func() time.Time) (time.Time, error) {
+	return f.Store.(wsm.DB).RecordLogSiteMark(ctx, now)
 }
 
 func (f *fakeStore) TallyLogSites(ctx context.Context, c wsm.LogSiteChunk) (bool, error) {

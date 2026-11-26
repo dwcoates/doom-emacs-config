@@ -77,6 +77,11 @@ AGENT API section, and two fields on an existing message), the conventions
   each deploy's start (a row is per deploy), so a per-deploy read is exact and
   a time window is exact to the hour. The answer says which hours it covered
   (`ListLogSitesCovered.whole`), so no reader mistakes the widening.
+  Since layout 220 a row's hour is also split at every mark (an instant the
+  daemon later reads a window from or to, such as a landing's start), so the
+  production checks read their spans exactly; a request's edges are
+  milliseconds and still widen to their hours, leaving out a row whose
+  records all lie outside the window.
 - WHY A COMPLETENESS ARM: the store keeps the rows of its most recent deploys
   (at least three), so a window older than that is read only from where the
   rows begin, and says so (`partial`); one wholly older is the

@@ -20,7 +20,7 @@ func fixedNow(at time.Time) func() time.Time { return func() time.Time { return 
 // at SEEN with MESSAGE as its sample.
 func logSiteCount(deploy time.Time, key, level string, seen time.Time, message string) LogSiteCount {
 	return LogSiteCount{
-		Deploy: deploy, Site: key, Level: level, Hour: seen.Truncate(time.Hour),
+		Deploy: deploy, Site: key, Level: level, Bucket: seen.Truncate(time.Hour),
 		Runtime: "daemon", Template: "said {what}", Operation: "daemon.test", Count: 1,
 		FirstSeen: seen, LastSeen: seen, SampleMessage: message, SampleContext: `{"what":"x"}`,
 	}
@@ -108,12 +108,125 @@ func TestLogSiteSnapshotAnswersTheDeploysAndItsInstant(t *testing.T) {
 	}
 	at := logSiteHour.Add(time.Minute)
 
+	mark := logSiteHour.Add(30 * time.Second)
+	if _, err := s.RecordLogSiteMark(context.Background(), fixedNow(mark)); err != nil {
+		t.Fatalf("RecordLogSiteMark: %v", err)
+	}
+
 	// Act
-	deploys, snapshot, err := s.LogSiteSnapshot(context.Background(), fixedNow(at))
+	bounds, snapshot, err := s.LogSiteSnapshot(context.Background(), fixedNow(at))
 
 	// Assert
-	if err != nil || !snapshot.Equal(at) || !reflect.DeepEqual(deploys, []time.Time{fromNanos(0), fromNanos(nanos(logSiteHour))}) {
-		t.Fatalf("LogSiteSnapshot = (%v, %v, %v), want both deploys at %v", deploys, snapshot, err, at)
+	want := LogSiteBoundaries{Deploys: []time.Time{fromNanos(0), fromNanos(nanos(logSiteHour))}, Marks: []time.Time{fromNanos(nanos(mark))}}
+	if err != nil || !snapshot.Equal(at) || !reflect.DeepEqual(bounds, want) {
+		t.Fatalf("LogSiteSnapshot = (%v, %v, %v), want %v at %v", bounds, snapshot, err, want, at)
+	}
+}
+
+func TestRecordLogSiteMarkRecordsTheInstantTakenInItsTransaction(t *testing.T) {
+	tests := []struct {
+		name  string
+		marks []time.Time
+	}{
+		{name: "one mark", marks: []time.Time{logSiteHour.Add(time.Minute)}},
+		{name: "two marks at one instant are one", marks: []time.Time{logSiteHour.Add(time.Minute), logSiteHour.Add(time.Minute)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+
+			// Act
+			var err error
+			for _, m := range tt.marks {
+				var at time.Time
+				if at, err = s.RecordLogSiteMark(context.Background(), fixedNow(m)); err != nil || !at.Equal(m) {
+					t.Fatalf("RecordLogSiteMark = (%v, %v), want %v", at, err, m)
+				}
+			}
+
+			// Assert
+			bounds, _, err := s.LogSiteSnapshot(context.Background(), fixedNow(logSiteHour.Add(time.Hour)))
+			if err != nil || !reflect.DeepEqual(bounds.Marks, []time.Time{fromNanos(nanos(tt.marks[0]))}) {
+				t.Fatalf("marks = (%v, %v), want the one mark at %v", bounds.Marks, err, tt.marks[0])
+			}
+		})
+	}
+}
+
+func TestRecordLogSiteMarkRefusesAnInstantNotAfterTheEpoch(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.RecordLogSiteMark(context.Background(), fixedNow(time.Time{}))
+
+	// Assert
+	bounds, _, _ := s.LogSiteSnapshot(context.Background(), fixedNow(logSiteHour))
+	if err == nil || len(bounds.Marks) != 0 {
+		t.Fatalf("a mark at the zero instant = %v, marks %v; want it refused and nothing added", err, bounds.Marks)
+	}
+	if !recordedError(log, "daemon.wsm.record_log_site_mark") {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+}
+
+func TestLogSiteEdgeAtAnswersWhatAnInstantSplitsRowsAt(t *testing.T) {
+	deploy, mark := logSiteHour.Add(10*time.Minute), logSiteHour.Add(20*time.Minute)
+	tests := []struct {
+		name string
+		at   time.Time
+		want LogSiteEdge
+	}{
+		{name: "a deploy's start", at: deploy, want: LogSiteEdgeDeploy},
+		{name: "a mark", at: mark, want: LogSiteEdgeMark},
+		{name: "neither", at: logSiteHour.Add(15 * time.Minute), want: LogSiteEdgeNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			if _, err := s.RecordLogSiteDeploy(context.Background(), fixedNow(deploy)); err != nil {
+				t.Fatalf("RecordLogSiteDeploy: %v", err)
+			}
+			if _, err := s.RecordLogSiteMark(context.Background(), fixedNow(mark)); err != nil {
+				t.Fatalf("RecordLogSiteMark: %v", err)
+			}
+
+			// Act
+			got, err := s.LogSiteEdgeAt(context.Background(), tt.at)
+
+			// Assert
+			if err != nil || got != tt.want {
+				t.Fatalf("LogSiteEdgeAt(%v) = (%v, %v), want %v", tt.at, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPruneLogSiteDeploysDropsTheMarksOfDeploysNoLongerKept(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	a, b, c := logSiteHour, logSiteHour.Add(time.Hour), logSiteHour.Add(2*time.Hour)
+	old, kept := a.Add(-time.Minute), b.Add(time.Minute)
+	for _, m := range []time.Time{old, kept} {
+		if _, err := s.RecordLogSiteMark(context.Background(), fixedNow(m)); err != nil {
+			t.Fatalf("RecordLogSiteMark: %v", err)
+		}
+	}
+	for _, at := range []time.Time{a, b, c} {
+		if _, err := s.RecordLogSiteDeploy(context.Background(), fixedNow(at)); err != nil {
+			t.Fatalf("RecordLogSiteDeploy: %v", err)
+		}
+	}
+
+	// Act
+	_, err := s.PruneLogSiteDeploys(context.Background(), 3)
+
+	// Assert
+	bounds, _, _ := s.LogSiteSnapshot(context.Background(), fixedNow(c.Add(time.Hour)))
+	if err != nil || !reflect.DeepEqual(bounds.Marks, []time.Time{fromNanos(nanos(kept))}) {
+		t.Fatalf("PruneLogSiteDeploys = %v, marks %v; want only the mark at %v kept", err, bounds.Marks, kept)
 	}
 }
 
@@ -478,6 +591,37 @@ func TestOldestLogSiteHourAnswersTheEarliestKeptRow(t *testing.T) {
 			// Assert
 			if err != nil || found != tt.wantFound || (found && !hour.Equal(tt.wantHour)) {
 				t.Fatalf("OldestLogSiteHour = (%v, %v, %v), want (%v, %v)", hour, found, err, tt.wantHour, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestLogSiteInstantsReadsOneInstantColumnInOrder(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		want    []time.Time
+		wantErr bool
+	}{
+		{name: "the deploys, oldest first", query: `SELECT started_at FROM log_site_deploys ORDER BY started_at`,
+			want: []time.Time{fromNanos(0), fromNanos(nanos(logSiteHour))}},
+		{name: "no row answers none", query: `SELECT at FROM log_site_marks ORDER BY at`},
+		{name: "a query that does not run fails", query: `SELECT at FROM no_such_table`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			if _, err := s.RecordLogSiteDeploy(context.Background(), fixedNow(logSiteHour)); err != nil {
+				t.Fatalf("RecordLogSiteDeploy: %v", err)
+			}
+
+			// Act
+			got, err := logSiteInstants(context.Background(), s.db(), tt.query)
+
+			// Assert
+			if (err != nil) != tt.wantErr || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("logSiteInstants = (%v, %v), want %v (error %v)", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

@@ -632,6 +632,62 @@ func TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowCannotBeRecorded(t *
 	}
 }
 
+// TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowsEndCannotBeMarked
+// pins the mark's error path: the approval is not recorded and the check
+// stays owed.
+func TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowsEndCannotBeMarked(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, errors.New("logs.sh exited 2") }
+	h.o.Mediate(context.Background())
+	h.db.markErr = errors.New("database is locked")
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "it broke nothing"})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("DecideMediation = %v, want the failed mark surfaced", err)
+	}
+	if m := owedCheck(t, h); m == nil || !m.Escalated() {
+		t.Fatalf("check %+v, want it still owed and escalated", m)
+	}
+	if _, found, err := h.db.CheckedThrough(context.Background(), mediationKey(h)); err != nil || found {
+		t.Fatalf("CheckedThrough = (%v, %v), want nothing recorded as read", found, err)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not mark where the window of a check that could not run ends; the approval is not recorded and the queue stays held"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), "database is locked") {
+		t.Fatalf("records = %v, want the failure at ERROR with its cause", h.logs.Records())
+	}
+}
+
+// TestTheApprovedWindowOfACheckThatCouldNotRunEndsAtALogSiteMark pins that
+// where the approval records the checks read to is a mark.
+func TestTheApprovedWindowOfACheckThatCouldNotRunEndsAtALogSiteMark(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, errors.New("logs.sh exited 2") }
+	h.o.Mediate(context.Background())
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "it broke nothing"})
+
+	// Assert
+	through, found, readErr := h.db.CheckedThrough(context.Background(), mediationKey(h))
+	if err != nil || readErr != nil || !found {
+		t.Fatalf("DecideMediation = %v, CheckedThrough = (%v, %v)", err, found, readErr)
+	}
+	edge, err := h.db.checks.LogSiteEdgeAt(context.Background(), through)
+	if err != nil || edge != wsm.LogSiteEdgeMark {
+		t.Fatalf("LogSiteEdgeAt(%v) = (%v, %v), want a mark", through, edge, err)
+	}
+}
+
 // TestACheckThatCouldNotRunIsToldToTheMediatorAsItStands pins the owner's
 // 2026-11-21 ruling: every failed round tells the mediator what failed and
 // why, verbatim. It is shown and never readied for it, since readying it may

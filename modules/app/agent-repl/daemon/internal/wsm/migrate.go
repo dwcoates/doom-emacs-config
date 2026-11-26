@@ -418,6 +418,8 @@ var migrations = []migration{
 	{To: 218, Name: "production_pauses", Kind: MigrationAdditive, DDL: productionPauseDDL},
 	// IT IS ADDITIVE: two nullable columns the previous build never names.
 	{To: 219, Name: "closure_how", Kind: MigrationAdditive, DDL: closureHowDDL},
+	// IT IS ADDITIVE: one new table the previous build never names.
+	{To: 220, Name: "log_site_marks", Kind: MigrationAdditive, DDL: logSiteMarksDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work

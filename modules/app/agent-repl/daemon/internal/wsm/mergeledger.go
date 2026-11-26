@@ -12,6 +12,9 @@ import (
 
 // OpenMergeLedger opens a workspace's ledger for one merge lease. Reopening the
 // same lease's ledger is idempotent; the ledger's intervals are append-only.
+// Its opening instant is a log site mark taken in the same transaction: a
+// landing's start bounds a production span (Mediation.LandingStartedAt), which
+// the tally then reads exactly (logsites.go).
 func (s *store) OpenMergeLedger(ctx context.Context, id WorkspaceID, lease LeaseID) error {
 	fields := dlog.Context{"workspace": string(id), "lease": string(lease)}
 	return s.write(ctx, "daemon.wsm.open_merge_ledger", fields, func(ctx context.Context, tx *sql.Tx) error {
@@ -23,9 +26,12 @@ func (s *store) OpenMergeLedger(ctx context.Context, id WorkspaceID, lease Lease
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES (?, ?, ?)`,
-			lease, id, nanos(nowUTC()))
-		return err
+		opened := nowUTC()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES (?, ?, ?)`,
+			lease, id, nanos(opened)); err != nil {
+			return err
+		}
+		return recordLogSiteMark(ctx, tx, opened)
 	})
 }
 

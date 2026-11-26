@@ -367,8 +367,15 @@ func (o *orchestrator) writeDigest(window []LogRecord, left []LeftOut, owed, sin
 // records unread by every check), to now. The span between landings is the
 // production checks' (owner ruling, 2026-11-23). An intake told before,
 // whose turn is reattached, is told the window it was told then.
+//
+// THE WINDOW'S END IS A LOG SITE MARK (wsm.DB.RecordLogSiteMark): the next
+// production span starts where this check read to, and the tally reads a
+// span from a mark exactly.
 func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, wsm.CheckWindow, bool, error) {
-	now := o.deps.Now()
+	now, err := o.deps.DB.RecordLogSiteMark(ctx, o.deps.Now)
+	if err != nil {
+		return "", wsm.CheckWindow{}, false, fmt.Errorf("merge: mark where the deploy's window ends: %w", err)
+	}
 	since, err := o.windowStart(ctx, q.key, m)
 	if err != nil {
 		return "", wsm.CheckWindow{}, false, err
