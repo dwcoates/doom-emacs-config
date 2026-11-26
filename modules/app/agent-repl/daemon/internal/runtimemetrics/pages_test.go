@@ -39,7 +39,9 @@ func TestLoadedPagesAreServedByReasonAndSessionState(t *testing.T) {
 	pages.Held("n", pageheld.LoadSlot)
 	pages.HostAttached("host")
 	pages.HostReported("host", []ids.WorkspaceID{"a", "k", "i", "p", "n"}, false)
-	recorded := func(context.Context) (map[ids.WorkspaceID]bool, error) { return map[ids.WorkspaceID]bool{"p": true}, nil }
+	recorded := func(context.Context) (map[ids.WorkspaceID]bool, error) {
+		return map[ids.WorkspaceID]bool{"p": true}, nil
+	}
 	if err := s.RegisterPages(pages, pagesCensus(), recorded); err != nil {
 		t.Fatalf("RegisterPages: %v", err)
 	}
