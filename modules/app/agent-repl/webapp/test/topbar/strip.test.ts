@@ -7,6 +7,7 @@ import {
   TopbarAccountSchema,
   TopbarConnectivitySchema,
   TopbarSessionLineSchema,
+  TopbarTitleDescriptionSchema,
   TopbarTitleSchema,
   TopbarWorkspaceNameSchema,
   TopbarWorkspaceNameLinkIcon,
@@ -24,6 +25,7 @@ import {
   drawTopbarConnectivity,
   drawTopbarHeading,
   drawTopbarSessionLine,
+  drawTitleDescription,
   drawTopbarTitle,
   drawTopbarWorkspaceName,
   BADGED_LINK_CLASS,
@@ -427,6 +429,69 @@ describe("the summary's look", () => {
       document.body.replaceChildren(heading);
       const drawn = paint(heading.querySelector(".topbar-title")!);
       expect([drawn, drawn.textDecoration.includes("underline")]).toEqual([plain, false]);
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("the summary popup's look", () => {
+  it("draws the long summary in the same grey as the strip's account chip", () => {
+    const teardown = installStylesheet();
+    try {
+      const chip = document.createElement("button");
+      chip.className = "topbar-account";
+      const popup = drawTitleDescription(create(TopbarTitleDescriptionSchema, { text: "- One." }));
+      document.body.replaceChildren(chip, popup);
+      expect(cascadedValue(popup, "color")).toBe(cascadedValue(chip, "color"));
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("the strip's other popups' look", () => {
+  const chipGrey = (): string => {
+    const chip = document.createElement("button");
+    chip.className = "topbar-account";
+    document.body.append(chip);
+    return cascadedValue(chip, "color");
+  };
+
+  it("draws a reveal panel's text in the same grey as the strip's account chip", () => {
+    const teardown = installStylesheet();
+    try {
+      const grey = chipGrey();
+      const panel = document.createElement("div");
+      panel.className = "topbar-reveal";
+      document.body.append(panel);
+      expect(cascadedValue(panel, "color")).toBe(grey);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("draws a menu row's text in that grey", () => {
+    const teardown = installStylesheet();
+    try {
+      const grey = chipGrey();
+      const row = document.createElement("button");
+      row.className = "topbar-model-option";
+      document.body.append(row);
+      expect(cascadedValue(row, "color")).toBe(grey);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("draws the app's hover tooltip in that grey", () => {
+    const teardown = installStylesheet();
+    try {
+      const grey = chipGrey();
+      const tip = document.createElement("div");
+      tip.className = "app-tooltip";
+      document.body.append(tip);
+      expect(cascadedValue(tip, "color")).toBe(grey);
     } finally {
       teardown();
     }
