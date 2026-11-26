@@ -278,6 +278,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"decide":   {usage: "decide -summary TEXT", run: productionDecide},
 		"dispatch": {usage: "dispatch -summary TEXT (the children are JSON on stdin)", run: productionDispatch},
 		"fold":     {usage: "fold -folded CHILD -surviving CHILD", run: productionFold},
+		"pause":    {usage: "pause -repository here|DIR", run: productionPause("pause")},
+		"resume":   {usage: "resume -repository here|DIR", run: productionPause("resume")},
 	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},

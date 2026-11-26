@@ -308,6 +308,10 @@ func (c *cliClient) UpdateDeployHold(_ context.Context, req *connect.Request[age
 	return connect.NewResponse(&agentreplv1.UpdateDeployHoldResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) UpdateProductionPause(_ context.Context, req *connect.Request[agentreplv1.UpdateProductionPauseRequest]) (*connect.Response[agentreplv1.UpdateProductionPauseResponse], error) {
+	return connect.NewResponse(&agentreplv1.UpdateProductionPauseResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) PruneStorage(_ context.Context, req *connect.Request[agentreplv1.PruneStorageRequest]) (*connect.Response[agentreplv1.PruneStorageResponse], error) {
 	return connect.NewResponse(&agentreplv1.PruneStorageResponse{}), c.record(req.Msg)
 }

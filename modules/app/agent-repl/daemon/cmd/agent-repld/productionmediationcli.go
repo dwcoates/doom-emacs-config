@@ -194,6 +194,66 @@ func describeProductionRefusal(e *agentreplv1.UpdateProductionMediationError) (s
 		return fmt.Sprintf("the workspace at %s cannot be folded: %s", r.NotFoldable.GetWorkspace().GetDir(), r.NotFoldable.GetDetail()), nil
 	case *agentreplv1.UpdateProductionMediationError_ChildRefused:
 		return fmt.Sprintf("child %d could not be made (%s); no child of the dispatch was kept", r.ChildRefused.GetChild(), r.ChildRefused.GetDetail()), nil
+	case *agentreplv1.UpdateProductionMediationError_Paused:
+		return "the repository's production checks are paused: decide, dispatch and fold nothing, and do not work around the pause", nil
 	}
 	return "", undescribed("deciding a production span", e)
+}
+
+// productionPause pauses or resumes one repository's production checks
+// (agentrepl.v1.UpdateProductionPause). Any agent may ask it, not only the
+// production mediator.
+func productionPause(action string) func(c *cliCall, args []string) int {
+	return func(c *cliCall, args []string) int {
+		fs, stateDir := c.flags()
+		repository := fs.String("repository", "", "here, or a main checkout (required)")
+		positionals, ok := c.parse(fs, args)
+		if !ok {
+			return exitFailure
+		}
+		if len(positionals) != 0 {
+			return c.usageFailed("nothing is positional")
+		}
+		if *repository == "" {
+			return c.usageFailed("-repository is required: here, or a main checkout")
+		}
+		req := &agentreplv1.UpdateProductionPauseRequest{}
+		switch action {
+		case "pause":
+			req.Action = &agentreplv1.UpdateProductionPauseRequest_Pause{Pause: &agentreplv1.UpdateProductionPausePause{}}
+		case "resume":
+			req.Action = &agentreplv1.UpdateProductionPauseRequest_Resume{Resume: &agentreplv1.UpdateProductionPauseResume{}}
+		default:
+			panic(fmt.Sprintf("agent-repld: production-mediation names the undeclared pause action %q", action))
+		}
+		if !c.dial(*stateDir) {
+			return exitFailure
+		}
+		scope, ok := c.scopeFlag(*repository)
+		if !ok {
+			return exitFailure
+		}
+		req.Repository = scope
+		resp, err := c.client.UpdateProductionPause(c.ctx, connect.NewRequest(req))
+		return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateProductionPauseResponse) (string, error) {
+			return describeProductionPauseRefusal(msg.GetError())
+		})
+	}
+}
+
+// describeProductionPauseRefusal says in one plain sentence why the
+// repository's production checks were not paused or resumed. Every
+// UpdateProductionPauseError arm has its own sentence.
+func describeProductionPauseRefusal(e *agentreplv1.UpdateProductionPauseError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.UpdateProductionPauseError_AlreadyPaused:
+		return "the repository's production checks are already paused", nil
+	case *agentreplv1.UpdateProductionPauseError_NotPaused:
+		return "the repository's production checks are not paused", nil
+	case *agentreplv1.UpdateProductionPauseError_UnknownRepository:
+		return noRepositoryFlag, nil
+	case *agentreplv1.UpdateProductionPauseError_ChecksOff:
+		return "the repository's lifecycle config turns no production checks on, so there is nothing to pause or resume", nil
+	}
+	return "", undescribed("pausing production checks", e)
 }
