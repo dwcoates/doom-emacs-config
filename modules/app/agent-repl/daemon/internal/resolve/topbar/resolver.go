@@ -926,10 +926,11 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	r.mutate(ws, "daemon.topbar.on_activity", "the topbar took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
-			for _, contradiction := range r.observeUsage(s, unit, act.GetUsage()) {
+			decision := r.observeUsage(s, unit, act.GetUsage())
+			for _, contradiction := range decision.Contradictions {
 				r.logOf(ws, s).Warn("daemon.topbar.usage_contradiction",
-					"a unit's token usage contradicts the session's accounting; the breakdown takes its latest report",
-					dlog.Context{"activity_id": unit, "contradiction": contradiction})
+					"a unit's token usage contradicts the session's accounting",
+					dlog.Context{"activity_id": unit, "contradiction": contradiction, "taken": decision.Take})
 			}
 		})
 }
@@ -938,16 +939,17 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 // so a re-report replaces rather than adds. What a re-report does is
 // tokenusage.Reconcile's decision: a settled usage supersedes a provisional
 // one, a late provisional one leaves the settled one standing, and only two
-// differing settled usages contradict. It answers every contradiction the
-// report makes, for its caller to record.
-func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.TokenUsage) []string {
+// differing settled usages contradict. It answers the decision, for its
+// caller to record every contradiction the report makes and whether the
+// breakdown took the report.
+func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.TokenUsage) tokenusage.Decision {
 	if u == nil {
-		return nil
+		return tokenusage.Decision{}
 	}
 	previous, held := s.counted[unit]
 	decision := tokenusage.Reconcile(previous, u)
 	if !decision.Take {
-		return decision.Contradictions
+		return decision
 	}
 	next := fingerprintOf(u)
 	if held {
@@ -964,7 +966,7 @@ func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.Token
 		s.perModel[s.model] = model
 	}
 	model.figures = addUsage(model.figures, next)
-	return decision.Contradictions
+	return decision
 }
 
 // fingerprintOf reads a usage report's figures for the session's arithmetic.
