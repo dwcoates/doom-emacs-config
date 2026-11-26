@@ -110,7 +110,7 @@ final class ScanWindowsTests: XCTestCase {
         let result = scanWindows(windows)
 
         // Assert
-        XCTAssertEqual(result.scan, ScreenScan(notifications: [], unrecognizedWindows: ["w1"]))
+        XCTAssertEqual(result.scan, ScreenScan(notifications: [], unrecognizedWindows: ["w1": layoutOutline(windows[0].node)]))
     }
 
     func testANotificationWithNoIdentifierMakesItsWindowUnrecognized() {
@@ -122,7 +122,42 @@ final class ScanWindowsTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(result.scan.notifications.map(\.identifier), ["B"])
-        XCTAssertEqual(result.scan.unrecognizedWindows, ["w1"])
+        XCTAssertEqual(Array(result.scan.unrecognizedWindows.keys), ["w1"])
+    }
+
+    func testAnEmptyWindowIsUnrecognizedWithItsLayout() {
+        // Arrange: a window whose notification has gone.
+        let windows = [(key: "w1", node: bannerWindow([]))]
+
+        // Act
+        let result = scanWindows(windows)
+
+        // Assert
+        XCTAssertEqual(result.scan.unrecognizedWindows,
+                       ["w1": "AXWindow/AXSystemDialog(AXGroup/AXHostingView(AXGroup(AXScrollArea),AXGroup#widgets-overlay-view))"])
+    }
+}
+
+final class LayoutOutlineTests: XCTestCase {
+    func testDescriptionsAreLeftOut() {
+        XCTAssertEqual(layoutOutline(notificationGroup("A", "Slack, secret, text")),
+                       "AXGroup/AXNotificationCenterBanner#A(AXStaticText#title,AXStaticText#body)")
+    }
+
+    func testAnElementWithNoRoleIsAQuestionMark() {
+        XCTAssertEqual(layoutOutline(FakeNode(role: nil)), "?")
+    }
+
+    func testALargeTreeIsCutOffAtTheLimit() {
+        // Arrange
+        let wide = FakeNode(role: "AXGroup", children: Array(repeating: FakeNode(role: "AXStaticText"), count: layoutOutlineLimit + 5))
+
+        // Act
+        let outline = layoutOutline(wide)
+
+        // Assert: the group and limit - 1 texts, then the cut.
+        XCTAssertEqual(outline.components(separatedBy: "AXStaticText").count - 1, layoutOutlineLimit - 1)
+        XCTAssertTrue(outline.hasSuffix(",…)"))
     }
 }
 

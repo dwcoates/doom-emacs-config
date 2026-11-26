@@ -52,14 +52,14 @@ public func scanWindows<Node: AccessibilityNode>(_ windows: [(key: String, node:
         if holdsPanelList(window.node) { continue }
         let found = notificationGroups(in: window.node)
         if found.isEmpty {
-            scan.unrecognizedWindows.insert(window.key)
+            scan.unrecognizedWindows[window.key] = layoutOutline(window.node)
             continue
         }
         for group in found {
             guard let identifier = group.identifier, !identifier.isEmpty else {
                 // A notification with no identifier cannot be found again to
                 // close; it counts as a layout this launcher does not know.
-                scan.unrecognizedWindows.insert(window.key)
+                scan.unrecognizedWindows[window.key] = layoutOutline(window.node)
                 continue
             }
             scan.notifications.append(ShownNotification(identifier: identifier, description: group.nodeDescription,
@@ -68,6 +68,37 @@ public func scanWindows<Node: AccessibilityNode>(_ windows: [(key: String, node:
         }
     }
     return (scan, elements)
+}
+
+/// How many elements a layout outline names at most, so one record stays
+/// small however large the window's tree.
+public let layoutOutlineLimit = 40
+
+/// A window's layout as an unrecognized-window record shows it: each
+/// element's `role/subrole#identifier`, its children in parentheses, in tree
+/// order, cut off with `…` after `layoutOutlineLimit` elements. Descriptions
+/// are left out, since they carry the notifications' text.
+public func layoutOutline<Node: AccessibilityNode>(_ node: Node) -> String {
+    var remaining = layoutOutlineLimit
+    func render(_ node: Node) -> String {
+        guard remaining > 0 else { return "…" }
+        remaining -= 1
+        var text = node.role ?? "?"
+        if let subrole = node.subrole { text += "/\(subrole)" }
+        if let identifier = node.identifier, !identifier.isEmpty { text += "#\(identifier)" }
+        let children = node.children
+        if !children.isEmpty {
+            var parts: [String] = []
+            for child in children {
+                parts.append(render(child))
+                if remaining == 0 { break }
+            }
+            if parts.count < children.count { parts.append("…") }
+            text += "(\(parts.joined(separator: ",")))"
+        }
+        return text
+    }
+    return render(node)
 }
 
 private func holdsPanelList<Node: AccessibilityNode>(_ node: Node) -> Bool {

@@ -291,17 +291,18 @@ final class NotificationCloserTests: XCTestCase {
 
     func testAnUnrecognizedWindowIsWarnedOncePerWindow() {
         // Arrange
-        screen.shown = ScreenScan(notifications: [], unrecognizedWindows: ["w1"])
+        screen.shown = ScreenScan(notifications: [], unrecognizedWindows: ["w1": "AXWindow(AXGroup)"])
 
         // Act
         closer.screenChanged()
         closer.screenChanged()
-        screen.shown = ScreenScan(notifications: [], unrecognizedWindows: ["w1", "w2"])
+        screen.shown = ScreenScan(notifications: [], unrecognizedWindows: ["w1": "AXWindow(AXGroup)", "w2": "AXWindow"])
         closer.screenChanged()
 
         // Assert
         let warnings = log.records.filter { $0.level == .warn && $0.message.hasPrefix("a Notification Center window holds no notification") }
         XCTAssertEqual(warnings.map { $0.context["window"] }, ["w1", "w2"])
+        XCTAssertEqual(warnings.map { $0.context["layout"] }, ["AXWindow(AXGroup)", "AXWindow"])
     }
 }
 
