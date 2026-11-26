@@ -89,3 +89,18 @@ Its brief names this file, and it is the mediator's to write.
   settled with no record at info (2026-11-23 20:30:59). The settles that were
   at debug are now at info for a merge-scoped park; the next failure's tail
   names the gate or the session state it read.
+- Emacs unary timeouts at a handover (`elisp.connect.unary-timeout`,
+  `elisp.host.page-state-failed`, `elisp.host.evaluation-answer-failed`, all
+  "timed out after 10s" against the successor at 127.0.0.1:49152) and the
+  sidecar's `workspace-locate-failed` (LocateWorkspace deadline exceeded) are
+  one problem: the successor's one state-database connection is starved while
+  it adopts a hundred workspaces. `daemon.wsm.conn_pressure` at info names the
+  holders; on the 2026-11-25 23:57 handover the heaviest was
+  `daemon.wsm.list_workspaces<-server.(*server).LocateWorkspace 12×1170ms`: the
+  sidecar's own locate calls, each reading every workspace row, held the
+  connection for most of the second and starved each other out to their
+  deadline. The Emacs side of the group was first logged before 2026-11-25
+  12:00Z (`conn.go` dates it to 2026-10-24), so it is older than the
+  three-deploy window; the sidecar locate is owned by
+  `sidecar-locate-times-out-at-handover` (prod-mediator's one-shot child,
+  2026-11-25). Read `conn_pressure` first when either recurs.
