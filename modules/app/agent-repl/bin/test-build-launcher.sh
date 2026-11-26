@@ -56,7 +56,7 @@ for p in "${products[@]}"; do
   chmod +x "$bin/$p"
 done
 STUB
-  printf '#!/bin/sh\nmkdir -p "$(dirname "$4")"; : >"$4"\n' >"$root/stubs/iconutil"
+  printf '#!/bin/sh\nmkdir -p "$(dirname "$5")"; : >"$5"\n' >"$root/stubs/iconutil"
   printf '#!/bin/sh\nexit 0\n' >"$root/stubs/codesign"
   printf '#!/bin/sh\nexit 0\n' >"$root/stubs/lsregister"
   printf '#!/bin/sh\necho "  1) AAAA \\"case signing\\""\n' >"$root/stubs/security"
