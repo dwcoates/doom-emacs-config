@@ -1,6 +1,7 @@
 package proctable
 
 import (
+	"errors"
 	"math"
 	"os"
 	"os/exec"
@@ -50,5 +51,52 @@ func TestNewMarkedReadsThisProcessesCPUAndItsReapedChildren(t *testing.T) {
 	wantChildren := seconds(children.Utime) + seconds(children.Stime)
 	if c := got[i].Children; math.Abs(c-wantChildren) > 0.01 || c <= 0 {
 		t.Fatalf("children's CPU = %.4fs; want getrusage's %.4fs, above zero", c, wantChildren)
+	}
+}
+
+// ProcessCPU reads the same record a scan does: this process's own CPU and
+// its reaped children's, together.
+func TestProcessCPUReadsAProcessesOwnAndReapedChildrensCPU(t *testing.T) {
+	// Arrange
+	if err := exec.Command("/usr/bin/true").Run(); err != nil {
+		t.Fatal(err)
+	}
+	var self, children syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &self); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Getrusage(syscall.RUSAGE_CHILDREN, &children); err != nil {
+		t.Fatal(err)
+	}
+	seconds := func(tv syscall.Timeval) float64 { return float64(tv.Sec) + float64(tv.Usec)/1e6 }
+	want := seconds(self.Utime) + seconds(self.Stime) + seconds(children.Utime) + seconds(children.Stime)
+
+	// Act
+	got, err := ProcessCPU(os.Getpid())
+
+	// Assert: read after getrusage, so at least as much, and the read itself
+	// costs well under a second.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got < want-0.01 || got > want+1 {
+		t.Fatalf("ProcessCPU(self) = %.4fs; want from getrusage's %.4fs", got, want)
+	}
+}
+
+// A process that is gone answers the kernel's error, naming the pid.
+func TestProcessCPUOfAGoneProcessIsAnError(t *testing.T) {
+	// Arrange: a child run and reaped, so its pid names no process.
+	cmd := exec.Command("/usr/bin/true")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := ProcessCPU(cmd.Process.Pid)
+
+	// Assert
+	if !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("ProcessCPU(reaped pid) err = %v; want ESRCH", err)
 	}
 }

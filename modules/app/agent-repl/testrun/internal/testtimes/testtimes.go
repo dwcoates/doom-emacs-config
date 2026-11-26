@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,6 +52,10 @@ const CPUSeriesName = "agentrepl_test_cpu_seconds"
 // unit started lands in, beside its CPU (AttributeCPU).
 const ProcessesSeriesName = "agentrepl_test_processes_started"
 
+// ProgramCPUSeriesName is the gauge every test's CPU by program lands in
+// (Test.Programs), labeled as SeriesName and with the program (Program).
+const ProgramCPUSeriesName = "agentrepl_test_program_cpu_seconds"
+
 // LogRecordsSeriesName is the gauge every test's counted log records land in,
 // for the tests whose harness counts them (Test.LogRecords).
 const LogRecordsSeriesName = "agentrepl_test_log_records"
@@ -67,6 +73,13 @@ const (
 	UnitMaxRSSSeriesName      = "agentrepl_test_unit_max_rss_bytes"
 	UnitBlockReadsSeriesName  = "agentrepl_test_unit_block_reads"
 	UnitBlockWritesSeriesName = "agentrepl_test_unit_block_writes"
+	// UnitProgramCPUSeriesName is the unit's CPU by program (Unit.Programs),
+	// one sample per program the unit's tree ran.
+	UnitProgramCPUSeriesName = "agentrepl_test_unit_program_cpu_seconds"
+	// UnitPhaseCPUSeriesName is the CPU the unit's harness told apart by
+	// phase (Unit.Phases, testenv.PhasesOut), one sample per phase it
+	// recorded.
+	UnitPhaseCPUSeriesName = "agentrepl_test_unit_phase_cpu_seconds"
 )
 
 // RunSeriesName is the gauge a whole run's wall time lands in, from its
@@ -111,6 +124,8 @@ type Test struct {
 	// Processes is the test's share of the processes its unit's tree started
 	// (AttributeCPU), when HasCPU.
 	Processes float64
+	// Programs is the test's CPU by program label (Program), when HasCPU.
+	Programs map[string]float64
 	// LogRecords is the log records the test's harness counted its
 	// production processes writing (testenv.CountLogRecords), when
 	// HasLogRecords.
@@ -143,6 +158,12 @@ type Unit struct {
 	MaxRSSBytes int64
 	// BlockReads and BlockWrites are block I/O operations to storage.
 	BlockReads, BlockWrites int64
+	// Programs is the unit's CPU by program label (UnitPrograms); nil where
+	// the run did not measure its tree.
+	Programs map[string]float64
+	// Phases is the CPU its harness told apart by phase (testenv.ReadPhases);
+	// nil where it recorded none.
+	Phases map[string]float64
 }
 
 // Run is a whole run's time: its wall time, its plan's prediction, and
@@ -403,6 +424,9 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 		if t.HasCPU {
 			fmt.Fprintf(&b, "%s{%s} %s %d\n", CPUSeriesName, labels, num(t.CPU), ms)
 			fmt.Fprintf(&b, "%s{%s} %s %d\n", ProcessesSeriesName, labels, num(t.Processes), ms)
+			for _, prog := range slices.Sorted(maps.Keys(t.Programs)) {
+				fmt.Fprintf(&b, "%s{%s,program=\"%s\"} %s %d\n", ProgramCPUSeriesName, labels, labelValue(prog), num(t.Programs[prog]), ms)
+			}
 		}
 		if t.HasLogRecords {
 			fmt.Fprintf(&b, "%s{%s} %d %d\n", LogRecordsSeriesName, labels, t.LogRecords, ms)
@@ -445,6 +469,12 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 			{UnitBlockWritesSeriesName, strconv.FormatInt(u.BlockWrites, 10)},
 		} {
 			fmt.Fprintf(&b, "%s{%s} %s %d\n", v.name, labels, v.value, ms)
+		}
+		for _, prog := range slices.Sorted(maps.Keys(u.Programs)) {
+			fmt.Fprintf(&b, "%s{%s,program=\"%s\"} %s %d\n", UnitProgramCPUSeriesName, labels, labelValue(prog), num(u.Programs[prog]), ms)
+		}
+		for _, phase := range slices.Sorted(maps.Keys(u.Phases)) {
+			fmt.Fprintf(&b, "%s{%s,phase=\"%s\"} %s %d\n", UnitPhaseCPUSeriesName, labels, labelValue(phase), num(u.Phases[phase]), ms)
 		}
 	}
 	return b.Bytes()

@@ -17,3 +17,9 @@ func List() ([]Entry, error) {
 func NewMarked(string) (*Marked, error) {
 	return nil, fmt.Errorf("reading the CPU of marked processes is not implemented on %s: %w", runtime.GOOS, syscall.ENOSYS)
 }
+
+// ProcessCPU is darwin's and linux's alone, like List; anywhere else it fails
+// loudly.
+func ProcessCPU(int) (float64, error) {
+	return 0, fmt.Errorf("reading a process's CPU is not implemented on %s: %w", runtime.GOOS, syscall.ENOSYS)
+}

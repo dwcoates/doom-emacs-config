@@ -268,6 +268,86 @@ func TestTestsCPUReadGrowthByMarkCountsEachMarksNewProcesses(t *testing.T) {
 	}
 }
 
+// program is P as a process of program PROG.
+func program(p proctable.Usage, prog string) proctable.Usage {
+	p.Program = prog
+	return p
+}
+
+func TestTestsCPUReadGrowthByMarkSplitsEachMarksCPUByProgram(t *testing.T) {
+	cases := []struct {
+		name  string
+		scans [][]proctable.Usage
+		want  map[string]float64
+	}{
+		{
+			name: "each live process counts under its own program",
+			scans: [][]proctable.Usage{
+				{program(marked("a", 10, 1, 1, 0), "_.test"), program(marked("a", 11, 10, 1, 0), "agent-repld")},
+				{program(marked("a", 10, 1, 1.5, 0), "_.test"), program(marked("a", 11, 10, 3, 0), "agent-repld")},
+			},
+			want: map[string]float64{"_.test": 0.5, "agent-repld": 2},
+		},
+		{
+			name: "a child that lived and was reaped between two reads counts under its reaping parent",
+			scans: [][]proctable.Usage{
+				{program(marked("a", 11, 1, 1, 0), "agent-repld")},
+				{program(marked("a", 11, 1, 1, 0.75), "agent-repld")},
+			},
+			want: map[string]float64{"agent-repld": 0.75},
+		},
+		{
+			name: "a reaped child keeps what reads saw of it under its own program, and its unseen rest goes to its parent's",
+			scans: [][]proctable.Usage{
+				{program(marked("a", 11, 1, 1, 0), "agent-repld"), program(marked("a", 12, 11, 2, 0), "git")},
+				{program(marked("a", 11, 1, 1, 0), "agent-repld"), program(marked("a", 12, 11, 3, 0), "git")},
+				{program(marked("a", 11, 1, 1, 3.5), "agent-repld")},
+			},
+			// The second read: git 1. The third: the daemon reaped git's 3.5,
+			// of which 3 was already counted.
+			want: map[string]float64{"agent-repld": 0.5},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			i := 0
+			a := &TestsCPU{Scan: func() ([]proctable.Usage, error) {
+				s := tc.scans[i]
+				i++
+				return s, nil
+			}}
+			var got map[string]MarkGrowth
+			for range tc.scans {
+				// Act
+				var err error
+				got, err = a.ReadGrowthByMark()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Assert: the last read's programs, summing to its CPU.
+			g := got["a"]
+			sum := 0.0
+			for prog, cpu := range g.Programs {
+				sum += cpu
+				if math.Abs(cpu-tc.want[prog]) > 1e-9 {
+					t.Fatalf("Programs = %v; want %v", g.Programs, tc.want)
+				}
+			}
+			for prog := range tc.want {
+				if _, ok := g.Programs[prog]; !ok {
+					t.Fatalf("Programs = %v; want %v", g.Programs, tc.want)
+				}
+			}
+			if math.Abs(sum-g.CPU) > 1e-9 {
+				t.Fatalf("Programs %v sum to %v; want the mark's CPU %v", g.Programs, sum, g.CPU)
+			}
+		})
+	}
+}
+
 // withStart is P started at unix second SEC: a later process given P's pid.
 func withStart(p proctable.Usage, sec int64) proctable.Usage {
 	p.Start = time.Unix(sec, 0)

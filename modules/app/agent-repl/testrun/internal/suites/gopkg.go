@@ -104,6 +104,10 @@ type goPkg struct {
 	// Counts is where each chunk's harnesses append its tests' log record
 	// counts, one file a chunk (testenv.LogRecordsOut); "" counts none.
 	Counts string
+	// Phases is where each chunk's harnesses append the CPU of the phases
+	// they tell apart from the tests (a daemon's boot, the binary's setup),
+	// one file a chunk (testenv.PhasesOut); "" records none.
+	Phases string
 	// SpawnedCovDir, under coverage, is where the systems this package's
 	// tests spawn write their counters (testenv.Coverage): every chunk
 	// carries it, with the programs marked instrumented, so the reach of an
@@ -180,9 +184,12 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 		}
 		p.ChunkEnv = append(p.ChunkEnv, p.spawnedEnv()...)
 	}
-	if p.Counts != "" {
-		if err := os.MkdirAll(p.Counts, 0o755); err != nil {
-			return nil, nil, fmt.Errorf("suites: create %s: %w", p.Counts, err)
+	for _, dir := range []string{p.Counts, p.Phases} {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("suites: create %s: %w", dir, err)
 		}
 	}
 	if p.CovDir != "" {
@@ -233,6 +240,10 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 				return nil, err
 			}
 			return tests, testtimes.WithLogRecords(tests, p.Rel, records)
+		}
+		if p.Phases != "" {
+			sp.Phases = filepath.Join(p.Phases, unitTag(id)+".jsonl")
+			sp.Env = append(sp.Env, testenv.PhasesOut+"="+sp.Phases)
 		}
 		sp.Display = QuietGoTestOutput
 		sp.Profiler = run.GoTestProfiler

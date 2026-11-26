@@ -134,7 +134,7 @@ func TestProcfsMarkedScanReadsThisUsersMarkAndCPU(t *testing.T) {
 	got, err := m.Scan()
 
 	// Assert
-	want := []Usage{{Pid: 10, Ppid: 1, Start: fixtureStart, Mark: "1", Own: 0.4, Children: 0.1}}
+	want := []Usage{{Pid: 10, Ppid: 1, Start: fixtureStart, Mark: "1", Program: "go", Own: 0.4, Children: 0.1}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Scan() = %+v, %v; want %+v", got, err, want)
 	}

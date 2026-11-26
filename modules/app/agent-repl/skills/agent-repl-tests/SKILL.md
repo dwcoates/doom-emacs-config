@@ -601,6 +601,7 @@ coverage impact (always none).
   cases the rest dominate; see AGENTS.md, "Which tests are redundant".
 
 - Wall and CPU: `/usr/bin/time -p <command>` (user+sys is CPU), before and after, same host load.
+- Where a suite's CPU goes in the merge gates, with no run of your own: each unit's CPU by program (the test binary, the daemon, fakeshim, covdata...) and the daemon harness's phases (each daemon's boot until it serves, shared or fresh, and the test binary's setup and teardown) are pushed with every gate, `agentrepl_test_unit_program_cpu_seconds` and `agentrepl_test_unit_phase_cpu_seconds` (`/agent-repl-metrics` CATALOG.md). A daemon's serving is its program's CPU less its boots.
 - Bytes written: sample each process's `proc_pid_rusage` `ri_diskio_byteswritten` (per process; short-lived processes and root processes are invisible to it), and the SSD's cumulative counter (`ioreg -c IOBlockStorageDriver -r -l`, "Bytes (Write)") with a quiet baseline before and after. Other sessions' runs contaminate the system counter: say so.
 - Flakes: repeat with `agent-repld test run ... -runs N` (for a flaky test,
   repeat just that test) and report pass counts; add load only with

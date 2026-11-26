@@ -48,9 +48,10 @@ type procKey struct {
 
 // seenProc is what the last read counted of a process.
 type seenProc struct {
-	ppid  int
-	mark  string
-	total float64
+	ppid    int
+	mark    string
+	program string
+	total   float64
 }
 
 // Read answers the CPU seconds every marked process has used since the first
@@ -92,6 +93,17 @@ type MarkGrowth struct {
 	// is never seen, so it is not counted here (its CPU still is, through its
 	// parent).
 	Started int
+	// Programs is CPU by the program that used it (proctable.Usage.Program),
+	// summing to CPU. A process is counted under its own program while a
+	// read sees it. What a read never saw of a process (all of one that
+	// lived and was reaped between two reads, and the last of one reaped
+	// since the last read) is counted under the program of the living parent
+	// that reaped it, whose children's CPU the kernel folded it into; the
+	// part of a reaped process earlier reads already counted under its own
+	// program is taken off that parent's program, so a read can hold a
+	// program below zero for that reason alone, never by more than the
+	// reaped process's last counted use.
+	Programs map[string]float64
 }
 
 // ReadGrowthByMark is ReadByMark with each mark's started processes beside
@@ -104,29 +116,33 @@ func (a *TestsCPU) ReadGrowthByMark() (map[string]MarkGrowth, error) {
 	now := make(map[procKey]seenProc, len(procs))
 	byPid := make(map[int]procKey, len(procs))
 	growth := map[string]MarkGrowth{}
-	add := func(mark string, cpu float64, started int) {
+	add := func(mark, program string, cpu float64, started int) {
 		g := growth[mark]
 		g.CPU += cpu
 		g.Started += started
+		if g.Programs == nil {
+			g.Programs = map[string]float64{}
+		}
+		g.Programs[program] += cpu
 		growth[mark] = g
 	}
 	for _, p := range procs {
 		k := procKey{pid: p.Pid, start: p.Start.UnixNano()}
 		total := p.Own + p.Children
 		if prev, ok := a.seen[k]; ok {
-			add(p.Mark, total-prev.total, 0)
+			add(p.Mark, p.Program, total-prev.total, 0)
 		} else if a.primed {
-			add(p.Mark, total, 1)
+			add(p.Mark, p.Program, total, 1)
 		}
-		now[k] = seenProc{ppid: p.Ppid, mark: p.Mark, total: total}
+		now[k] = seenProc{ppid: p.Ppid, mark: p.Mark, program: p.Program, total: total}
 		byPid[p.Pid] = k
 	}
 	for k, gone := range a.seen {
 		if _, alive := now[k]; alive {
 			continue
 		}
-		if _, parentAlive := byPid[gone.ppid]; parentAlive {
-			add(gone.mark, -gone.total, 0)
+		if parent, parentAlive := byPid[gone.ppid]; parentAlive {
+			add(gone.mark, now[parent].program, -gone.total, 0)
 		}
 	}
 	a.seen, a.primed = now, true

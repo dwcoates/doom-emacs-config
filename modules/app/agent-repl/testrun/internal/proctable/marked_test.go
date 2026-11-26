@@ -88,8 +88,8 @@ func TestMarkedScanAnswersThisUsersMarkedProcessesAndTheirCPU(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Usage{
-		{Pid: 10, Ppid: 1, Start: start, Mark: "7", Own: 1.5, Children: 2},
-		{Pid: 16, Ppid: 10, Start: start, Mark: "", Own: 0.25},
+		{Pid: 10, Ppid: 1, Start: start, Mark: "7", Program: "sh", Own: 1.5, Children: 2},
+		{Pid: 16, Ppid: 10, Start: start, Mark: "", Program: "sh", Own: 0.25},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Scan() =\n%+v\nwant\n%+v", got, want)
@@ -129,6 +129,41 @@ func TestMarkedScanAnswersEachProcessesMarkValueFromItsOneRead(t *testing.T) {
 	}
 	if f.argsRead[10] != 1 || f.argsRead[20] != 1 {
 		t.Fatalf("environments read %v; want each once", f.argsRead)
+	}
+}
+
+func TestMarkedScanNamesEachProcessesProgramByItsArgvZero(t *testing.T) {
+	start := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		args []byte
+		want string
+	}{
+		{"a path names its base", procArgsBuf(1, "/tmp/bin/agent-repld", "/tmp/bin/agent-repld", "MARK=u"), "agent-repld"},
+		{"a bare name is itself", procArgsBuf(1, "/bin/sh", "sh", "MARK=u"), "sh"},
+		{"an empty argv names none", procArgsBuf(0, "/bin/sh", "MARK=u"), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &fakeMarked{
+				pids:    []int{10},
+				records: map[int]procRecord{10: {UID: 501, Start: start}},
+				args:    map[int][]byte{10: tc.args},
+				cpu:     map[int][2]float64{10: {1, 0}},
+			}
+
+			// Act
+			got, err := f.scanner().Scan()
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Program != tc.want || got[0].Mark != "u" {
+				t.Fatalf("Scan() = %+v; want one process of program %q marked u", got, tc.want)
+			}
+		})
 	}
 }
 

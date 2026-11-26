@@ -268,11 +268,23 @@ func runPinned(m *testing.M, module, parent string) int {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
+	// The binary's own CPU before its first test and after its last are its
+	// setup and teardown (phases.go).
+	meter := newPhaseMeter()
+	if err := meter.start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	code := m.Run()
+	meter.ran()
 	// The suite's shared fixtures end after its last test and before the run
 	// root they live under is removed (suite.go).
 	if failed := finishSuite(); code == 0 {
 		code = failed
+	}
+	if err := meter.finish(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
 	}
 	return code
 }

@@ -588,6 +588,12 @@ type Daemon struct {
 	// command, its client, its exit and the locks that order them. Every
 	// Daemon over one process shares the one daemonProc.
 	*daemonProc
+
+	// suiteOwned is a daemon the suite started (harness.Suite()): the
+	// canonical daemon or a group's, shared by every test that views it,
+	// rather than one a test started for itself. Its boot is recorded as the
+	// shared phase (phases.go).
+	suiteOwned bool
 }
 
 // newDaemonProc is the one way a daemonProc is made: the process's state
@@ -763,6 +769,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		required:           map[string]bool{},
 		daemonProc:         newDaemonProc(nil),
 	}
+	_, d.suiteOwned = t.(*SuiteTB)
 	if opts.DefaultSettings != "" {
 		writeFile(t, filepath.Join(d.DefaultConfigDir, "settings.json"), opts.DefaultSettings)
 	}
@@ -1123,6 +1130,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		d.PrivateAddr = AddrAdvertisement(d.awaitFile(d.AddrFile())).Daemon()
 		d.dial(opts.JSONCodec)
 		d.awaitServing()
+		d.recordBoot()
 	}
 	return d
 }

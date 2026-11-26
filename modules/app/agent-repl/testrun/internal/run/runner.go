@@ -17,6 +17,7 @@ import (
 
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/testtimes"
+	"agentrepl/testrun/testenv"
 )
 
 // Spec is one unit and the process that runs it.
@@ -65,6 +66,10 @@ type Spec struct {
 	// then passes under one digest is known to have failed for no change of
 	// what it ran.
 	InputsDigest string
+	// Phases is the file the unit's harness appends the CPU of its phases to
+	// (testenv.PhasesOut), which the runner reads into Result.Phases when the
+	// unit ends. "" for a unit whose harness records none.
+	Phases string
 }
 
 // Profiler is how a unit's own process writes a CPU profile.
@@ -131,6 +136,12 @@ type Result struct {
 	Items map[string]float64
 	// Tests are the individual tests' times the unit's output reported.
 	Tests []testtimes.Test
+	// Programs is the unit's CPU by program label (testtimes.UnitPrograms),
+	// when the runner measured the unit's tree (Runner.CPU).
+	Programs map[string]float64
+	// Phases is the CPU the unit's harness told apart in each phase
+	// (testenv.ReadPhases of Spec.Phases).
+	Phases map[string]float64
 	// CancelledBy names the failed dependency of a cancelled unit.
 	CancelledBy string
 	// TimedOut is a unit killed because it ran past its Bound.
@@ -465,6 +476,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		if r.CPU != nil {
 			intervals := r.CPU.Take(c.id)
+			res.Programs = testtimes.UnitPrograms(intervals, res.Usage.CPU, res.Start, res.End)
 			if err := testtimes.AttributeCPU(res.Tests, intervals, res.Usage.CPU, res.Start, res.End); err != nil {
 				r.Log.Errorf("unit %s (%s) reported tests whose CPU cannot be told apart (%d tests, %d CPU intervals, %.3fs CPU): %v", c.id, spec.Suite, len(res.Tests), len(intervals), res.Usage.CPU, err)
 				if res.Outcome == Passed {
@@ -473,6 +485,18 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 					res.Outcome, res.Exit = Failed, 1
 				}
 			}
+		}
+		if spec.Phases != "" && (res.Outcome == Passed || res.Outcome == Failed) {
+			phases, err := testenv.ReadPhases(spec.Phases)
+			if err != nil {
+				r.Log.Errorf("unit %s (%s) wrote phase CPU the runner cannot read: %v", c.id, spec.Suite, err)
+				if res.Outcome == Passed {
+					// As for the test timings: a passing unit that broke its
+					// measurement contract fails.
+					res.Outcome, res.Exit = Failed, 1
+				}
+			}
+			res.Phases = phases
 		}
 		// A TEST THE RUNNER SKIPPED NEVER RAN: a vitest name that matched
 		// nothing reports every test of its file skipped (2026-11-21: a

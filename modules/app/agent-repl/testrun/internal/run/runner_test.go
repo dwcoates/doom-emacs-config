@@ -2,9 +2,13 @@ package run
 
 import (
 	"agentrepl/testrun/internal/cores"
+	"agentrepl/testrun/testenv"
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1434,5 +1438,80 @@ func TestRunWithoutCPUGivesNoTestCPU(t *testing.T) {
 	}
 	if results[0].Tests[0].HasCPU {
 		t.Fatalf("test CPU %v; want no CPU share", results[0].Tests[0].HasCPU)
+	}
+}
+
+func TestRunGivesAMeasuredUnitItsCPUByProgram(t *testing.T) {
+	// Arrange: one interval of two programs, and the rest the unit's wait
+	// accounting holds beyond it.
+	t0 := time.Unix(1_800_000_000, 0)
+	s := spec("daemon#00", "daemon")
+	e := &fakeExec{scripts: map[string]script{"daemon#00": {usage: Usage{CPU: 4}}}}
+	cpu := &fakeUnitCPU{slices: map[string][]testtimes.CPUSlice{"daemon#00": {{From: t0, To: t0.Add(time.Second), CPU: 3,
+		Programs: map[string]float64{testtimes.ProgramDaemon: 2, testtimes.ProgramTestBinary: 1}}}}}
+	r, _, _ := newRunner(1, e)
+	r.CPU = cpu
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{testtimes.ProgramDaemon: 2, testtimes.ProgramTestBinary: 1, testtimes.ProgramUnsampled: 1}
+	if !reflect.DeepEqual(results[0].Programs, want) {
+		t.Fatalf("Programs = %v, want %v", results[0].Programs, want)
+	}
+}
+
+func TestRunReadsTheUnitsPhaseCPU(t *testing.T) {
+	// Arrange: the unit's harness wrote two phases.
+	path := filepath.Join(t.TempDir(), "phases.jsonl")
+	body := `{"phase":"harness_setup","cpu_seconds":0.5}` + "\n" + `{"phase":"daemon_boot_fresh","cpu_seconds":1.25}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := spec("daemon#00", "daemon")
+	s.Phases = path
+	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"daemon#00": {}}})
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{testenv.PhaseHarnessSetup: 0.5, testenv.PhaseDaemonBootFresh: 1.25}
+	if results[0].Outcome != Passed || !reflect.DeepEqual(results[0].Phases, want) {
+		t.Fatalf("outcome %v, Phases = %v; want passed with %v", results[0].Outcome, results[0].Phases, want)
+	}
+}
+
+func TestRunFailsAPassingUnitWhosePhaseCPUCannotBeRead(t *testing.T) {
+	// Arrange: a phase outside the vocabulary.
+	path := filepath.Join(t.TempDir(), "phases.jsonl")
+	if err := os.WriteFile(path, []byte(`{"phase":"other","cpu_seconds":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := spec("daemon#00", "daemon")
+	s.Phases = path
+	r, _, errOut := newRunner(1, &fakeExec{scripts: map[string]script{"daemon#00": {}}})
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].Outcome != Failed || results[0].Exit != 1 || results[0].Phases != nil {
+		t.Fatalf("outcome = %v exit %d phases %v, want failed with 1 and no phases", results[0].Outcome, results[0].Exit, results[0].Phases)
+	}
+	for _, part := range []string{"ERROR", "unit daemon#00 (daemon)", "phase CPU the runner cannot read", path} {
+		if !strings.Contains(errOut.String(), part) {
+			t.Fatalf("log %q does not say %q", errOut.String(), part)
+		}
 	}
 }

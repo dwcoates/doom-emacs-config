@@ -13,11 +13,14 @@ type CPUSlice struct {
 	// Started is how many processes of the tree the interval's read saw for
 	// the first time (cores.MarkGrowth.Started).
 	Started int
+	// Programs is CPU by program label (Program), summing to CPU
+	// (cores.MarkGrowth.Programs).
+	Programs map[string]float64
 }
 
-// AttributeCPU gives each of a unit's tests its share of the unit's CPU, and
-// of the processes its tree started (Test.Processes), each slice's processes
-// split as its CPU is.
+// AttributeCPU gives each of a unit's tests its share of the unit's CPU, of
+// the processes its tree started (Test.Processes), and of each program's CPU
+// (Test.Programs), each slice's processes and programs split as its CPU is.
 //
 // UNIT is the CPU the unit's process and its reaped descendants used, as the
 // kernel's wait accounting reports it (run.Usage.CPU), and SLICES what the
@@ -58,7 +61,7 @@ func AttributeCPU(tests []Test, slices []CPUSlice, unit float64, start, end time
 		return nil
 	}
 	for i := range tests {
-		tests[i].CPU, tests[i].Processes, tests[i].HasCPU = 0, 0, true
+		tests[i].CPU, tests[i].Processes, tests[i].Programs, tests[i].HasCPU = 0, 0, map[string]float64{}, true
 	}
 	for _, s := range slices {
 		overlaps := make([]float64, len(tests))
@@ -72,8 +75,14 @@ func AttributeCPU(tests []Test, slices []CPUSlice, unit float64, start, end time
 			continue
 		}
 		for i, o := range overlaps {
+			if o == 0 {
+				continue
+			}
 			tests[i].CPU += s.CPU * o / sum
 			tests[i].Processes += float64(s.Started) * o / sum
+			for prog, cpu := range s.Programs {
+				tests[i].Programs[prog] += cpu * o / sum
+			}
 		}
 	}
 	return nil
@@ -96,16 +105,34 @@ func withRemainder(slices []CPUSlice, unit float64, start, end time.Time) []CPUS
 	if !end.After(from) {
 		from = end.Add(-time.Millisecond)
 	}
-	return append(append([]CPUSlice(nil), slices...), CPUSlice{From: from, To: end, CPU: unit - sampled})
+	rest := unit - sampled
+	return append(append([]CPUSlice(nil), slices...), CPUSlice{From: from, To: end, CPU: rest, Programs: map[string]float64{ProgramUnsampled: rest}})
+}
+
+// UnitPrograms is the unit's CPU by program: every slice's programs, and what
+// UNIT holds beyond the slices as ProgramUnsampled (withRemainder), so it
+// sums to the larger of UNIT and the slices' CPU.
+func UnitPrograms(slices []CPUSlice, unit float64, start, end time.Time) map[string]float64 {
+	out := map[string]float64{}
+	for _, s := range withRemainder(slices, unit, start, end) {
+		for prog, cpu := range s.Programs {
+			out[prog] += cpu
+		}
+	}
+	return out
 }
 
 // bySeconds splits the slices' CPU across TESTS by each one's seconds, evenly
 // when none took any.
 func bySeconds(tests []Test, slices []CPUSlice) {
 	total, started, secs := 0.0, 0.0, 0.0
+	programs := map[string]float64{}
 	for _, s := range slices {
 		total += s.CPU
 		started += float64(s.Started)
+		for prog, cpu := range s.Programs {
+			programs[prog] += cpu
+		}
 	}
 	for _, t := range tests {
 		secs += t.Seconds
@@ -116,6 +143,10 @@ func bySeconds(tests []Test, slices []CPUSlice) {
 			share = tests[i].Seconds / secs
 		}
 		tests[i].CPU, tests[i].Processes, tests[i].HasCPU = total*share, started*share, true
+		tests[i].Programs = make(map[string]float64, len(programs))
+		for prog, cpu := range programs {
+			tests[i].Programs[prog] = cpu * share
+		}
 	}
 }
 

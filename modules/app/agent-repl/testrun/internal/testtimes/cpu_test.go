@@ -189,3 +189,113 @@ func TestAttributeCPUGivesEachTestItsShareOfTheProcessesStarted(t *testing.T) {
 		})
 	}
 }
+
+func TestAttributeCPUGivesEachTestItsShareOfEachProgram(t *testing.T) {
+	cases := []struct {
+		name   string
+		tests  []Test
+		slices []CPUSlice
+		unit   float64
+		end    float64
+		want   []map[string]float64
+	}{
+		{
+			name:  "timed tests split each slice's programs by how long each ran in it",
+			tests: []Test{{Name: "a", Start: at(0), Seconds: 1}, {Name: "b", Start: at(1), Seconds: 1}},
+			slices: []CPUSlice{
+				{From: at(0), To: at(1), CPU: 2, Programs: map[string]float64{ProgramDaemon: 1.5, ProgramTestBinary: 0.5}},
+				{From: at(1), To: at(2), CPU: 1, Programs: map[string]float64{ProgramFakeShim: 1}},
+			},
+			unit: 3, end: 2,
+			want: []map[string]float64{{ProgramDaemon: 1.5, ProgramTestBinary: 0.5}, {ProgramFakeShim: 1}},
+		},
+		{
+			name:  "what the wait accounting holds beyond the slices is unsampled",
+			tests: []Test{{Name: "a", Start: at(0), Seconds: 2}},
+			slices: []CPUSlice{
+				{From: at(0), To: at(1), CPU: 1, Programs: map[string]float64{ProgramDaemon: 1}},
+			},
+			unit: 1.5, end: 2,
+			want: []map[string]float64{{ProgramDaemon: 1, ProgramUnsampled: 0.5}},
+		},
+		{
+			name:  "untimed tests split the programs by each one's seconds",
+			tests: []Test{{Name: "a", Seconds: 3}, {Name: "b", Seconds: 1}},
+			slices: []CPUSlice{
+				{From: at(0), To: at(1), CPU: 4, Programs: map[string]float64{ProgramShell: 4}},
+			},
+			unit: 4, end: 1,
+			want: []map[string]float64{{ProgramShell: 3}, {ProgramShell: 1}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			err := AttributeCPU(tc.tests, tc.slices, tc.unit, at(0), at(tc.end))
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, w := range tc.want {
+				got := tc.tests[i].Programs
+				if len(got) != len(w) {
+					t.Fatalf("test %s programs = %v; want %v", tc.tests[i].Name, got, w)
+				}
+				for prog, cpu := range w {
+					if math.Abs(got[prog]-cpu) > 1e-9 {
+						t.Fatalf("test %s programs = %v; want %v", tc.tests[i].Name, got, w)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestUnitProgramsSumsEverySliceAndTheUnsampledRest(t *testing.T) {
+	cases := []struct {
+		name   string
+		slices []CPUSlice
+		unit   float64
+		want   map[string]float64
+	}{
+		{
+			name: "the slices and the rest",
+			slices: []CPUSlice{
+				{From: at(0), To: at(1), CPU: 1, Programs: map[string]float64{ProgramDaemon: 0.75, ProgramGit: 0.25}},
+				{From: at(1), To: at(2), CPU: 1, Programs: map[string]float64{ProgramDaemon: 1}},
+			},
+			unit: 2.5,
+			want: map[string]float64{ProgramDaemon: 1.75, ProgramGit: 0.25, ProgramUnsampled: 0.5},
+		},
+		{
+			name: "no read is all unsampled",
+			unit: 0.5,
+			want: map[string]float64{ProgramUnsampled: 0.5},
+		},
+		{
+			name: "slices that hold all the unit's CPU leave nothing unsampled",
+			slices: []CPUSlice{
+				{From: at(0), To: at(1), CPU: 2, Programs: map[string]float64{ProgramNode: 2}},
+			},
+			unit: 1.5,
+			want: map[string]float64{ProgramNode: 2},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := UnitPrograms(tc.slices, tc.unit, at(0), at(3))
+
+			// Assert
+			if len(got) != len(tc.want) {
+				t.Fatalf("UnitPrograms = %v; want %v", got, tc.want)
+			}
+			for prog, cpu := range tc.want {
+				if math.Abs(got[prog]-cpu) > 1e-9 {
+					t.Fatalf("UnitPrograms = %v; want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

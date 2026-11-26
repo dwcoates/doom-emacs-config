@@ -1478,7 +1478,7 @@ func TestEveryChunkKindReadsItsTestTimes(t *testing.T) {
 			got, err := tt.chunk.Tests([]byte(tt.out), true)
 
 			// Assert
-			if err != nil || len(got) != 1 || got[0] != tt.want {
+			if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], tt.want) {
 				t.Fatalf("Tests = %+v, %v; want [%+v]", got, err, tt.want)
 			}
 		})
@@ -1885,6 +1885,49 @@ func TestAGoChunksTestsAreGivenTheLogRecordsTheirHarnessCounted(t *testing.T) {
 	}
 	if !tests[0].HasLogRecords || tests[0].LogRecords != 5 || tests[1].HasLogRecords {
 		t.Fatalf("tests = %+v, want TestA with its 5 records and TestB uncounted", tests)
+	}
+}
+
+// A GO CHUNK IS TOLD WHERE ITS HARNESSES RECORD PHASE CPU
+// (testenv.PhasesOut), and its spec names that same file for the runner to
+// read; a package with no phases directory records none.
+func TestAGoChunkIsToldWhereItsHarnessRecordsPhaseCPU(t *testing.T) {
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	cases := []struct {
+		name   string
+		phases string
+	}{
+		{"a phases directory gives each chunk its file", t.TempDir()},
+		{"no phases directory records none", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			_, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "m:build", Phases: tc.phases}.units()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			chunk := split.Chunk("m:p#00", []string{"TestA"})
+
+			// Assert
+			env := ""
+			for _, kv := range chunk.Env {
+				if v, ok := strings.CutPrefix(kv, testenv.PhasesOut+"="); ok {
+					env = v
+				}
+			}
+			if tc.phases == "" {
+				if env != "" || chunk.Phases != "" {
+					t.Fatalf("chunk env %q, Phases %q; want no phase file", chunk.Env, chunk.Phases)
+				}
+				return
+			}
+			if env == "" || filepath.Dir(env) != tc.phases || chunk.Phases != env {
+				t.Fatalf("chunk env = %q, Phases %q; want %s and Phases naming one file in %s", chunk.Env, chunk.Phases, testenv.PhasesOut, tc.phases)
+			}
+		})
 	}
 }
 
