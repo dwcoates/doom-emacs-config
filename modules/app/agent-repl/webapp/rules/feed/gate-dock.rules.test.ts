@@ -94,17 +94,17 @@ describe("installGateDock", () => {
   });
 });
 
-describe("the gate's background (owner request, 2026-10-28)", () => {
+describe("the gate's background (owner request, 2026-11-25, superseding 2026-10-28)", () => {
   it.each([
     ["the docked card", /#gate-dock > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
     ["the webhost's card", /#webhost-gate > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
     ["the undocked card", /\n\.cold-gate\s*\{[^}]*\}/],
-  ])("paints %s the feed's own ground, never a told color or the revival yellow", (_name, selector) => {
+  ])("paints %s the composer's ground, never a told color or the revival yellow", (_name, selector) => {
     // Arrange
     // Act
     const rule = selector.exec(css)?.[0] ?? "";
     // Assert
-    expect([rule.includes("background: var(--bg);"), rule.includes("--input-bg"), rule.includes("revival-gate-bg")]).toEqual([true, false, false]);
+    expect([rule.includes("background: var(--sidebar-ground);"), rule.includes("--input-bg"), rule.includes("revival-gate-bg")]).toEqual([true, false, false]);
   });
 
   it.each([
