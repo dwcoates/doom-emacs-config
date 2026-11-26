@@ -1605,6 +1605,34 @@ func TestADetachedDirectoryIsNotCreatedWhileItStillExists(t *testing.T) {
 	}
 }
 
+// TestADetachedDirectoryNeverOpenedIsRefusedWhenItsIDCannotBeResolved: the
+// first resolve of a detached directory mints its entry without a stat, and a
+// lookup that cannot name the workspace refuses it with nothing recorded for
+// the directory.
+func TestADetachedDirectoryNeverOpenedIsRefusedWhenItsIDCannotBeResolved(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "worktree")
+	if err := s.DetachDir(dir); err != nil {
+		t.Fatalf("DetachDir: %v", err)
+	}
+	s.BindWorkspaceIDs(func(string) (string, error) { return "", errors.New("roster is closed") })
+
+	// Act.
+	_, err := s.Workspace(dir)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "roster is closed") {
+		t.Fatalf("Workspace on a detached directory = %v, want the lookup's refusal", err)
+	}
+	s.mu.Lock()
+	entries := len(s.workspaces)
+	s.mu.Unlock()
+	if entries != 0 {
+		t.Fatalf("workspace entries = %d after a refused detached directory, want 0", entries)
+	}
+}
+
 // TestAnOpenSinkRollsWithoutItsLinkOnceDetached: a detached sink that reaches
 // its cap rotates its target and neither verifies nor re-creates the link.
 func TestAnOpenSinkRollsWithoutItsLinkOnceDetached(t *testing.T) {
