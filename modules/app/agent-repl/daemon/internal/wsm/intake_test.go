@@ -40,6 +40,37 @@ func TestAnIntakeWorkspaceIsBornMarkedAndBacklogged(t *testing.T) {
 	}
 }
 
+func TestTheWorkspaceRecordSaysWhetherItIsAnIntakeWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		register func(t *testing.T, s *store) Workspace
+		want     bool
+	}{
+		{name: "an intake workspace's record is Intake", register: func(t *testing.T, s *store) Workspace {
+			return registerBornIntake(t, s, arrangeRepo(t, "repo"), "intake")
+		}, want: true},
+		{name: "any other workspace's record is not", register: testWorkspace, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := tt.register(t, s)
+
+			// Act
+			read, err := s.Workspace(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if read.Intake != tt.want {
+				t.Fatalf("Workspace(%s).Intake = %v, want %v", ws.ID, read.Intake, tt.want)
+			}
+		})
+	}
+}
+
 func TestAWorkspaceNeverMarkedIsNoIntakeWorkspace(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

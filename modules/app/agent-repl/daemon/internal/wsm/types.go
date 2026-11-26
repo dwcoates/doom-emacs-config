@@ -179,6 +179,11 @@ type Workspace struct {
 	// derived in the shared select list, so the record and the originator can
 	// never disagree. A workspace with no recorded originator is not one.
 	EmojiAck bool
+	// Intake reports that the workspace is an ephemeral intake workspace
+	// (intake_workspaces). READ-ONLY, derived in the shared select list. A
+	// CLOSED intake workspace is RETIRED: its worktree and branch are
+	// destroyed on purpose (retireIntake), so it is never reopened.
+	Intake bool
 	// Current reports whether the workspace is the user's selection
 	// (SetCurrent): the one they are looking at. At most one workspace is.
 	Current bool

@@ -1092,6 +1092,39 @@ func TestEachStreamCarriesItsOwnSnapshot(t *testing.T) {
 	}
 }
 
+func TestARetiredIntakeWorkspaceIsListedNowhere(t *testing.T) {
+	// Arrange: an open intake workspace (born backlogged), a closed one
+	// (retired, its worktree and branch destroyed), and a closed ordinary one.
+	r, _ := newResolver(t)
+	open := backloggedWorkspace("i", "intake-open")
+	open.Intake = true
+	retired := workspace("r", "intake-retired")
+	retired.Intake, retired.Closed = true, true
+	closed := workspace("c", "closed")
+	closed.Closed = true
+
+	// Act.
+	r.SetRegistry(registry(open, retired, closed))
+
+	// Assert.
+	push := latestPush(t, r)
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{name: "the closed list leaves the retired intake out", got: rowNames(rosterwalk.ClosedRows(push.GetClosed())), want: []string{"closed"}},
+		{name: "the open intake is still in the backlog", got: rowNames(rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: push.GetWorkspaces()})), want: []string{"intake-open"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !equal(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
 // streamPointers names the message each stream of PUSH is.
 func streamPointers(push *frontendv1.RosterPush) [4]proto.Message {
 	return [4]proto.Message{push.GetWorkspaces(), push.GetMergeQueue(), push.GetRecentlyMerged(), push.GetClosed()}
