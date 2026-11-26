@@ -112,6 +112,9 @@ func (o *orchestrator) PauseProduction(ctx context.Context, scope RepositoryScop
 		log.Error(opPauseProduction, "could not pause the repository's production checks; nothing is paused", withField(fields, "error", err.Error()))
 		return ProductionPaused{}, err
 	}
+	for range dropped {
+		o.deps.Meter.ObserveProductionCheck(ProductionCheckPaused, 0)
+	}
 	out := ProductionPaused{Dropped: len(dropped)}
 	fields = withField(fields, "dropped_spans", len(dropped))
 	if hasMediator {

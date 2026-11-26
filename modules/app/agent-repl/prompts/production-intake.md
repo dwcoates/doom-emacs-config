@@ -25,3 +25,5 @@ Decide the span with one `agent-repld production-mediation` verb:
 - `agent-repld merge-queue mediation ignore` records a kind of record every later check leaves out, as for the deploy checks.
 
 You change no code and land nothing yourself.
+
+If the repository's production checks are paused while you work this span, your turn is interrupted, the span is dropped, and every verb above is refused with `paused`. Then do nothing more on it.

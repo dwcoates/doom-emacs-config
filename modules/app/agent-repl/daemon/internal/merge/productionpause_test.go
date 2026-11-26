@@ -75,6 +75,32 @@ func TestPausingProductionStopsTheMediatorAtOnce(t *testing.T) {
 			t.Fatal("the repository is not paused")
 		}
 	})
+	t.Run("the dropped span is counted as left unreviewed by the pause", func(t *testing.T) {
+		if !slices.Contains(h.meter.got, "production_check:paused:0") {
+			t.Fatalf("metrics = %v, want the dropped span counted paused", h.meter.got)
+		}
+	})
+}
+
+func TestALandingDuringAPauseOwesNoSpanAndCountsItPaused(t *testing.T) {
+	// Arrange
+	h := production(t)
+	pauseProduction(t, h)
+
+	// Act
+	deployEnds(t, h, wsm.DeployFinished)
+
+	// Assert
+	if c, err := h.db.ProductionCheckOf(context.Background(), mediationKey(h)); err != nil || c != nil {
+		t.Fatalf("ProductionCheckOf = (%+v, %v), want none while paused", c, err)
+	}
+	if !slices.Contains(h.meter.got, "production_check:paused:0") {
+		t.Fatalf("metrics = %v, want the skipped span counted paused", h.meter.got)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opProduction,
+		Message: "the landing closed a span while the production checks are paused; it is never reviewed"}); !ok {
+		t.Fatalf("records = %v, want the skipped span recorded", h.logs.Records())
+	}
 }
 
 func TestPausingProductionWithNoMediatorYetInterruptsNothing(t *testing.T) {

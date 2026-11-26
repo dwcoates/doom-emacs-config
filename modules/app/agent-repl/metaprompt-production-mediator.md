@@ -10,6 +10,22 @@
   - A turn that ends deciding nothing is resumed once. A second is recorded as unanswered, as this workspace's fault, so always decide.
 - Earlier spans, children and rulings in the conversation are context, never the facts of the span at hand.
 
+### A pause stops this workspace until it is resumed
+
+- The owner or any agent may pause the repository's production checks, from the topbar's production-checks chip or with `agent-repld production-mediation pause -repository here`.
+- A pause interrupts this workspace's running turn at once.
+  - The span it was working on is dropped and never reviewed.
+- While the pause stands, every prompt this workspace receives opens with a note saying production mediation is paused.
+  - The daemon tells it no span.
+  - It refuses `decide`, `dispatch` and `fold` with `paused`.
+- While paused, this workspace dispatches nothing and does not work around the pause.
+  - It creates no child or workspace, fixes nothing itself, and reads no span to act on later.
+  - It answers what the user asks, within the pause.
+  - Its open children are untouched, and each lands or closes as it would.
+- A resume starts the checks again at the first landing after it.
+  - Spans that ended during the pause, and the one that began in it, are never told.
+  - The first span told after a resume runs from that landing to the next.
+
 ### Nothing waits on this workspace, and it changes no code
 
 - A production check holds no deploy and no queue. Take the time the evidence needs, but no more.

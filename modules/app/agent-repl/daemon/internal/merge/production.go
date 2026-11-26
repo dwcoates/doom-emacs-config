@@ -105,6 +105,9 @@ const (
 	ProductionCheckNothingToDo = "nothing_to_do"
 	ProductionCheckDispatched  = "dispatched"
 	ProductionCheckUnanswered  = "unanswered"
+	// ProductionCheckPaused is a span a pause left unreviewed: dropped by
+	// the pause, or skipped as it ended in or began in one.
+	ProductionCheckPaused = "paused"
 )
 
 // The events ObserveProductionChild records.
@@ -145,8 +148,10 @@ func (o *orchestrator) oweProductionChecks(ctx context.Context, at time.Time) er
 		case wsm.ProductionSpanEmpty:
 			o.deps.Log.Global().Info(opProduction, "the landing closed no span between landings; it owes no production check", fields)
 		case wsm.ProductionSpanPaused:
+			o.deps.Meter.ObserveProductionCheck(ProductionCheckPaused, 0)
 			o.deps.Log.Global().Info(opProduction, "the landing closed a span while the production checks are paused; it is never reviewed", span)
 		case wsm.ProductionSpanBeganInPause:
+			o.deps.Meter.ObserveProductionCheck(ProductionCheckPaused, 0)
 			o.deps.Log.Global().Info(opProduction, "the first landing after the production checks resumed closed a span begun in the pause; it is never reviewed, and the checks start at this landing", span)
 		case wsm.ProductionSpanOwed:
 			o.deps.Log.Global().Info(opProduction, "the landing owes a production check of the span before it", span)
