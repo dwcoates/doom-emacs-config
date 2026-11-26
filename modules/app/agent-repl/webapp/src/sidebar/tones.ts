@@ -28,7 +28,6 @@ import {
   gateGlyph,
   glyphInk,
   oneShotGlyphArm,
-  asyncMergeMark,
   pausedMergeMark,
 } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -141,19 +140,17 @@ export function rosterArmMark(arm: string): RosterArmMark {
 /**
  * The row's markers that change its status MARK, each read off its own
  * `frontend.v1.RosterRow` field by presence: `one_shot`
- * (`RosterRowOneShot`), `async_merging` (`RosterRowAsyncMerging`),
- * `merge_turn` (`RosterRowMergeTurn`) and `merge_paused`
- * (`RosterRowMergePaused`).
+ * (`RosterRowOneShot`), `merge_turn` (`RosterRowMergeTurn`) and
+ * `merge_paused` (`RosterRowMergePaused`).
  */
 export interface RowMarkers {
   oneShot: boolean;
-  asyncMerging: boolean;
   mergeTurn: boolean;
   mergePaused: boolean;
 }
 
 /** A row carrying no marker. */
-export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMerging: false, mergeTurn: false, mergePaused: false });
+export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, mergeTurn: false, mergePaused: false });
 
 /** The status arms that draw the row's OWN merge: a merge running or waiting. */
 const OWN_MERGE_ARMS: ReadonlySet<string> = new Set(["merging", "mergeQueued"]);
@@ -173,30 +170,20 @@ const OWN_MERGE_ARMS: ReadonlySet<string> = new Set(["merging", "mergeQueued"]);
  * other arm. The row's name breathes, as the work it stands for does, and
  * the row keeps the arm's tone.
  *
- * An ASYNC MERGE of the workspace's own branch draws the merge glyph in place
- * of the PLAIN dot -- the `dot` glyph with no ink of its own -- in the glyph,
- * ink and motion of `render-colors.json#async_merge_mark` (owner requests,
- * 2026-10-13 and 2026-10-14). Every other mark outranks it: a gate's glyph,
- * the one-shot glyph, a merge glyph, an inked dot (compacting's orange) and no
- * mark at all. The row keeps the arm's tone either way, so its NAME stays the
- * workspace's own status color.
- *
  * A PAUSED QUEUE (`merge_paused`, owner ruling 2026-10-14) inks every merge
  * indicator the row draws, in `render-colors.json#paused_merge_mark`'s ink,
  * and takes the merge's breath off the row's name. The merge glyph of a
- * `merging` or `merge_queued` arm takes the section's motion. The async-merge
- * mark takes the ARM's own motion back, so a turn in flight under it still
- * breathes, because that breath is the turn's. The tone stands, so the name
- * keeps its color. The marker on a row drawing neither the arm nor the async
- * marker breaks the contract and is refused.
+ * `merging` or `merge_queued` arm takes the section's motion. The tone
+ * stands, so the name keeps its color. The marker on a row drawing no merge
+ * of its own breaks the contract and is refused.
  */
 export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   const mark = rosterArmMark(arm);
   const ownMerge = OWN_MERGE_ARMS.has(arm) || markers.mergeTurn;
-  if (markers.mergePaused && !ownMerge && !markers.asyncMerging) {
+  if (markers.mergePaused && !ownMerge) {
     throw new MalformedView(
       "RosterRow.merge_paused",
-      `the marker stands on arm '${arm}' with no merge_turn or async_merging marker, so the row draws no merge for it to pause`,
+      `the marker stands on arm '${arm}' with no merge_turn marker, so the row draws no merge for it to pause`,
     );
   }
   const paused = pausedMergeMark();
@@ -207,11 +194,6 @@ export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   }
   if (markers.oneShot && oneShotGlyphArm(arm)) {
     return { toneClass: mark.toneClass, glyph: "target", image: GLYPH_IMAGES.target, ink: undefined, motion: "breathes" };
-  }
-  if (markers.asyncMerging && mark.glyph === "dot" && mark.ink === undefined) {
-    const merge = asyncMergeMark();
-    const drawn = { ...mark, glyph: merge.glyph, image: GLYPH_IMAGES[merge.glyph], ink: merge.ink, motion: merge.motion as MarkMotion };
-    return markers.mergePaused ? { ...drawn, ink: paused.ink, motion: mark.motion } : drawn;
   }
   if (markers.mergePaused && ownMerge) {
     return { ...mark, ink: paused.ink, motion: paused.motion as MarkMotion };

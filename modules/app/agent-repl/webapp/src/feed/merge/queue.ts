@@ -65,7 +65,6 @@ import {
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import type {
   FeedMergeQueue,
-  FeedMergeQueueBubble,
   FeedMergeQueueEntry,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -306,9 +305,7 @@ export function drawFeedMergeQueueEntry(entry: FeedMergeQueueEntry, rc: RowConte
     void guardMalformed(
       rc.ctx,
       "feed.merge.queue.select",
-      entry.bubble === undefined
-        ? selectQueueEntryWorkspace(el, rc, ref)
-        : openQueueEntryBubble(el, rc, entry.bubble),
+      selectQueueEntryWorkspace(el, rc, ref),
     );
   });
   return el;
@@ -331,22 +328,6 @@ export function selectQueueEntryWorkspace(
   workspace: WorkspaceRef,
 ): Promise<void> {
   return jumpToWorkspace(entry, rc.ctx, workspace, QUEUE_JUMP);
-}
-
-/**
- * An ASYNC merge's jump (owner ruling, 2026-10-17): its entry is the hidden
- * merge workspace, which a click never selects. It selects the requester and
- * opens the merge's bubble in its feed (`FeedMergeQueueBubble`); a bubble with
- * no row (a merge this daemon holds no bubble identity for) selects the
- * requester alone.
- */
-export function openQueueEntryBubble(
-  entry: HTMLElement,
-  rc: RowContext,
-  bubble: FeedMergeQueueBubble,
-): Promise<void> {
-  const requester = requireMessage(bubble.requester, `${PATH}Bubble.requester`);
-  return jumpToWorkspace(entry, rc.ctx, requester, QUEUE_JUMP, bubble.row);
 }
 
 /**

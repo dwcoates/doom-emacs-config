@@ -49,7 +49,6 @@ import type {
   RosterRowContextHeat,
   RosterRowOpenOwnedPullRequest,
   RosterRowOpening,
-  RosterRowAsyncMerging,
   RosterRowMergePaused,
   RosterRowMergeTurn,
   RosterRowWhen,
@@ -240,13 +239,10 @@ export function drawRosterRow(
   // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
   // set here, from the same one vocabulary table the mark reads.
   // PRESENCE IS THE FACT: only a one-shot carries the mark, and its glyph
-  // replaces the dot while the one-shot works; an async merge of the
-  // workspace's own branch draws the purple merge glyph in place of a plain
-  // dot, and a merge in flight running a turn draws the merge glyph in place
+  // replaces the dot while the one-shot works, and a merge in flight running a turn draws the merge glyph in place
   // of the turn's mark (`tones.rosterRowMark`).
   const markers: RowMarkers = {
     oneShot: u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`),
-    asyncMerging: u.asyncMerging !== undefined && drawRosterRowAsyncMerging(u.asyncMerging, `${path}.asyncMerging`),
     mergeTurn: u.mergeTurn !== undefined && drawRosterRowMergeTurn(u.mergeTurn, `${path}.mergeTurn`),
     mergePaused: u.mergePaused !== undefined && drawRosterRowMergePaused(u.mergePaused, `${path}.mergePaused`),
   };
@@ -686,17 +682,6 @@ export function drawRosterRowContextHeat(u: RosterRowContextHeat, path: string):
 }
 
 /**
- * The ASYNC-MERGING marker: the workspace's own branch merges async in a
- * hidden merge workspace. Presence is the whole fact; `tones.rosterRowMark`
- * decides which marks it inks.
- */
-export function drawRosterRowAsyncMerging(u: RosterRowAsyncMerging, path: string): boolean {
-  void u;
-  void path;
-  return true;
-}
-
-/**
  * The MERGE-TURN marker: the workspace's own merge is in flight and its
  * session runs a turn, which the row's arm draws. EMPTY -- presence is the
  * fact -- so this answers `true` for a marker that is there at all; what it
@@ -993,7 +978,6 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
       path,
       arm,
       one_shot: markers.oneShot,
-      async_merging: markers.asyncMerging,
       merge_turn: markers.mergeTurn,
       merge_paused: markers.mergePaused,
       glyph: mark.glyph,

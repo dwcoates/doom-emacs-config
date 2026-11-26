@@ -689,7 +689,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -700,15 +700,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
     background-color: #545453;
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
     background-color: #393938;
   }
 }
@@ -1129,7 +1129,7 @@ body {
    (owner request, 2026-11-01): a merged row's name stands where a waiting
    merge's position numeral does, so the two sections' lists read alike. THE
    INDENT IS A ROW'S OWN LEFT PADDING (owner request, 2026-11-18), as the
-   OPEN section's rows start, so a line has the room its async note takes. */
+   OPEN section's rows start. */
 #ws-sidebar { --mq-list-indent: 0.9rem; }
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github,
@@ -1138,26 +1138,6 @@ body {
   font-size: 0.9em;
   line-height: var(--merged-row-line-h);
   padding-left: var(--mq-list-indent);
-}
-/* AN ASYNC MERGE'S "(<requester>)" NOTE is smaller, greyer and
-   italic beside its name (owner request, 2026-11-18). It gives way first:
-   it shrinks to an ellipsis before the name or the clock does, and the
-   line's hover shows it whole. */
-#ws-sidebar .sb-mq-async-of {
-  color: var(--repo-head-collapsed);
-  font-size: 0.75em;
-  font-style: italic;
-  min-width: 0;
-  flex: 0 1000 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#ws-sidebar .sb-mq-async-of-link {
-  cursor: pointer;
-}
-#ws-sidebar:not(.sb-hover-suspended) .sb-mq-async-of-link:hover {
-  text-decoration: underline;
 }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
@@ -7204,9 +7184,7 @@ bubble-body.bubble-body { display: block; }
    failed merge is a green workspace whose merge glyph is red; a compacting
    turn is a red workspace whose dot is the orange of the feed's compaction
    rule; a turn whose vendor has gone silent is a red workspace whose dot is
-   the blue of an unusable one (owner ruling, 2026-11-08). An async merge of
-   the workspace's own branch draws the merge glyph purple in place of a
-   plain dot (render-colors.json async_merge_mark). After the tones, at their
+   the blue of an unusable one (owner ruling, 2026-11-08). After the tones, at their
    specificity, so the ink wins. */
 #ws-sidebar .st.ink-red { color: var(--err); }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
@@ -7214,7 +7192,7 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .st.ink-purple { color: var(--blocked); }
 /* A PAUSED QUEUE'S MERGE INDICATORS (render-colors.json paused_merge_mark,
    owner ruling 2026-10-14, amber per owner request 2026-10-25): the merge
-   glyph of a merging, queued or async merge whose queue is paused, in the
+   glyph of a merging or queued merge whose queue is paused, in the
    amber a paused merge bubble is framed in. */
 #ws-sidebar .st.ink-amber { color: var(--merge-paused); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
@@ -9306,13 +9284,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   border-radius: 6px;
 }
 
-/* THE SWITCH TO A DETACHED MERGE'S MERGE WORKSPACE (workspace-switch.ts): a
-   prominent button at the head line's right end, there for the bubble's whole
-   life, and in an agentic tab's content in place of the rows the requester's
-   copy never streams. Disabled once the workspace was removed. */
-.merge-workspace-switch-head { flex: 0 0 auto; }
-.merge-workspace-switch-tab { display: block; padding: 0.3rem 0; }
-.merge-workspace-switch-refusal { color: var(--err); font-size: 0.85em; }
 /* BREATHING, NOT BLINKING: a live thing should read as alive at a glance
    without pulling the eye off whatever the reader is actually reading. */
 @keyframes merge-breathe {
