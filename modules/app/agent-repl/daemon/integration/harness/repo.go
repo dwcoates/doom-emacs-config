@@ -129,10 +129,10 @@ func addFakeRepo(s *fakegit.State, dir, subject string, paths []string) *fakegit
 // checkout (internal/deployedversion).
 const PinnedVersion = "0.1.0"
 
-// tagPinnedCheckout states dir, the pinned checkout the daemon deploys from,
-// as a fake repository whose head carries PinnedVersion. It touches only the
-// fixture file, never dir, which every test of the process shares; the
-// daemons of one test share its world, so the first one records it.
+// tagPinnedCheckout states dir, a daemon's own pinned checkout it deploys
+// from, as a fake repository whose head carries PinnedVersion. It touches only
+// the fixture file, never dir, which the daemon owns; the daemons of one test
+// share its world, so each records its own checkout once.
 func (w *GitWorld) tagPinnedCheckout(dir string) {
 	w.t.Helper()
 	w.edit(func(s *fakegit.State) {

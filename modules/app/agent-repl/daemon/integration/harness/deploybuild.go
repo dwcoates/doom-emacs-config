@@ -11,7 +11,6 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"agent-repld/internal/buildid"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
@@ -264,21 +263,13 @@ func (b *DeployBuilder) StatePlaceholderBuilds(t testing.TB, lockDir string, pid
 // contributes nothing, exactly as a module absent from a checkout does.
 const pinnedConfigEl = "(agent-repl--load-module \"core\")\n"
 
-// PinnedElispBuild is the pinned checkout's elisp build, which every Emacs
+// PinnedElispBuild is the pinned checkouts' elisp build, which every Emacs
 // stream the harness opens reports: an Emacs running the checkout's elisp is
-// one a deploy leaves alone.
+// one a deploy leaves alone. runPinned states it once, before any test; every
+// daemon's checkout carries the same loader, so the same build.
 var PinnedElispBuild string
 
-// writePinnedConfig lays the loader into the pinned checkout and states its
-// elisp build.
+// writePinnedConfig lays the loader into a pinned checkout.
 func writePinnedConfig(dir string) error {
-	if err := os.WriteFile(filepath.Join(dir, "config.el"), []byte(pinnedConfigEl), 0o644); err != nil {
-		return err
-	}
-	build, err := buildid.Elisp(dir)
-	if err != nil {
-		return err
-	}
-	PinnedElispBuild = build
-	return nil
+	return os.WriteFile(filepath.Join(dir, "config.el"), []byte(pinnedConfigEl), 0o644)
 }

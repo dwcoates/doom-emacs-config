@@ -74,6 +74,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/buildid"
 	"agentrepl/testrun/testenv"
 )
 
@@ -84,7 +85,9 @@ var (
 	gitBinary      string
 	testsBinary    string
 	buildErr       error
-	pinnedCheckout string
+	// checkoutRepo is the real repository root every daemon's own pinned
+	// checkout is laid from (newDaemonCheckout); runPinned sets it once.
+	checkoutRepo string
 )
 
 // Main builds the daemon and the fake shim, runs the suite, and reports the
@@ -245,17 +248,19 @@ func mainIn(m *testing.M, module, root string) int {
 		}
 		*b.path = path
 	}
-	// The pinned checkout is this process's own, never shared.
+	// The template checkout is this process's own, and every daemon lays its
+	// own beside its state (newDaemonCheckout), so none is ever shared.
 	return runPinned(m, module, root)
 }
 
-// runPinned lays out the pinned checkout under parent, self-checks the build
-// identity and runs the suite.
+// runPinned lays out the suite's template checkout under parent, self-checks
+// the build identity against it, states the pinned elisp build once, and runs
+// the suite. Every daemon then lays its own checkout from the same repository
+// (newDaemonCheckout).
 func runPinned(m *testing.M, module, parent string) int {
-	repo := filepath.Dir(module)
-	var err error
-	pinnedCheckout, err = TimedStep(os.Stderr, "harness", "lay the pinned checkout", func() (string, error) {
-		return newPinnedCheckout(filepath.Join(parent, "checkout"), repo)
+	checkoutRepo = filepath.Dir(module)
+	template, err := TimedStep(os.Stderr, "harness", "lay the pinned checkout", func() (string, error) {
+		return newPinnedCheckout(filepath.Join(parent, "checkout"), checkoutRepo)
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
@@ -264,8 +269,15 @@ func runPinned(m *testing.M, module, parent string) int {
 	// The self-check runs BEFORE any test, because a build identity that
 	// disagrees fails as a stale-shim relaunch on every spawn rather than as
 	// anything a test can read.
-	if _, err := TimedStep(os.Stderr, "harness", "check the build identity", func() (struct{}, error) { return struct{}{}, checkBuildIdentityAgrees(pinnedCheckout) }); err != nil {
+	if _, err := TimedStep(os.Stderr, "harness", "check the build identity", func() (struct{}, error) { return struct{}{}, checkBuildIdentityAgrees(template) }); err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	// THE ELISP BUILD IS STATED ONCE, before any test runs: every daemon's
+	// own checkout carries the same loader, so its build is this one, and a
+	// global written per daemon from parallel tests would race.
+	if PinnedElispBuild, err = buildid.Elisp(template); err != nil {
+		fmt.Fprintln(os.Stderr, "harness: the pinned checkout's elisp build:", err)
 		return 1
 	}
 	// The binary's own CPU before its first test and after its last are its
@@ -289,8 +301,10 @@ func runPinned(m *testing.M, module, parent string) int {
 	return code
 }
 
-// newPinnedCheckout lays out the checkout root every daemon in this suite
-// resolves its build stamps from: a directory that carries NEITHER
+// newPinnedCheckout lays out a pinned checkout root: the suite's template,
+// which runPinned self-checks, and each daemon's own (newDaemonCheckout), which
+// that daemon deploys from, installs into and resolves its build stamps from.
+// Each is a directory that carries NEITHER
 // agent-shim/claude/shim/dist/.built-sha nor daemon/bin/.built-sha, so the
 // harness's SHIM_BUILD_SHA and AGENT_REPL_DEPLOY_STAMP are the only answers
 // and no host build can be read as this suite's deployed build. The shared
@@ -324,14 +338,23 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 	return dir, nil
 }
 
-// PinnedCheckout is the harness-owned checkout root, or a fatal failure if
-// Main did not lay it out.
-func PinnedCheckout(t testing.TB) string {
+// newDaemonCheckout lays one daemon's own pinned checkout at dir and
+// self-checks its build identity, or fails t. No two daemons share a checkout:
+// a deploy installs into its module root, so a shared one let one daemon's
+// install remove the files another's was keeping.
+func newDaemonCheckout(t testing.TB, dir string) string {
 	t.Helper()
-	if pinnedCheckout == "" {
+	if checkoutRepo == "" {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
 	}
-	return pinnedCheckout
+	checkout, err := newPinnedCheckout(dir, checkoutRepo)
+	if err != nil {
+		t.Fatalf("harness: lay the daemon's pinned checkout: %v", err)
+	}
+	if err := checkBuildIdentityAgrees(checkout); err != nil {
+		t.Fatalf("harness: the daemon's pinned checkout: %v", err)
+	}
+	return checkout
 }
 
 // checkBuildIdentityAgrees is this harness's self-check for the invariant

@@ -128,7 +128,7 @@ func TestAnEmacsConnectingOnOlderElispIsPushedTheReloadAsItsVerdict(t *testing.T
 		t.Fatalf("the stale Emacs's stream ended without its verdict: %v", stream.Err())
 	}
 	reload := stream.Msg().GetReloadElisp()
-	if reload == nil || reload.GetBuild() != harness.PinnedElispBuild || reload.GetModuleRoot() != harness.PinnedCheckout(t) {
+	if reload == nil || reload.GetBuild() != harness.PinnedElispBuild || reload.GetModuleRoot() != d.Checkout {
 		t.Fatalf("first frame = %v, want reload_elisp naming the checkout's root and build", stream.Msg())
 	}
 	if stream.Receive() {

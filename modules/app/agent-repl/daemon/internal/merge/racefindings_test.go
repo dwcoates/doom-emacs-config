@@ -467,7 +467,7 @@ func TestAnOpenRaceFindingIsPutToTheMediatorWhateverTheWindowHolds(t *testing.T)
 			races = told
 		}
 	}
-	if !strings.Contains(races, "`daemon/TestRacy`") || !strings.Contains(races, "merge-a") || !strings.Contains(races, "lost the race") || !strings.Contains(races, "/archive/a") {
+	if !strings.Contains(races, "suite `daemon`, test `TestRacy`") || !strings.Contains(races, "merge-a") || !strings.Contains(races, "lost the race") || !strings.Contains(races, "/archive/a") {
 		t.Fatalf("race_findings = %q, want the open race with its merge, failure and artifacts", races)
 	}
 }
@@ -560,7 +560,10 @@ func TestRenderRaceFindings(t *testing.T) {
 		{name: "none", want: []string{"None:"}},
 		{name: "an open race names its merges, failure and artifacts",
 			findings: []wsm.RaceFinding{{Ref: racyRef, LastSeen: at, Recurrences: 2, Merges: []string{"a", "b"}, Failure: "lost", Artifacts: "/x"}},
-			want:     []string{"Open, each yours to dispatch:", "`daemon/TestRacy`: failed in 2 merge gate(s), last at 2026-11-25T12:00:00Z, in a, b", "Artifacts: `/x`.", "  > lost"}},
+			want:     []string{"Open, each yours to dispatch:", "- suite `daemon`, test `TestRacy`: failed in 2 merge gate(s), last at 2026-11-25T12:00:00Z, in a, b", "Artifacts: `/x`.", "  > lost"}},
+		{name: "a test name holding a slash renders apart from its suite",
+			findings: []wsm.RaceFinding{{Ref: wsm.RaceFindingRef{Suite: "daemon", Test: "integration.TestFoo/case"}, LastSeen: at, Recurrences: 1, Failure: "lost"}},
+			want:     []string{"- suite `daemon`, test `integration.TestFoo/case`: failed in 1 merge gate(s)"}, wantNot: []string{"daemon/integration"}},
 		{name: "a reopened race says its fixes did not end it",
 			findings: []wsm.RaceFinding{{Ref: racyRef, LastSeen: at, Recurrences: 3, Fixes: 1, Failure: "lost"}},
 			want:     []string{"it came back after 1 deployed fix(es)"}},
@@ -569,7 +572,7 @@ func TestRenderRaceFindings(t *testing.T) {
 			want:     []string{"> ...", "THE END"}, wantNot: []string{strings.Repeat("x", raceFailureBytes)}},
 		{name: "a race taken on is at work",
 			findings: []wsm.RaceFinding{{Ref: racyRef, TakenOnAt: &at, Recurrences: 1}},
-			want:     []string{"At work, taken on by your earlier dispatch; never dispatch one again:", "`daemon/TestRacy`: taken on at 2026-11-25T12:00:00Z"}, wantNot: []string{"Open,"}},
+			want:     []string{"At work, taken on by your earlier dispatch; never dispatch one again:", "- suite `daemon`, test `TestRacy`: taken on at 2026-11-25T12:00:00Z"}, wantNot: []string{"Open,"}},
 		{name: "a fixed race is not listed",
 			findings: []wsm.RaceFinding{{Ref: racyRef, TakenOnAt: &at, FixedAt: &at, Recurrences: 1}},
 			want:     []string{"None:"}},
@@ -599,7 +602,38 @@ func TestRenderProblemsNamesTheRacesAProblemIs(t *testing.T) {
 	got := renderProblems([]DeployProblem{{Statement: "TestRacy races", Evidence: []string{"lost"}, RaceFindings: []wsm.RaceFindingRef{racyRef}}})
 
 	// Assert
-	if !strings.Contains(got, "1. TestRacy races\n   race `daemon/TestRacy`: fix it at its source, never by loosening a bound, a retry or a sleep\n   > lost") {
+	if !strings.Contains(got, "1. TestRacy races\n   race suite `daemon`, test `TestRacy`: fix it at its source, never by loosening a bound, a retry or a sleep\n   > lost") {
 		t.Fatalf("renderProblems = %q, want the race named between the statement and its evidence", got)
+	}
+}
+
+// TestBothBriefsNameARaceFindingAlike pins that the mediator's brief and the
+// fixer's dispatch brief render a finding in one shape, so a site that
+// hand-rolls its own rendering fails here.
+func TestBothBriefsNameARaceFindingAlike(t *testing.T) {
+	at := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		ref  wsm.RaceFindingRef
+		want string
+	}{
+		{name: "a plain test name", ref: racyRef, want: "suite `daemon`, test `TestRacy`"},
+		{name: "a test name holding a slash", ref: wsm.RaceFindingRef{Suite: "daemon", Test: "integration.TestFoo/case"}, want: "suite `daemon`, test `integration.TestFoo/case`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			briefs := map[string]string{
+				"the mediator's brief": RenderRaceFindings([]wsm.RaceFinding{{Ref: tt.ref, LastSeen: at, Recurrences: 1, Failure: "lost"}}),
+				"the dispatch brief":   renderProblems([]DeployProblem{{Statement: "it races", RaceFindings: []wsm.RaceFindingRef{tt.ref}}}),
+			}
+
+			// Assert
+			for brief, got := range briefs {
+				if !strings.Contains(got, tt.want) {
+					t.Fatalf("%s = %q, want the finding named %q", brief, got, tt.want)
+				}
+			}
+		})
 	}
 }
