@@ -98,6 +98,25 @@ func registry(workspaces ...wsm.Workspace) sidebar.Registry {
 		Repositories: []wsm.Repository{{ID: "repo-1", Dir: "/home/u/.config/doom"}}}
 }
 
+// closedRegistry is registry with the parent closed.
+func closedRegistry(workspaces ...wsm.Workspace) sidebar.Registry {
+	reg := registry(workspaces...)
+	reg.Workspaces[0].Closed = true
+	return reg
+}
+
+// closedAndOpenChildren are an abandoned child and a working one.
+func closedAndOpenChildren() []wsm.Workspace {
+	abandoned := child(childA, "abandoned", 0)
+	abandoned.Closed, abandoned.Closure = true, &wsm.Closure{At: epoch.Add(time.Hour)}
+	return []wsm.Workspace{abandoned, child(childB, "working", time.Minute)}
+}
+
+// handed is how many bubbles, footer lists and menus F was handed.
+func (f *fixture) handed() [3]int {
+	return [3]int{len(f.feed.upserts), len(f.footer.sets), len(f.topbar.sets)}
+}
+
 func names(open []footer.OpenChild) []string {
 	var out []string
 	for _, c := range open {
@@ -324,4 +343,96 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		}
 	}()
 	New(Deps{})
+}
+
+func TestAParentThatIsNotOpenDrawsNothing(t *testing.T) {
+	tests := []struct {
+		name string
+		reg  func() sidebar.Registry
+	}{
+		{name: "a closed parent with a closed and an open child", reg: func() sidebar.Registry {
+			return closedRegistry(closedAndOpenChildren()...)
+		}},
+		{name: "a parent absent from the registry", reg: func() sidebar.Registry {
+			unknown := ids.WorkspaceID("ws-unknown")
+			reg := registry(closedAndOpenChildren()...)
+			for i := range reg.Workspaces[1:] {
+				reg.Workspaces[i+1].Parent = &unknown
+			}
+			return reg
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+
+			// Act
+			f.t.SetRegistry(tt.reg())
+			f.t.SetArm(childB, "thinking", "red")
+			f.t.SetSummary(childB, wsm.WorkspaceSummary{Short: "Work"})
+
+			// Assert
+			if got := f.handed(); got != [3]int{} {
+				t.Fatalf("handed %v bubbles, footer lists and menus; want none", got)
+			}
+		})
+	}
+}
+
+func TestAParentClosedAfterBeingDrawnIsHandedNothingMore(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.t.SetRegistry(registry(closedAndOpenChildren()...))
+	drawn := f.handed()
+
+	// Act
+	f.t.SetRegistry(closedRegistry(closedAndOpenChildren()...))
+	f.t.SetArm(childB, "thinking", "red")
+	f.t.SetSummary(childB, wsm.WorkspaceSummary{Short: "Work"})
+
+	// Assert
+	if got := f.handed(); got != drawn {
+		t.Fatalf("handed %v bubbles, footer lists and menus; want %v, nothing after the close", got, drawn)
+	}
+}
+
+func TestAReopenedParentIsDrawnAfresh(t *testing.T) {
+	tests := []struct {
+		name  string
+		first func() sidebar.Registry
+	}{
+		{name: "a parent drawn, closed, then reopened", first: func() sidebar.Registry {
+			return registry(closedAndOpenChildren()...)
+		}},
+		{name: "a parent closed from the start, then reopened", first: func() sidebar.Registry {
+			return closedRegistry(closedAndOpenChildren()...)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			f.t.SetRegistry(tt.first())
+			f.t.SetRegistry(closedRegistry(closedAndOpenChildren()...))
+			before := f.handed()
+
+			// Act
+			f.t.SetRegistry(registry(closedAndOpenChildren()...))
+
+			// Assert
+			if got := f.handed(); got != [3]int{before[0] + 2, before[1] + 1, before[2] + 1} {
+				t.Fatalf("handed %v bubbles, footer lists and menus, from %v; want both bubbles, the footer list and the menu again", got, before)
+			}
+			if f.feed.upserts[len(f.feed.upserts)-1].ws != parent || f.feed.bubble(childA) == nil || f.feed.bubble(childB) == nil {
+				t.Fatalf("upserts = %+v, want both bubbles in the parent's feed", f.feed.upserts)
+			}
+			if got := names(f.footer.last()); !slices.Equal(got, []string{"working"}) {
+				t.Fatalf("footer = %v, want the working child", got)
+			}
+			if menu := f.topbar.last(); len(menu) != 1 || menu[0].Name != "abandoned" {
+				t.Fatalf("menu = %+v, want the abandoned child", menu)
+			}
+		})
+	}
 }

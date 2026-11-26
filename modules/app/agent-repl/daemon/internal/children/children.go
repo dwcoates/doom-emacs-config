@@ -17,6 +17,9 @@
 // predicate (open), so the two can never both list it nor both miss it. A
 // child whose workspace the daemon removed keeps its bubble, its name no
 // longer a door, and leaves the menu.
+//
+// A CHILD IS DRAWN ONLY WHILE ITS PARENT IS OPEN, and a parent's reopen
+// redraws its children afresh.
 package children
 
 import (
@@ -115,7 +118,8 @@ func New(deps Deps) *Tracker {
 }
 
 // SetRegistry takes the registry the roster just installed
-// (sidebar.RegistrySink). A child it no longer carries was removed now.
+// (sidebar.RegistrySink). A child it no longer carries was removed now. A
+// workspace that became open, or stopped being open, is redrawn as a parent.
 func (t *Tracker) SetRegistry(reg sidebar.Registry) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -123,8 +127,12 @@ func (t *Tracker) SetRegistry(reg sidebar.Registry) {
 	parents := map[ids.WorkspaceID]bool{}
 	for _, ws := range reg.Workspaces {
 		seen[ws.ID] = true
-		if prev, ok := t.records[ws.ID]; ok && prev.Parent != nil && (ws.Parent == nil || *ws.Parent != *prev.Parent) {
+		prev, ok := t.records[ws.ID]
+		if ok && prev.Parent != nil && (ws.Parent == nil || *ws.Parent != *prev.Parent) {
 			parents[*prev.Parent] = true
+		}
+		if t.openLocked(ws.ID) != !ws.Closed {
+			parents[ws.ID] = true
 		}
 		t.records[ws.ID] = ws
 		delete(t.removed, ws.ID)
@@ -135,6 +143,9 @@ func (t *Tracker) SetRegistry(reg sidebar.Registry) {
 	for id, ws := range t.records {
 		if seen[id] {
 			continue
+		}
+		if t.openLocked(id) {
+			parents[id] = true
 		}
 		if ws.Parent == nil {
 			delete(t.records, id)
@@ -175,6 +186,24 @@ func (t *Tracker) SetSummary(ws ids.WorkspaceID, summary wsm.WorkspaceSummary) {
 	t.redrawParentLocked(ws)
 }
 
+// openLocked answers whether WS is open: in the last registry and not
+// closed. Only an open parent's children are drawn.
+func (t *Tracker) openLocked(ws ids.WorkspaceID) bool {
+	record, ok := t.records[ws]
+	_, removed := t.removed[ws]
+	return ok && !removed && !record.Closed
+}
+
+// forgetLocked drops what was last drawn and handed for PARENT, so its
+// reopen draws and hands everything afresh.
+func (t *Tracker) forgetLocked(parent ids.WorkspaceID) {
+	delete(t.open, parent)
+	delete(t.closed, parent)
+	for _, child := range t.childrenLocked(parent) {
+		delete(t.drawn, child.ID)
+	}
+}
+
 // redrawParentLocked redraws the parent of WS, if WS is a child.
 func (t *Tracker) redrawParentLocked(ws ids.WorkspaceID) {
 	if record, ok := t.records[ws]; ok && record.Parent != nil {
@@ -200,8 +229,13 @@ func (t *Tracker) childrenLocked(parent ids.WorkspaceID) []wsm.Workspace {
 }
 
 // redrawLocked publishes every bubble of PARENT's children that changed, and
-// hands its footer and menu lists when they changed.
+// hands its footer and menu lists when they changed. A parent that is not
+// open draws nothing, and is forgotten.
 func (t *Tracker) redrawLocked(parent ids.WorkspaceID) {
+	if !t.openLocked(parent) {
+		t.forgetLocked(parent)
+		return
+	}
 	var open []footer.OpenChild
 	type ended struct {
 		child topbar.ClosedChild
