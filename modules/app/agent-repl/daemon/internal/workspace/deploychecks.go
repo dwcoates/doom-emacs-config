@@ -400,7 +400,7 @@ func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws 
 	if resume {
 		answer.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
 	}
-	log.Log(dlog.LevelInfo, opColdGate, why, dlog.Context{"resume": resume})
+	log.Log(dlog.LevelInfo, opDeployChecks, why, dlog.Context{"resume": resume})
 	if err := v.answerColdGate(ctx, ws, answer, settled); err != nil {
 		return false, err
 	}

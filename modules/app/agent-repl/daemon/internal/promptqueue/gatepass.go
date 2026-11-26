@@ -2,7 +2,7 @@ package promptqueue
 
 import (
 	"context"
-	"sort"
+	"slices"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -159,7 +159,7 @@ func (q *queue) gateSenders(ctx context.Context, ws ids.WorkspaceID) ([]ids.Work
 		seen[*w.SentBy] = true
 		senders = append(senders, *w.SentBy)
 	}
-	sort.Slice(senders, func(i, j int) bool { return senders[i] < senders[j] })
+	slices.Sort(senders)
 	return senders, nil
 }
 

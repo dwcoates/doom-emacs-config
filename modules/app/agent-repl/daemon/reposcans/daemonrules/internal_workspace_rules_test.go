@@ -529,9 +529,14 @@ func TestEveryGateAnswerTheDaemonChoosesUsesTheDefaultSummarizerAnswer(t *testin
 		}
 
 		// Assert: the gate answers the daemon makes on its own build their
-		// compaction through one helper, never by hand.
-		if !strings.Contains(string(body), "defaultSummarizerAnswer()") || strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
+		// compaction through one helper, never by hand. The helper's one call
+		// lives in deploychecks.go (answerColdGateByCompaction), which every
+		// automatic pass, answers.go's included, goes through.
+		if strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
 			t.Fatalf("%s builds a gate's compaction by hand; it must use defaultSummarizerAnswer()", file)
+		}
+		if file == "deploychecks.go" && !strings.Contains(string(body), "defaultSummarizerAnswer()") {
+			t.Fatalf("%s no longer builds its gate answers through defaultSummarizerAnswer()", file)
 		}
 	}
 }
