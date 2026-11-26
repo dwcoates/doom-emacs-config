@@ -115,3 +115,15 @@ Its brief names this file, and it is the mediator's to write.
   "it reports more thinking tokens than output tokens" with `taken: false`
   is a provisional report arriving after the settled one, not a change to the
   breakdown.
+- Scenario goldens (2026-11-26): the shim's writer
+  (`AGENT_REPL_SCENARIO_GOLDENS_WRITE=1` on `test/fake/goldens.test.ts`, run
+  under `bin/background.sh`) removes each golden's directory whole, so it
+  deletes the daemon's `feed.json` halves; those are rewritten by the same
+  switch on `daemon/internal/scenariogolden` (`TestEveryScenarioGoldenProjectsToItsFeedGolden`).
+  `agent-repld test run` does not pass the switch through, so both rewrites
+  run by hand. The in-process writer and the real daemon disagree on
+  `compact-failed`: the writer leaves `daemon.footer.on_context_cut` out of
+  the feed golden's warnings while `TestScenarioGoldensRouteThroughARealDaemon`
+  sees the daemon record it, so that file was kept at its committed version;
+  the drift between the in-process projection and the daemon is a harness
+  defect still to fix.
