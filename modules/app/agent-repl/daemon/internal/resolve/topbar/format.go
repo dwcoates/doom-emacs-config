@@ -19,14 +19,6 @@ func formatTokens(n int64) string {
 	return figures.Tokens(uint64(n))
 }
 
-// trimZero drops a trailing ".0" so "18.0k" draws as "18k".
-func trimZero(s string) string {
-	if len(s) > 2 && s[len(s)-2:] == ".0" {
-		return s[:len(s)-2]
-	}
-	return s
-}
-
 // truncate shortens a composed line. The daemon truncates, never the client.
 func truncate(s string, max int) string {
 	if max <= 1 || len([]rune(s)) <= max {
