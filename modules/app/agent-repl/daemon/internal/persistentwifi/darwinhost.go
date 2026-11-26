@@ -112,6 +112,9 @@ func (h *darwinHost) JoinHotspot(ctx context.Context, _, hotspot string) (hotspo
 		join.network = j.Network
 	}
 	join.steps["stage"] = j.Stage
+	if j.JoinedBy != "" {
+		join.steps["joined_by"] = j.JoinedBy
+	}
 	for key, ms := range map[string]*int64{"browse_ms": j.BrowseMs, "enable_ms": j.EnableMs, "scan_ms": j.ScanMs, "join_ms": j.JoinMs} {
 		if ms != nil {
 			join.steps[key] = *ms

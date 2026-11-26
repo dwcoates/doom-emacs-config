@@ -113,6 +113,8 @@ final class SharingPhones: NSObject, HotspotPhones {
 struct CoreWLANRadio: HotspotRadio {
     let iface: CWInterface
 
+    func current() -> String? { iface.ssid() }
+
     func find(ssid: String, within: TimeInterval) -> Result<AnyObject, HotspotFailure> {
         bounded("the scan for \(ssid)", within: within) {
             do {
