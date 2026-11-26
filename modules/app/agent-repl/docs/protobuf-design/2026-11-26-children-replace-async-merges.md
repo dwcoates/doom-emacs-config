@@ -240,3 +240,38 @@ next:
     removal, which means the feed resolver now subscribes to other
     workspaces' facts.
   - A child the user created (no requesting workspace) has no bubble.
+
+### 3. The footer's children chip and panel
+
+- **What changed**
+  - `frontend.v1.FooterLiveWorkChips.merges` (tag 7) and
+    `frontend.v1.FooterExpanded.merges` (tag 8) are retired, with the merges
+    chip and panel messages.
+  - The ⇄ chip is now `frontend.v1.FooterChipChildren`, which counts the open
+    children and carries a waiting-on-you count.
+  - Its panel is `frontend.v1.FooterExpandedChildren`, one
+    `frontend.v1.FooterChildRow` per OPEN child. Each row has:
+    - the name, in the canonical purple
+    - the status, as a word and a color name
+    - the short summary, optional
+    - a select target
+- **Drawing**:
+
+  ```text
+  ┌─ FooterExpandedChildren ───────────────────────────────────────────┐
+  │ ⇄ [FooterChildRowName] [FooterChildRowStatus] [short summary]      │
+  │ ⇄ ...                                                              │
+  └────────────────────────────────────────────────────────────────────┘
+  ```
+
+- **Why**: the owner wants the expanded footer to hold every OPEN child,
+  showing what the summary menu shows: the short summary and the status. The
+  topbar summary's menu holds every child that is NOT open. A child reopened
+  after it merged is open, so it is in the footer.
+- **Decisions**
+  - A row selects the child rather than jumping to its bubble. The bubble is
+    itself only a door, so the row opens the door directly.
+  - The status is a word plus a color name, the same pair the sidebar row
+    draws, resolved from the one ladder.
+- **Consequences**: the footer resolver needs every child's roster status and
+  summary, not just facts about its own workspace.
