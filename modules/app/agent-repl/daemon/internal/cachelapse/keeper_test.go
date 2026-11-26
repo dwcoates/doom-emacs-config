@@ -588,6 +588,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 			return h.gate, h.gate != nil
 		},
 		ContextTokens: func(ids.WorkspaceID) int64 { return h.contextTokens },
+		SmallContext:  SmallContextTokens,
 		Hold: func(ws ids.WorkspaceID) wsm.ShimHold {
 			if h.hold != nil {
 				return h.hold(ws)

@@ -197,6 +197,9 @@ type Deps struct {
 	// for WS, 0 when the vendor reported none (topbar.Resolver.ContextTokens).
 	// A workspace at or below SmallContextTokens is not kept warm.
 	ContextTokens func(ws ids.WorkspaceID) int64
+	// SmallContext is the largest context that is not kept warm: SmallContextTokens,
+	// or a test run's seam (SmallContextFromEnv). Zero keeps every context warm.
+	SmallContext int64
 	// Hold answers until when WS's resource allocation holds its idle shim
 	// up (sidebar.Resolver.ShimHold): every idle park waits on it, and the
 	// roster tells the keeper of each change (ShimHoldChanged).

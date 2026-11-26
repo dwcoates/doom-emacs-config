@@ -74,6 +74,7 @@ func keepaliveWorld(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef, stri
 	t.Helper()
 	w := stack.GroupWorld(t, "keepalive", stack.WorldOpts{DaemonOpts: harness.Opts{
 		KeepaliveInterval: keepaliveTestInterval,
+		KeepSmallContexts: true,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")

@@ -998,6 +998,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve the keep-alive interval: %w", err)
 	}
+	smallContext, err := cachelapse.SmallContextFromEnv(p.Contracts, os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: resolve the small context line for the cache keeper: %w", err)
+	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
 		DB:   p.DB,
 		Why:  sessionWhy,
@@ -1008,6 +1012,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Parked:        lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
 		ColdGate:      func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		ContextTokens: topbarResolver.ContextTokens,
+		SmallContext:  smallContext,
 		Hold:          sidebarResolver.ShimHold,
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID, trigger drain.WithheldTrigger) {
 			drainController.StandDownWithheld(ws, trigger)

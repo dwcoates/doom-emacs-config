@@ -2,7 +2,9 @@ package cachelapse
 
 import (
 	"fmt"
+	"strconv"
 
+	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
 )
 
@@ -26,8 +28,35 @@ const SmallContextTokens int64 = 80_000
 // SmallContextTokens, with the reason it owes no keep-alive when it is.
 func (k *Keeper) smallContext(ws ids.WorkspaceID) (string, bool) {
 	tokens := k.deps.ContextTokens(ws)
-	if tokens <= 0 || tokens > SmallContextTokens {
+	if tokens <= 0 || tokens > k.deps.SmallContext {
 		return "", false
 	}
-	return fmt.Sprintf("its context of %d tokens is at or below %d, too small for a keep-alive to save more than it costs", tokens, SmallContextTokens), true
+	return fmt.Sprintf("its context of %d tokens is at or below %d, too small for a keep-alive to save more than it costs", tokens, k.deps.SmallContext), true
+}
+
+// EnvTestSmallContext replaces SmallContextTokens in a TEST RUN: the keep-alive
+// suites drive scenarios whose contexts are a few hundred tokens, which the
+// production line would leave unkept, and their subject is the beat itself.
+// Its value is a token count, 0 meaning no context is small. Honored only
+// under the vendor guard, as every test-run seam is (IntervalFromEnv).
+const EnvTestSmallContext = "AGENT_REPL_TEST_SMALL_CONTEXT_TOKENS"
+
+// SmallContextFromEnv answers the largest context not kept warm in this
+// process: SmallContextTokens, or EnvTestSmallContext's value in a test run.
+func SmallContextFromEnv(contracts envc.Contracts, getenv func(string) string) (int64, error) {
+	raw := getenv(EnvTestSmallContext)
+	if raw == "" {
+		return SmallContextTokens, nil
+	}
+	if err := contracts.RequireTestRun(EnvTestSmallContext+"="+raw, "a live daemon leaves contexts of "+strconv.FormatInt(SmallContextTokens, 10)+" tokens or fewer unkept"); err != nil {
+		return 0, fmt.Errorf("cachelapse: %w", err)
+	}
+	tokens, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cachelapse: %s=%q is not a token count: %w", EnvTestSmallContext, raw, err)
+	}
+	if tokens < 0 {
+		return 0, fmt.Errorf("cachelapse: %s=%q is negative", EnvTestSmallContext, raw)
+	}
+	return tokens, nil
 }

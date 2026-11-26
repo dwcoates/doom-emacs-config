@@ -380,6 +380,11 @@ type Opts struct {
 	// keep-alive turn -- its rewind, what it stores, a prompt racing it --
 	// which cannot see one otherwise. Zero leaves the production cadence.
 	KeepaliveInterval time.Duration
+	// KeepSmallContexts makes the daemon keep every context warm through its
+	// test-run seam (cachelapse.EnvTestSmallContext = 0): the suites whose
+	// subject is a keep-alive drive scenarios with contexts the production
+	// line (cachelapse.SmallContextTokens) leaves unkept.
+	KeepSmallContexts bool
 	// FooterMomentaryDwell compresses the footer's momentary-status dwell via
 	// --footer-momentary-dwell. It exists for the two tests whose subject IS
 	// the retirement: the product window is 1.5s because a person has to read
@@ -1003,6 +1008,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	}
 	if opts.KeepaliveInterval > 0 {
 		env = append(env, cachelapse.EnvTestKeepaliveInterval+"="+opts.KeepaliveInterval.String())
+	}
+	if opts.KeepSmallContexts {
+		env = append(env, cachelapse.EnvTestSmallContext+"=0")
 	}
 	env = append(env, BuildIdentityEnv(d.Checkout)...)
 	env = append(env, HostNeutralNamingEnv()...)

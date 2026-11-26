@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
 )
 
@@ -73,5 +74,47 @@ func TestNewRefusesNoContextSizes(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "context sizes") {
 		t.Fatalf("err = %v, want the missing context sizes refused", err)
+	}
+}
+
+func TestSmallContextFromEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		forbid  string
+		value   string
+		want    int64
+		wantErr string
+	}{
+		{name: "no seam leaves the production line", forbid: "", value: "", want: SmallContextTokens},
+		{name: "a live daemon handed the seam refuses to boot", forbid: "", value: "0", wantErr: "test-run seam"},
+		{name: "a test-run daemon honors the seam", forbid: "1", value: "0", want: 0},
+		{name: "a value that is not a count is refused", forbid: "1", value: "lots", wantErr: "is not a token count"},
+		{name: "a negative count is refused", forbid: "1", value: "-5", wantErr: "is negative"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv(envc.EnvForbidVendorCalls, tc.forbid)
+			getenv := func(key string) string {
+				if key == EnvTestSmallContext {
+					return tc.value
+				}
+				return ""
+			}
+
+			// Act
+			got, err := SmallContextFromEnv(envc.Load(), getenv)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("SmallContextFromEnv = %v, %v; want an error containing %q", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("SmallContextFromEnv = %v, %v; want %v", got, err, tc.want)
+			}
+		})
 	}
 }
