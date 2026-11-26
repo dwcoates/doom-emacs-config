@@ -412,6 +412,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	followNotices := workspacesubs.New(workspacesubs.Deps{
 		Notices:     p.Metrics,
 		Subscribers: p.DB,
+		Records:     p.DB,
 		Holds:       holdsRef,
 		Untold:      p.DB,
 		Status:      verbsRef.status,

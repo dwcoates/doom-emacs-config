@@ -109,8 +109,24 @@ func (u *fakeUntold) RecordUntoldWorkspaceNotice(_ context.Context, n wsm.Untold
 	return nil
 }
 
+// fakeRecords answers the landed workspace's record, or err.
+type fakeRecords struct {
+	record wsm.Workspace
+	err    error
+}
+
+func (r *fakeRecords) Workspace(_ context.Context, id wsm.WorkspaceID) (wsm.Workspace, error) {
+	if r.err != nil {
+		return wsm.Workspace{}, r.err
+	}
+	record := r.record
+	record.ID = id
+	return record, nil
+}
+
 type fixture struct {
 	s         *Service
+	records   *fakeRecords
 	prompts   *fakePrompts
 	subs      *fakeSubscribers
 	holds     *fakeHolds
@@ -118,16 +134,18 @@ type fixture struct {
 	status    func() *agentreplv1.WorkspaceStatus
 	statusErr error
 	briefErr  error
+	mintErr   error
 	logs      *dlog.TestSurfaces
 }
 
 func newFixture() *fixture {
 	f := &fixture{prompts: &fakePrompts{failFor: map[ids.WorkspaceID]error{}}, subs: &fakeSubscribers{},
 		holds: &fakeHolds{retired: true}, untold: &fakeUntold{rows: map[[2]ids.WorkspaceID]wsm.UntoldWorkspaceNotice{}},
-		status: idleStatus, logs: dlog.NewTestSurfaces()}
+		status: idleStatus, logs: dlog.NewTestSurfaces(), records: &fakeRecords{}}
 	keys := 0
 	f.s = New(Deps{
 		Subscribers: f.subs,
+		Records:     f.records,
 		Holds:       f.holds,
 		Untold:      f.untold,
 		Status: func(_ context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error) {
@@ -141,12 +159,18 @@ func newFixture() *fixture {
 			if f.briefErr != nil {
 				return "", f.briefErr
 			}
+			if name == BriefChildLanded {
+				return "child-landed|" + values["child"], nil
+			}
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
 			}
 			return briefText + values["label"] + "|" + values["why"] + "|" + values["event"] + "|" + values["status"] + "|" + values["stop"], nil
 		},
 		MintKey: func(prefix string) (string, error) {
+			if f.mintErr != nil {
+				return "", f.mintErr
+			}
 			keys++
 			return fmt.Sprintf("%s-%d", prefix, keys), nil
 		},
@@ -703,4 +727,160 @@ func TestAParentsUpdateThatCannotBeMarkedSpentIsRecorded(t *testing.T) {
 		Message: "the parent was told its child's one update but it could not be recorded as spent; the child's next conclusion is told too"}); !ok {
 		t.Fatalf("records = %+v, want the failed mark at error", f.logs.Records())
 	}
+}
+
+func TestAOneShotChildsLandingIsToldItsParentInOneLine(t *testing.T) {
+	tests := []struct {
+		name          string
+		parentFollows bool
+		want          string
+	}{
+		{name: "a parent following its child", parentFollows: true, want: "child-landed|followed"},
+		{name: "a subscriber", want: briefText + "workspace `followed`: landed|"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			sub := subscribed(watcherA, wsm.WorkspaceEventLanded)
+			sub.ParentFollows = tt.parentFollows
+			f.subs.subs = []wsm.WorkspaceSubscription{sub}
+
+			// Act
+			f.s.Landed(followed)
+			f.deliverAll()
+
+			// Assert
+			if len(f.prompts.got) != 1 || !strings.HasPrefix(f.prompts.got[0].text, tt.want) {
+				t.Fatalf("submitted = %+v, want one notice starting %q", f.prompts.got, tt.want)
+			}
+			if tt.parentFollows && strings.Contains(f.prompts.got[0].text, "\n") {
+				t.Fatalf("the parent's notice %q is more than one line", f.prompts.got[0].text)
+			}
+		})
+	}
+}
+
+// requested marks the fixture's landed workspace as a one-shot WATCHERA
+// requested, with EFFECTS.
+func (f *fixture) requested(effects *wsm.LandingEffects) {
+	requester := watcherA
+	f.records.record = wsm.Workspace{OneShot: true, RequestedBy: &requester, Effects: effects}
+}
+
+func TestALandingCompactsTheRequesterOnlyWhenItsCreatorAsked(t *testing.T) {
+	tests := []struct {
+		name    string
+		effects *wsm.LandingEffects
+		want    bool
+	}{
+		{name: "a one-shot asked to compact its requester", effects: &wsm.LandingEffects{CompactRequester: true}, want: true},
+		{name: "a one-shot with other effects", effects: &wsm.LandingEffects{ProfileGate: true}},
+		{name: "a one-shot with no effects"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the requester is the parent, told the landing first.
+			f := newFixture()
+			sub := subscribed(watcherA, wsm.WorkspaceEventLanded)
+			sub.ParentFollows = true
+			f.subs.subs = []wsm.WorkspaceSubscription{sub}
+			f.requested(tt.effects)
+
+			// Act
+			f.s.Landed(followed)
+			f.deliverAll()
+
+			// Assert: the notice, then the compaction deferred behind it.
+			want := 1
+			if tt.want {
+				want = 2
+			}
+			if len(f.prompts.got) != want {
+				t.Fatalf("submitted = %+v, want %d", f.prompts.got, want)
+			}
+			if !tt.want {
+				return
+			}
+			compaction := f.prompts.got[1]
+			if compaction.ws != watcherA || compaction.text != CompactCommand || compaction.origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER || !compaction.defer_ {
+				t.Fatalf("compaction = %+v, want the deferred /compact to the requester", compaction)
+			}
+			if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op,
+				Message: "submitted the compaction a landed one-shot asked for to its requester"}); !ok {
+				t.Fatalf("records = %+v, want the compaction recorded", f.logs.Records())
+			}
+		})
+	}
+}
+
+func TestANoticeOtherThanALandingCompactsNothing(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventTurnEnded)}
+	f.requested(&wsm.LandingEffects{CompactRequester: true})
+
+	// Act
+	f.s.TurnEnded(followed)
+	f.deliverAll()
+
+	// Assert
+	if len(f.prompts.got) != 1 {
+		t.Fatalf("submitted = %+v, want the notice alone", f.prompts.got)
+	}
+}
+
+func TestALandingsCompactionThatFailsIsRecordedAndSendsNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "the record will not read", arrange: func(f *fixture) { f.records.err = errors.New("store closed") },
+			message: "could not read the landed workspace's record; a compaction its requester asked for is not sent"},
+		{name: "no key mints", arrange: func(f *fixture) { f.mintErr = errors.New("no entropy") },
+			message: "could not mint the idempotency key of a landed one-shot's compaction; its requester is not compacted"},
+		{name: "the submission is refused", arrange: func(f *fixture) { f.prompts.failFor[watcherA] = errors.New("refused") },
+			message: "could not submit the compaction a landed one-shot asked for; its requester is not compacted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: nobody subscribes, so the compaction is the only send.
+			f := newFixture()
+			f.requested(&wsm.LandingEffects{CompactRequester: true})
+			tt.arrange(f)
+
+			// Act
+			f.s.Landed(followed)
+			f.deliverAll()
+
+			// Assert
+			if len(f.prompts.got) != 0 {
+				t.Fatalf("submitted = %+v, want nothing", f.prompts.got)
+			}
+			rec, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: tt.message})
+			if !ok || rec.Context["workspace"] != string(followed) {
+				t.Fatalf("records = %+v, want %q naming the workspace", f.logs.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestALandedOneShotAskingToCompactNoRequesterPanics(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.records.record = wsm.Workspace{OneShot: true, Effects: &wsm.LandingEffects{CompactRequester: true}}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a compaction with no requester was not refused loudly")
+		}
+		if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op,
+			Message: "a landed one-shot asks to compact its requester but records none"}); !ok {
+			t.Fatalf("records = %+v, want the defect at error", f.logs.Records())
+		}
+	}()
+
+	// Act
+	f.s.compactRequester(context.Background(), f.prompts, followed)
 }
