@@ -37,6 +37,21 @@ export type Color = "none" | "blue" | "purple" | "red" | "turquoise" | "yellow" 
 /** The three sides a failure can land on, from `failure_sides`. */
 export type FailureSide = "machinery" | "vendor" | "client_local";
 
+/** Every color name the shared vocabulary declares (`colors`), and `none`. */
+const COLOR_NAMES: readonly string[] = ["none", ...renderColors.colors];
+
+/**
+ * The color a wire field names by NAME (`render-colors.json#colors`, or
+ * `none`), checked:
+ * a name the file does not declare is a MalformedView at PATH, never a guess.
+ */
+export function wireColor(name: string, path: string): Color {
+  if (!COLOR_NAMES.includes(name)) {
+    throw new MalformedView(path, `'${name}' is no color of render-colors.json`);
+  }
+  return name as Color;
+}
+
 /** The CSS class a color paints with. Defined once by the chassis. */
 export function toneClass(color: Color): string {
   return `tone-${color}`;

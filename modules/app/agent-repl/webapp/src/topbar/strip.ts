@@ -45,6 +45,7 @@ import type {
   TopbarConnectivity,
   TopbarSessionLine,
   TopbarTitle,
+  TopbarTitleChildMenu,
   TopbarTitleDescription,
   TopbarWorkspaceNameLinkMenu,
   TopbarWorkspaceName,
@@ -54,7 +55,9 @@ import { renderMarkdown } from "../markdown.js";
 import { drawLinkBadge, drawLinkMarks } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
 import { createLogger } from "../log.js";
-import { requireCase, unreachableArm } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { jumpToWorkspace, type JumpSite } from "../feed/merge/jump.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import { drawNamePrefix } from "../name-prefix.js";
 import type { TopbarContext } from "./context.js";
@@ -196,6 +199,9 @@ export const LINKS_REVEAL = "links";
 /** The summary's hover popup's name in the strip's one reveal layer. */
 export const DESCRIPTION_REVEAL = "description";
 
+/** The summary's click menu of children's name in the strip's one reveal layer. */
+export const CHILDREN_REVEAL = "children";
+
 /** A menu row whose link the workspace's work made: drawn on a lighter ground, its label in the summary's purple. */
 export const OWNED_LINK_CLASS = "is-owned";
 /** A menu row that carries a pull request badge, which reserves its margin. */
@@ -211,7 +217,73 @@ export const LINK_HEAD_CLASS = "topbar-name-link-head";
 export function drawTopbarTitle(u: TopbarTitle, tc: TopbarContext): HTMLElement {
   const element = drawHeadingLine("topbar-title", u.text);
   if (u.description !== undefined) bindTitleDescription(element, u.description, tc);
+  if (u.childMenu !== undefined) bindTitleChildMenu(element, u.childMenu, tc);
   return element;
+}
+
+/** Where a child menu row's jump is recorded and its refusal drawn. */
+const CHILD_JUMP: JumpSite = {
+  describe: "a child that is not open",
+  operation: "topbar.child-menu.select",
+  refusalClass: "topbar-child-refusal",
+};
+
+/**
+ * Wire the summary's click to the menu of the workspace's children that are
+ * not open (`TopbarTitle.child_menu`). The summary takes a pointer and a
+ * click only while the menu stands; it is never underlined.
+ */
+export function bindTitleChildMenu(element: HTMLElement, menu: TopbarTitleChildMenu, tc: TopbarContext): void {
+  element.classList.add("topbar-title-menu");
+  asAnchor(element, CHILDREN_REVEAL);
+  const body = (): HTMLElement => drawTitleChildMenu(menu, tc);
+  tc.reveals.register(CHILDREN_REVEAL, CHILDREN_REVEAL, body);
+  element.addEventListener("click", (event) => {
+    event.stopPropagation();
+    tc.reveals.toggle(CHILDREN_REVEAL, CHILDREN_REVEAL, body);
+  });
+}
+
+/**
+ * The summary's child menu, in the link menu's look: one row per child, the
+ * one that stopped being open most recently first, its short summary as its
+ * title and its name as the dim second line (its name alone when it never
+ * set a summary), and its standing's badge in the right margin. A click on a
+ * row selects the child, reopening a closed one, and closes the menu.
+ */
+export function drawTitleChildMenu(menu: TopbarTitleChildMenu, tc: TopbarContext): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "topbar-name-link-options list-rows";
+  menu.items.forEach((item, index) => {
+    const path = `TopbarTitleChildMenu.items[${index}]`;
+    const target = requireMessage(requireMessage(item.select, `${path}.select`).target, `${path}.select.target`);
+    const name = requireMessage(item.name, `${path}.name`).text;
+    const badge = requireCase(requireMessage(item.badge, `${path}.badge`).standing, `${path}.badge.standing`);
+    const row = document.createElement("div");
+    row.className = `topbar-name-link-option topbar-child-option ${BADGED_LINK_CLASS}`;
+    row.setAttribute("data-child", target.id);
+    const head = document.createElement("div");
+    head.className = LINK_HEAD_CLASS;
+    head.textContent = item.title?.text ?? name;
+    row.append(head);
+    if (item.title !== undefined) {
+      const second = document.createElement("span");
+      second.className = "topbar-name-link-url";
+      second.textContent = name;
+      row.append(second);
+    }
+    const mark = document.createElement("span");
+    mark.className = "topbar-name-link-badge topbar-child-badge";
+    mark.setAttribute("data-badge", badge.case);
+    mark.textContent = badge.case;
+    row.append(mark);
+    row.addEventListener("click", () => {
+      tc.reveals.close();
+      void guardMalformed(tc.ctx, "topbar.child-menu.select", jumpToWorkspace(row, tc.ctx, target, CHILD_JUMP));
+    });
+    list.append(row);
+  });
+  return list;
 }
 
 /**
