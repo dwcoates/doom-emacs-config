@@ -73,10 +73,10 @@ public struct ScreenScan: Equatable, Sendable {
     public var notifications: [ShownNotification]
     /// Each window that held neither a notification nor the panel's list (a
     /// layout this launcher does not recognize), by a key naming the window
-    /// for as long as it is open.
-    public var unrecognizedWindows: Set<String>
+    /// for as long as it is open, with its layout (`layoutOutline`).
+    public var unrecognizedWindows: [String: String]
 
-    public init(notifications: [ShownNotification], unrecognizedWindows: Set<String> = []) {
+    public init(notifications: [ShownNotification], unrecognizedWindows: [String: String] = [:]) {
         self.notifications = notifications
         self.unrecognizedWindows = unrecognizedWindows
     }
@@ -166,11 +166,11 @@ public final class NotificationCloser {
     /// screen is forgotten.
     public func screenChanged() {
         guard let scan = look() else { return }
-        for window in scan.unrecognizedWindows.subtracting(reportedWindows).sorted() {
+        for (window, layout) in scan.unrecognizedWindows.sorted(by: { $0.key < $1.key }) where !reportedWindows.contains(window) {
             log.warn(CloserOp.close, "a Notification Center window holds no notification this launcher recognizes; macOS may have changed its layout, and notifications in it stay on screen",
-                     ["window": window])
+                     ["window": window, "layout": layout])
         }
-        reportedWindows = scan.unrecognizedWindows
+        reportedWindows = Set(scan.unrecognizedWindows.keys)
         let now = scheduler.now()
         var shown: Set<String> = []
         for notification in scan.notifications {
