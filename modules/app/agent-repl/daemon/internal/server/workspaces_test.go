@@ -4293,3 +4293,175 @@ func TestCreateWorkspaceFailsWhenTheRequestersStandingCannotBeRead(t *testing.T)
 		t.Fatalf("ERROR records = %+v, want the failed standing read recorded", log.at("ERROR"))
 	}
 }
+
+// oneShotForm is a one-shot peer of PROMPT, edited by EDIT.
+func oneShotForm(edit func(*agentreplv1.CreateWorkspaceOneShot)) *agentreplv1.CreateWorkspaceRequest_OneShot {
+	form := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("land the fix"), Relationship: peerRelationship()}
+	if edit != nil {
+		edit(form)
+	}
+	return &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: form}
+}
+
+func TestCreateWorkspaceMapsTheSourceBranchAndTheLandingEffectsOntoTheSpec(t *testing.T) {
+	closer := ids.WorkspaceID("ws-close")
+	tests := []struct {
+		name        string
+		edit        func(r *agentreplv1.CreateWorkspaceRequest)
+		wantSource  string
+		wantCleanup bool
+		wantEffects *wsm.LandingEffects
+	}{
+		{name: "a standard create cut from a source branch", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.GetStandard().SourceBranch = &agentreplv1.WorkspaceSourceBranch{Branch: " agent/fix "}
+		}, wantSource: "agent/fix"},
+		{name: "a one-shot cut from a source branch it cleans up", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.Form = oneShotForm(func(o *agentreplv1.CreateWorkspaceOneShot) {
+				o.SourceBranch = &agentreplv1.WorkspaceSourceBranch{Branch: "agent/fix"}
+				o.CleanupSourceWorktree = true
+			})
+		}, wantSource: "agent/fix", wantCleanup: true},
+		{name: "a one-shot that compacts its requester and profiles its gate", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.Requester = workspaceRequester(ref())
+			r.Form = oneShotForm(func(o *agentreplv1.CreateWorkspaceOneShot) {
+				o.CompactRequesterAfter, o.ProfileGate = true, true
+			})
+		}, wantEffects: &wsm.LandingEffects{CompactRequester: true, ProfileGate: true}},
+		{name: "a one-shot that closes another workspace once it lands", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.Form = oneShotForm(func(o *agentreplv1.CreateWorkspaceOneShot) {
+				o.CloseAfter = &agentreplv1.CreateWorkspaceCloseAfter{Workspace: &workspacev1.WorkspaceRef{Id: string(closer)}}
+			})
+		}, wantEffects: &wsm.LandingEffects{CloseAfter: closer}},
+		{name: "a one-shot with no effects", edit: func(r *agentreplv1.CreateWorkspaceRequest) { r.Form = oneShotForm(nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.DB.workspaces[closer] = wsm.Workspace{ID: closer, Repo: "repo-1", Dir: "/tmp/close", Name: "close"}
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := validCreate(tt.edit)
+			req.Repository = repoRef
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = %v, %v; want success", resp, err)
+			}
+			spec := h.Verbs.createSpecs[0]
+			if spec.SourceBranch != tt.wantSource || spec.CleanupSourceWorktree != tt.wantCleanup || !reflect.DeepEqual(spec.Effects, tt.wantEffects) {
+				t.Fatalf("spec = source %q cleanup %v effects %+v; want %q %v %+v",
+					spec.SourceBranch, spec.CleanupSourceWorktree, spec.Effects, tt.wantSource, tt.wantCleanup, tt.wantEffects)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceRefusesACloseAfterItCannotClose(t *testing.T) {
+	closer := ids.WorkspaceID("ws-close")
+	tests := []struct {
+		name    string
+		arrange func(h *harness, r *agentreplv1.CreateWorkspaceRequest)
+	}{
+		{name: "the requester itself", arrange: func(_ *harness, r *agentreplv1.CreateWorkspaceRequest) {
+			r.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(closer)})
+		}},
+		{name: "an unregistered workspace", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) { delete(h.DB.workspaces, closer) }},
+		{name: "a closed workspace", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
+			ws := h.DB.workspaces[closer]
+			ws.Closed = true
+			h.DB.workspaces[closer] = ws
+		}},
+		{name: "a workspace of another repository", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
+			ws := h.DB.workspaces[closer]
+			ws.Repo = "repo-2"
+			h.DB.workspaces[closer] = ws
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.DB.workspaces[closer] = wsm.Workspace{ID: closer, Repo: "repo-1", Dir: "/tmp/close", Name: "close"}
+			req := validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = oneShotForm(func(o *agentreplv1.CreateWorkspaceOneShot) {
+					o.CloseAfter = &agentreplv1.CreateWorkspaceCloseAfter{Workspace: &workspacev1.WorkspaceRef{Id: string(closer)}}
+				})
+			})
+			req.Repository = repoRef
+			tt.arrange(h, req)
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert: refused on its arm, and nothing created.
+			if err != nil || resp.Msg.GetError().GetUnknownCloseAfter() == nil {
+				t.Fatalf("CreateWorkspace = %v, %v; want the unknown_close_after refusal", resp, err)
+			}
+			if len(h.Verbs.createSpecs) != 0 {
+				t.Fatalf("creates = %d, want none", len(h.Verbs.createSpecs))
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceForksTheSessionThatSpawnedASubagent(t *testing.T) {
+	spawner := ids.WorkspaceID("ws-spawner")
+	tests := []struct {
+		name     string
+		spawners map[string]wsm.Workspace
+		findErr  error
+		want     func(t *testing.T, h *harness, resp *agentreplv1.CreateWorkspaceResponse, err error)
+	}{
+		{name: "a subagent its spawner's session holds", spawners: map[string]wsm.Workspace{"a1": {ID: spawner}},
+			want: func(t *testing.T, h *harness, resp *agentreplv1.CreateWorkspaceResponse, err error) {
+				if err != nil || resp.GetSuccess() == nil {
+					t.Fatalf("CreateWorkspace = %v, %v; want success", resp, err)
+				}
+				spec := h.Verbs.createSpecs[0]
+				if spec.ForkFrom == nil || *spec.ForkFrom != spawner || spec.ForkSubagent != "a1" {
+					t.Fatalf("spec = fork %v subagent %q; want %s's subagent a1", spec.ForkFrom, spec.ForkSubagent, spawner)
+				}
+			}},
+		{name: "a subagent no session holds",
+			want: func(t *testing.T, h *harness, resp *agentreplv1.CreateWorkspaceResponse, err error) {
+				if err != nil || resp.GetError().GetUnknownSubagent().GetAgentId() != "a1" || len(h.Verbs.createSpecs) != 0 {
+					t.Fatalf("CreateWorkspace = %v, %v (creates %d); want the unknown_subagent refusal naming a1", resp, err, len(h.Verbs.createSpecs))
+				}
+			}},
+		{name: "a finder that fails", findErr: errors.New("transcripts unreadable"),
+			want: func(t *testing.T, h *harness, resp *agentreplv1.CreateWorkspaceResponse, err error) {
+				if err == nil || len(h.Verbs.createSpecs) != 0 {
+					t.Fatalf("CreateWorkspace = %v, %v (creates %d); want the failure and nothing created", resp, err, len(h.Verbs.createSpecs))
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.Makers.spawners, h.Makers.err = tt.spawners, tt.findErr
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.ContextOrigin = &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Subagent{
+					Subagent: &agentreplv1.WorkspaceContextOriginSubagent{AgentId: " a1 "}}}
+			})
+			req.Repository = repoRef
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			var msg *agentreplv1.CreateWorkspaceResponse
+			if resp != nil {
+				msg = resp.Msg
+			}
+			tt.want(t, h, msg, err)
+		})
+	}
+}
