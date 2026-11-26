@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/dlog"
 )
 
 // openChild is an open child named NAME, waiting on the user when WAITING.
@@ -101,5 +103,48 @@ func TestTheOpenChildrenAreCopiedNotShared(t *testing.T) {
 	rows := h.view(t).GetExpanded().GetChildren().GetRows()
 	if len(rows) != 1 || rows[0].GetName().GetText() != "changed" {
 		t.Fatalf("rows = %v, want the one child as last installed", rows)
+	}
+}
+
+func TestAnOpenChildWithoutItsStatusOrToneIsRecordedAndFailsHard(t *testing.T) {
+	tests := []struct {
+		name  string
+		blank func(*OpenChild)
+	}{
+		{name: "empty tone", blank: func(c *OpenChild) { c.Tone = "" }},
+		{name: "empty status", blank: func(c *OpenChild) { c.Status = "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			bad := openChild("b", false)
+			tt.blank(&bad)
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("a child without its status or tone did not fail hard")
+				}
+				errs := recordsOf(h.log.Records(), "daemon.footer.set_open_children")
+				var got []dlog.Record
+				for _, rec := range errs {
+					if rec.Level == dlog.LevelError {
+						got = append(got, rec)
+					}
+				}
+				if len(got) != 1 {
+					t.Fatalf("ERROR records = %+v, want one", got)
+				}
+				ctx := got[0].Context
+				if ctx["parent"] != string(testWS) || ctx["child_id"] != "ws-b" || ctx["child_name"] != "b" ||
+					ctx["invariant_violation"] != "the children tracker hands only children whose arm is decided" {
+					t.Fatalf("record context = %v, want the parent, the child's ref id and name, and the invariant", ctx)
+				}
+			}()
+
+			// Act
+			h.r.SetOpenChildren(testWS, []OpenChild{openChild("a", false), bad})
+		})
 	}
 }

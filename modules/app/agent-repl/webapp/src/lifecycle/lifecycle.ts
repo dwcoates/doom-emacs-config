@@ -33,8 +33,12 @@
  * again in place at every handover. `no_transfer_announced` is the ORDINARY
  * answer for a page that booted without a handover, so it is a debug line and
  * never an alarm; `not_yet_adopted` is the successor still finishing its
- * rendezvous and is retried with backoff; every other arm is a boot failure,
- * because a page that cannot be adopted cannot honestly show a workspace.
+ * rendezvous and is retried with backoff, inside `adoptAtBoot` alone; every
+ * other arm is a boot failure, because a page that cannot be adopted cannot
+ * honestly show a workspace. The page's streams never meet `not_yet_adopted`:
+ * the in-place adoption holds the context's adoption latch from the move until
+ * `AdoptWebWorkspace` answers, and every stream reopen waits behind it
+ * (`DaemonContext.awaitAdopted`, rpc/context.ts).
  *
  * THE BANNER IS ONE HOST WITH TWO STANDING NOTICES, in precedence order:
  * restarting (an announced outage) and the scheduled drain. They share a host
@@ -203,9 +207,14 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
       operation: "lifecycle.transferred",
       context: {},
     }, { address });
+    // EVERY STREAM REOPEN WAITS BEHIND THIS ADOPTION (context.ts): the
+    // successor refuses every per-workspace rpc until it completes, and the
+    // page's streams end and reopen there while it may still be held.
+    ctx.holdForAdoption();
     void adoptInPlace(ctx, webappBuild).then(
       (outcome) => {
         moving = false;
+        ctx.adoptionSettled();
         if (outcome === "rehomed") {
           log.info("the workspace is adopted where it is served now; this page keeps its streams until its daemon hands them on", {
             operation: "lifecycle.adopted-in-place",
@@ -223,6 +232,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
         // `adoptAtBoot` recorded and reported the refusal it threw; a page
         // whose workspace could not be adopted cannot honestly show it.
         moving = false;
+        ctx.adoptionSettled();
         log.error("this page could not adopt its workspace in place: {cause}", {
           operation: "lifecycle.adopt-in-place-failed",
           context: { address },

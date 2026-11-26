@@ -21,6 +21,19 @@
  * no reconnect. A page that merely stopped drawing would still be firing verbs
  * at a daemon that has handed the workspace away, and every one of them would
  * come back as a refusal the user did nothing to cause.
+ *
+ * EVERY STREAM REOPEN ON THE PAGE WAITS BEHIND THE IN-PLACE ADOPTION. A
+ * successor refuses every per-workspace rpc `not_yet_adopted` until the
+ * adoption it holds completes, and at a handover the page's streams end (the
+ * incumbent's promotion) and reopen on the shared address, which the successor
+ * now answers, while the page's `AdoptWebWorkspace` may still be held there.
+ * The lifecycle holds the adoption latch (`holdForAdoption`) from the move
+ * until that call answers (`adoptionSettled`), and every reopen waits on it
+ * (`awaitAdopted`) before it opens anything. The ordering makes the latch
+ * sound: the `transferred` push and the ends of the page's subscriptions ride
+ * the page's one stream in order, so the page starts adopting before any
+ * subscription of the workspace ends. `AdoptWebWorkspace` is a unary, and the
+ * latch never holds it.
  */
 import type { StreamCostMeter } from "../stream-cost.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -117,6 +130,22 @@ export interface DaemonContext {
    * Record one frame's main-thread cost. See StreamContext.noteStreamCost.
    */
   noteStreamCost(stream: string, ms: number): void;
+  /**
+   * Mark that an in-place adoption is being answered: every stream reopen
+   * waits (`awaitAdopted`) until `adoptionSettled`. A second hold while one
+   * stands is the same hold.
+   */
+  holdForAdoption(): void;
+  /**
+   * Release the adoption hold, whether the adoption succeeded or failed (a
+   * page whose adoption failed goes quiet anyway). A no-op with no hold.
+   */
+  adoptionSettled(): void;
+  /**
+   * Resolve at once when no adoption is held, else when it settles or SIGNAL
+   * aborts. See StreamContext.awaitAdopted.
+   */
+  awaitAdopted(signal: AbortSignal, stream?: string): Promise<void>;
 }
 
 /** A workspace page's context: the daemon context, plus the workspace it shows. */
@@ -227,6 +256,9 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   const quietListeners = createListeners();
   const pushListeners = createListeners();
   const restoredListeners = createListeners();
+  /** Whether an in-place adoption is being answered (holdForAdoption). */
+  let adopting = false;
+  const adoptedListeners = createListeners();
   const base = {
     webappBuild: init.webappBuild,
     client: init.client,
@@ -268,6 +300,30 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
       // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves; only the web view
       // host's movable origin does.
       return init.daemon?.onMoved(fn) ?? ((): void => undefined);
+    },
+    holdForAdoption(): void {
+      adopting = true;
+    },
+    adoptionSettled(): void {
+      if (!adopting) return;
+      adopting = false;
+      adoptedListeners.notify();
+    },
+    awaitAdopted(signal: AbortSignal, stream?: string): Promise<void> {
+      if (!adopting || signal.aborted) return Promise.resolve();
+      log.debug("a stream reopen waits for the page's in-place adoption to answer", {
+        operation: "rpc.stream-awaits-adoption",
+        context: stream === undefined ? {} : { rpc: stream },
+      });
+      return new Promise<void>((resolve) => {
+        const done = (): void => {
+          unsubscribe();
+          signal.removeEventListener("abort", done);
+          resolve();
+        };
+        const unsubscribe = adoptedListeners.add(done);
+        signal.addEventListener("abort", done, { once: true });
+      });
     },
     onQuiesced(fn: () => void): () => void {
       // A subscriber arriving AFTER the page went quiet is told at once, or a

@@ -856,6 +856,88 @@ describe("watchStream: reopen", () => {
   });
 });
 
+describe("watchStream: a reopen behind the page's in-place adoption", () => {
+  /** A stream that stays open until aborted, counting its opens. */
+  function standingStream(ctx: AppContext) {
+    const state = { openCount: 0 };
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: async function* (_client, signal) {
+        state.openCount += 1;
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield* [] as WatchFooterResponse[];
+      },
+      onPush: () => undefined,
+      backoff: BACKOFF,
+    });
+    return { handle, state };
+  }
+
+  it("opens nothing again while the adoption is held", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const { handle, state } = standingStream(ctx);
+    await settle();
+    ctx.holdForAdoption();
+    // ACT: the run ends, as the incumbent's promotion ends it.
+    handle.reopen();
+    await advance(10_000);
+    // ASSERT
+    expect(state.openCount).toBe(1);
+    handle.cancel();
+  });
+
+  it("reopens once when the adoption settles", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const { handle, state } = standingStream(ctx);
+    await settle();
+    ctx.holdForAdoption();
+    handle.reopen();
+    await settle();
+    // ACT
+    ctx.adoptionSettled();
+    await settle();
+    // ASSERT
+    expect(state.openCount).toBe(2);
+    handle.cancel();
+  });
+
+  it("ends at a cancel during the wait, opening nothing more", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const { handle, state } = standingStream(ctx);
+    await settle();
+    ctx.holdForAdoption();
+    handle.reopen();
+    await settle();
+    // ACT
+    handle.cancel();
+    await settle();
+    ctx.adoptionSettled();
+    await advance(10_000);
+    // ASSERT
+    expect(state.openCount).toBe(1);
+  });
+
+  it("never holds the first run, which the boot's adoption already precedes", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const ctx = contextFor(client, new RecordingSink());
+    ctx.holdForAdoption();
+    // ACT
+    const { handle, state } = standingStream(ctx);
+    await settle();
+    // ASSERT
+    expect(state.openCount).toBe(1);
+    handle.cancel();
+  });
+});
+
 describe("watchStream: cancel", () => {
   it("stops reopening", async () => {
     const sink = new RecordingSink();

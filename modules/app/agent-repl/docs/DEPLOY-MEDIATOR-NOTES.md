@@ -163,3 +163,14 @@ Its brief names this file, and it is the mediator's to write.
   means a new writer runs on the joining daemon before its promotion; the fix
   is the store's held-write pattern (hold under `heldMu`, write in `Promote`),
   never a wait or a retry in the caller.
+- A webapp `rpc.stream-frame-undecodable` or `footer.verdict-redraw-undecodable`
+  whose path ends in `.tone` with the cause `'' is no color of
+  render-colors.json` means a daemon writer composed a row before the sidebar
+  decided the workspace's arm (the registry sink fires before any render); the
+  fix is in the writer, which lists the row only once the arm is known, and the
+  footer fails hard on an empty tone (2026-11-26, the children tracker).
+- A webapp `feed.root-open-refused` with arm `notYetAdopted` right after a
+  handover means a stream reopened on the successor before the page's in-place
+  adoption answered; since 2026-11-26 every reopen waits behind the context's
+  adoption latch (`DaemonContext.awaitAdopted`), so one seen again is a defect
+  in that latch, never a reason to re-level the record.

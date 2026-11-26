@@ -3475,7 +3475,10 @@ draws a child in:
 - the parent's root feed as a `frontend.v1.FeedChild` row (`feedid.KindChild`),
   one per child, republished whole whenever anything it draws changes;
 - the parent's footer while the child is OPEN (`footer.SetOpenChildren`: the
-  `⇄` chip and panel);
+  `⇄` chip and panel), and only once the sidebar has decided its arm: the
+  registry arrives before any render decides arms, and a row without its arm
+  has no status word and no tone, which the footer refuses (fails hard) and
+  the webapp cannot draw (2026-11-26);
 - the parent's topbar summary menu once it is NOT open
   (`topbar.SetClosedChildren`), the child that stopped being open most
   recently first.

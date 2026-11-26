@@ -763,6 +763,85 @@ describe("startLifecycle: the handover", () => {
     expect(record.context).toMatchObject({ address: "127.0.0.1:8123" });
   });
 
+  /**
+   * A lifecycle context recording, in order, the adoption latch's hold and
+   * settle, each AdoptWebWorkspace call, and the page going quiet.
+   */
+  const latchRecorder = (adopt?: () => AdoptWebWorkspaceResponse) => {
+    const events: string[] = [];
+    const answer = adopt ?? adoptedOn("testbuild");
+    const { client } = lifecycleClient({
+      web: transferred,
+      adopt: () => {
+        events.push("adopt");
+        return answer();
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const hold = ctx.holdForAdoption;
+    const settled = ctx.adoptionSettled;
+    const quiesce = ctx.quiesce;
+    vi.spyOn(ctx, "holdForAdoption").mockImplementation(() => {
+      events.push("hold");
+      hold();
+    });
+    vi.spyOn(ctx, "adoptionSettled").mockImplementation(() => {
+      events.push("settled");
+      settled();
+    });
+    vi.spyOn(ctx, "quiesce").mockImplementation(() => {
+      events.push("quiesce");
+      quiesce();
+    });
+    return { ctx, events };
+  };
+
+  it("holds the adoption latch before it calls AdoptWebWorkspace", async () => {
+    // ARRANGE
+    const { ctx, events } = latchRecorder();
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(document.createElement("div")));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(events.slice(0, 2)).toEqual(["hold", "adopt"]);
+  });
+
+  it("settles the adoption latch once an adoption on this page's build answers", async () => {
+    // ARRANGE
+    const { ctx, events } = latchRecorder();
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(document.createElement("div")));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(events).toEqual(["hold", "adopt", "settled"]);
+  });
+
+  it("settles the adoption latch before going quiet for an adoption on another build", async () => {
+    // ARRANGE
+    const { ctx, events } = latchRecorder(adoptedOn("another-build"));
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(document.createElement("div")));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(events).toEqual(["hold", "adopt", "settled", "quiesce"]);
+  });
+
+  it("settles the adoption latch before going quiet when the in-place adoption is refused", async () => {
+    // ARRANGE
+    const { ctx, events } = latchRecorder(() =>
+      create(AdoptWebWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+    );
+    // ACT
+    const handle = startLifecycle(ctx, lifecycleDeps(document.createElement("div")));
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(events).toEqual(["hold", "adopt", "settled", "quiesce"]);
+  });
+
   it("carries this page's own webapp build on the WatchWebWorkspace request", async () => {
     // ARRANGE
     const host = document.createElement("div");
