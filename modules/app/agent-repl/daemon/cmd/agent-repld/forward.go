@@ -767,12 +767,12 @@ func (f *mergeForwarder) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID)
 	return m.AdoptWorkspace(ctx, ws)
 }
 
-func (f *mergeForwarder) ReviewQueues(ctx context.Context) error {
+func (f *mergeForwarder) ReviewQueues(ctx context.Context, handedLater func(ids.WorkspaceID) bool) error {
 	m, err := f.mover()
 	if err != nil {
 		return err
 	}
-	return m.ReviewQueues(ctx)
+	return m.ReviewQueues(ctx, handedLater)
 }
 
 // ServingWidened is a takeover's edge, and nothing takes over before the

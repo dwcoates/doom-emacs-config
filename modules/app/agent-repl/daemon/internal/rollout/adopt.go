@@ -1100,9 +1100,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// THE WORKSPACE'S MERGES ARE THIS DAEMON'S NOW: a merge the incumbent
 	// suspended for the transfer resumes here at its recorded step, in the
 	// bubble it already had (merge/transfer.go).
-	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not take the adopted workspace's merges", dlog.WithCause(fields, err))
-		return fmt.Errorf("rollout: adopt %q: take its merges: %w", ws, err)
+	if err := c.handMerges(ctx, ws, fields); err != nil {
+		return fmt.Errorf("rollout: adopt %q: %w", ws, err)
 	}
 	// AN OWED MOVE IS THIS DAEMON'S NOW: a rename whose move the incumbent
 	// could not register (the workspace was already moving here) is taken
@@ -1478,7 +1477,7 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// queue stood still until someone paused and resumed it again (2026-10-25,
 	// unexpected-page-waits-land). Offered to this daemon's pump, each queue is
 	// judged from its durable rows, whichever daemon wrote them.
-	if err := c.deps.Merges.ReviewQueues(c.lifetime(context.Background())); err != nil {
+	if err := c.deps.Merges.ReviewQueues(c.lifetime(context.Background()), c.adoptionHandsMerges); err != nil {
 		c.log.Error(opAdopt, "the merge queues could not be read again at the takeover; a queue change the outgoing daemon made waits for its queue's next change", dlog.WithCause(fields, err))
 	}
 	// THE WORKSPACES THE TAKEOVER MADE OWNED ARE TOLD TO THE MERGE QUEUE,
@@ -1718,6 +1717,45 @@ func (c *controller) tookOverSignal() <-chan struct{} {
 	return c.tookOverSignalLocked()
 }
 
+// handMerges takes WS's merges into this daemon's queue (Merges.AdoptWorkspace)
+// and records them handed, so the takeover's queue review leaves them to no
+// adoption any longer (adoptionHandsMerges). A take that fails records
+// nothing: the merges are still to be handed.
+func (c *controller) handMerges(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	if err := c.deps.Merges.AdoptWorkspace(ctx, ws); err != nil {
+		c.log.Error(opAdopt, "could not take the adopted workspace's merges", dlog.WithCause(fields, err))
+		return fmt.Errorf("take its merges: %w", err)
+	}
+	c.mu.Lock()
+	if c.mergesHanded == nil {
+		c.mergesHanded = map[ids.WorkspaceID]bool{}
+	}
+	c.mergesHanded[ws] = true
+	c.unlock()
+	return nil
+}
+
+// hasHandedMerges reports whether an adoption here has handed WS's merges.
+func (c *controller) hasHandedMerges(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.mergesHanded[ws]
+}
+
+// adoptionHandsMerges reports whether WS's merges are still coming to this
+// daemon through an adoption of the handover being joined: WS is one the
+// intent manifest named (joining), and no adoption of it has handed its
+// merges yet (AdoptWorkspace). The takeover's queue review leaves such a
+// merge alone: taken up there, it was resumed before the workspace's
+// session had arrived, its wait on the repairing turn found no session,
+// and the merge returned to line while its repairing turn still ran
+// (2026-11-26 16:44:14, persistent-wifi-service).
+func (c *controller) adoptionHandsMerges(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.joining[ws] && !c.mergesHanded[ws]
+}
+
 // adoptStragglers takes every workspace that was being handed over but never
 // finished its rendezvous. The incumbent is gone, so nobody else can serve it:
 // it is OWNED from this instant (a request for it gets this daemon's answer,
@@ -1769,8 +1807,19 @@ func (c *controller) adoptStragglers(wg *sync.WaitGroup, fields dlog.Context) {
 		inflight.Go(func() {
 			defer wg.Done()
 			if err := c.adopt(lifetime, ws, "straggler"); err != nil {
+				wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(ws)})
 				c.log.Error(opAdopt, "a workspace whose handover never finished could not have its session adopted; it is served without one",
-					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws)}), err))
+					dlog.WithCause(wsFields, err))
+				// ITS MERGES ARE STILL THIS DAEMON'S: the workspace is owned
+				// and served here, and no adoption of it is coming to hand
+				// them, so the failed adoption hands them itself. Left
+				// unhanded, the takeover's queue review would never take
+				// them up either (adoptionHandsMerges).
+				if !c.hasHandedMerges(ws) {
+					if err := c.handMerges(lifetime, ws, wsFields); err != nil {
+						c.log.Error(opAdopt, "the straggler's merges could not be taken; they wait for the next boot or handover", dlog.WithCause(wsFields, err))
+					}
+				}
 			}
 		})
 	}

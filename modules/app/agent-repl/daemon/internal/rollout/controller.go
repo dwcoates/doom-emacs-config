@@ -74,6 +74,10 @@ type controller struct {
 	rendezvous map[ids.WorkspaceID]*entry
 	// owned is every workspace this joining daemon has finished adopting.
 	owned map[ids.WorkspaceID]bool
+	// mergesHanded is every workspace an adoption here has handed its
+	// merges to the merge queue for (AdoptWorkspace returned): what
+	// adoptionHandsMerges tells the takeover's queue review apart by.
+	mergesHanded map[ids.WorkspaceID]bool
 	// mirror is the joining window's subscription to the incumbent's roster
 	// (startRosterMirror), nil outside one.
 	mirror *rostermirror.Mirror
