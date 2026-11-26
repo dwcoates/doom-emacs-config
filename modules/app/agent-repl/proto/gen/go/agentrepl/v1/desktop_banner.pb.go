@@ -402,8 +402,8 @@ type DesktopBannerPostOutcome_Posted struct {
 	// The notification center accepted the banner, and Zettel's settings
 	// draw it on screen: notifications are allowed, alerts are on, and their
 	// style is banners or alerts. The daemon rings the banner's chime on this
-	// answer alone, so a sound always means a banner on screen. A Focus that
-	// files the banner silently is not reported.
+	// answer alone, so a sound always means a banner on screen. No Focus on
+	// now silences Zettel (`silenced` otherwise).
 	Posted *DesktopBannerPostOutcomePosted `protobuf:"bytes,1,opt,name=posted,proto3,oneof"`
 }
 

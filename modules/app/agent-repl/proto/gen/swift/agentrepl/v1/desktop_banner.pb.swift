@@ -179,8 +179,8 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
   /// The notification center accepted the banner, and Zettel's settings
   /// draw it on screen: notifications are allowed, alerts are on, and their
   /// style is banners or alerts. The daemon rings the banner's chime on this
-  /// answer alone, so a sound always means a banner on screen. A Focus that
-  /// files the banner silently is not reported.
+  /// answer alone, so a sound always means a banner on screen. No Focus on
+  /// now silences Zettel (`silenced` otherwise).
   public var posted: Agentrepl_V1_DesktopBannerPostOutcomePosted {
     get {
       if case .posted(let v)? = outcome {return v}
@@ -227,8 +227,8 @@ public nonisolated struct Agentrepl_V1_DesktopBannerPostOutcome: Sendable {
     /// The notification center accepted the banner, and Zettel's settings
     /// draw it on screen: notifications are allowed, alerts are on, and their
     /// style is banners or alerts. The daemon rings the banner's chime on this
-    /// answer alone, so a sound always means a banner on screen. A Focus that
-    /// files the banner silently is not reported.
+    /// answer alone, so a sound always means a banner on screen. No Focus on
+    /// now silences Zettel (`silenced` otherwise).
     case posted(Agentrepl_V1_DesktopBannerPostOutcomePosted)
     /// Zettel's notification settings keep the banner off the screen, so it was
     /// not posted. Remedied only in System Settings → Notifications → Zettel.
