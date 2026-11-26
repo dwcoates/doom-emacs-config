@@ -65,6 +65,12 @@ type DB interface {
 	// WorkspaceHead loads one workspace's head by id: its own columns alone,
 	// which a request is resolved by (WorkspaceHead).
 	WorkspaceHead(ctx context.Context, id WorkspaceID) (WorkspaceHead, error)
+	// WorkspaceHeadsAt loads the heads of the workspaces whose worktree is
+	// one of dirs, in registry order: one index probe per dir.
+	WorkspaceHeadsAt(ctx context.Context, dirs []string) ([]WorkspaceHead, error)
+	// WorkspaceHeadsNamed loads the heads of every workspace of a name, in
+	// registry order.
+	WorkspaceHeadsNamed(ctx context.Context, name string) ([]WorkspaceHead, error)
 	// WorkspaceByDir loads one workspace by its normalized worktree directory.
 	WorkspaceByDir(ctx context.Context, dir string) (Workspace, error)
 	// ListWorkspaces loads every workspace, all-or-nothing.

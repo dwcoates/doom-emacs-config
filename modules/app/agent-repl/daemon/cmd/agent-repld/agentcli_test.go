@@ -429,10 +429,10 @@ func cliRow(id, dir, name string) *frontendv1.RosterRow {
 // one open, would: through the daemon's own matching (workspacefind.Locate).
 func locateOver(rows ...*frontendv1.RosterRow) func(context.Context, agentreplv1connect.AgentReplClient, *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
 	return func(_ context.Context, _ agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
-		var records []wsm.Workspace
+		var records []wsm.WorkspaceHead
 		for _, row := range rows {
 			ref := row.GetWorkspace().GetWorkspace()
-			records = append(records, wsm.Workspace{ID: wsm.WorkspaceID(ref.GetId()), Dir: ref.GetDir(), Name: row.GetName().GetText()})
+			records = append(records, wsm.Workspace{ID: wsm.WorkspaceID(ref.GetId()), Dir: ref.GetDir(), Name: row.GetName().GetText()}.Head())
 		}
 		by := workspacefind.LocateBy{Name: req.GetNamed().GetName(), At: req.GetAt().GetDir(), Containing: req.GetContaining().GetDir()}
 		var refs []*workspacev1.WorkspaceRef

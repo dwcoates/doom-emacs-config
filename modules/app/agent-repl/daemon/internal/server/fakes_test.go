@@ -190,6 +190,8 @@ type fakeDB struct {
 	forgetCasesErr error
 	// listWorkspacesErr fails ListWorkspaces.
 	listWorkspacesErr error
+	// headsErr fails WorkspaceHeadsAt and WorkspaceHeadsNamed.
+	headsErr error
 	// subsections are the subsections ReadArrangement answers.
 	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
@@ -3911,6 +3913,34 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	out := make([]wsm.Workspace, 0, len(d.workspaces))
 	for _, ws := range d.workspaces {
 		out = append(out, ws)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// WorkspaceHeadsAt answers the heads of the registered workspaces at one of
+// DIRS, by id, or headsErr.
+func (d *fakeDB) WorkspaceHeadsAt(_ context.Context, dirs []string) ([]wsm.WorkspaceHead, error) {
+	return d.heads(func(ws wsm.Workspace) bool { return slices.Contains(dirs, ws.Dir) })
+}
+
+// WorkspaceHeadsNamed answers the heads of the registered workspaces named
+// NAME, by id, or headsErr.
+func (d *fakeDB) WorkspaceHeadsNamed(_ context.Context, name string) ([]wsm.WorkspaceHead, error) {
+	return d.heads(func(ws wsm.Workspace) bool { return ws.Name == name })
+}
+
+// heads is the one answer of the head reads: the registered workspaces KEEP
+// holds, by id.
+func (d *fakeDB) heads(keep func(wsm.Workspace) bool) ([]wsm.WorkspaceHead, error) {
+	if d.headsErr != nil {
+		return nil, d.headsErr
+	}
+	var out []wsm.WorkspaceHead
+	for _, ws := range d.workspaces {
+		if keep(ws) {
+			out = append(out, ws.Head())
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

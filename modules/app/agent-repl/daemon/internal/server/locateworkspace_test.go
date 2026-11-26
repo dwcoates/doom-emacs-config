@@ -65,6 +65,38 @@ func TestLocateWorkspaceAnswersTheRegistrysWorkspaces(t *testing.T) {
 	}
 }
 
+// TestLocateWorkspaceNeverReadsTheWholeRegistry pins the locate to its
+// candidates' heads: with the whole-registry read failing, every arm still
+// answers.
+func TestLocateWorkspaceNeverReadsTheWholeRegistry(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.LocateWorkspaceRequest
+	}{
+		{name: "by name", req: &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: "merge-one"}}}},
+		{name: "at a directory", req: &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: "/src/merge"}}}},
+		{name: "containing a directory", req: &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{Containing: &agentreplv1.LocateWorkspaceContaining{Dir: "/src/merge/daemon"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := locateHarness(t)
+			h.DB.listWorkspacesErr = errors.New("the whole registry was read")
+
+			// Act
+			resp, err := h.Client.LocateWorkspace(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("LocateWorkspace = %v; want an answer read off the candidates' heads", err)
+			}
+			if got := resp.Msg.GetSuccess().GetWorkspaces(); len(got) != 1 || got[0].GetId() != "ws-merge" {
+				t.Fatalf("located %v, want ws-merge", got)
+			}
+		})
+	}
+}
+
 func TestLocateWorkspaceRefusesAnInvalidRequest(t *testing.T) {
 	tests := []struct {
 		name string
@@ -97,7 +129,7 @@ func TestLocateWorkspaceFailsAndRecordsAFailedRead(t *testing.T) {
 		edit  func(*harness)
 		cause string
 	}{
-		{name: "the workspaces", edit: func(h *harness) { h.DB.listWorkspacesErr = errors.New("disk gone") }, cause: "list the workspaces: disk gone"},
+		{name: "the workspaces", edit: func(h *harness) { h.DB.headsErr = errors.New("disk gone") }, cause: "read the workspaces the locate could name: disk gone"},
 		{name: "no roster published yet", edit: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.RosterPush) bool { return true }) },
 			cause: "read the roster: the daemon has published no roster yet"},
 	}

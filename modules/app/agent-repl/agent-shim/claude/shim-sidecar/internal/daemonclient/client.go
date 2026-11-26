@@ -55,12 +55,19 @@ const workspaceRefFreshness = time.Second
 const readinessTimeout = 250 * time.Millisecond
 
 // locateTimeout bounds the one LocateWorkspace call a directory the roster's
-// streams do not carry is asked of (locateWorkspace). MEASURED 2026-11-16 off
-// the owner's live daemon log (~/.claude-emacs/logs/agent-repl-*-daemon-*.log,
-// `daemon.server.locate_workspace` "completed the rpc handler" records): 8
-// calls against the ~1,150-workspace registry, p50 57ms, p90 100ms, max
-// 156ms. 400ms is ~2.6x that max.
-const locateTimeout = 400 * time.Millisecond
+// streams do not carry is asked of (locateWorkspace). The daemon answers it
+// off the heads of the workspaces at that directory, one index probe of the
+// state database (workspacefind.Candidates). MEASURED 2026-11-25 against a
+// copy of the owner's ~1,700-workspace state database: under 1ms. What the
+// call waits on is the database's one connection, which the daemon budgets
+// each hold of at 250ms (wsm's connHoldBudget, past which a hold is
+// recorded), so the healthy worst case is one in-budget hold plus the read,
+// and 600ms is ~2.4x it.
+//
+// It was 400ms over a read of the WHOLE registry, which by 2026-11-25 held
+// the connection ~330ms by itself (median over-budget list_workspaces hold
+// that day), and the 0.573.5 handover's locate ran out inside it.
+const locateTimeout = 600 * time.Millisecond
 
 // cachedWorkspaceRef is one directory's daemon-minted ref together with the
 // instant the roster that named it was delivered. The instant is the whole
