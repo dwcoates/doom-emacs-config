@@ -807,6 +807,15 @@ type Deps struct {
 	// step runs under its own measured bound, so a slow compaction is never
 	// a failure.
 	CompactColdGate func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// CompactForQueue compacts a workspace's conversation for its merge's
+	// place in the queue (compactForQueue): a `/compact` with INSTRUCTIONS, as
+	// conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION,
+	// through the workspace's prompt queue. It answers once the compaction's
+	// turn has ended, and an error when it did not complete.
+	CompactForQueue func(ctx context.Context, ws ids.WorkspaceID, instructions string) error
+	// SetModel switches a workspace's session to MODEL through its prompt
+	// queue, ahead of every prompt queued after it (workspace.Verbs.SetModel).
+	SetModel func(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// ParkQueued asks for the park of a workspace's session the moment its
 	// own branch's merge is put in line in REPO under LEDGER
 	// (drain.Controller.MergeQueuedDown; parkQueued). It returns at once.

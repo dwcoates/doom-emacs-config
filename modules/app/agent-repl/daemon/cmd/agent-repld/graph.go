@@ -1730,6 +1730,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MintKey:       prompthandler.MintKey,
 		Log:           p.Surfaces,
 	})
+	enqueueCompactions := &enqueuePrompts{awaitTurnEnd: fleet.AwaitTurnEnd}
 	deployConfig := deployConfigFiles(paths, log)
 	mergeOrchestrator, err := merge.New(merge.Deps{
 		DeployConfig:  deployConfig,
@@ -1776,6 +1777,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		AtColdGate:         fleet.AtColdGate,
 		ParkQueued:         drainController.MergeQueuedDown,
 		CompactColdGate:    verbsRef.compactRequeuedMergeColdGate,
+		CompactForQueue:    enqueueCompactions.compactForQueue,
+		SetModel:           verbsRef.setModel,
 		PauseAfterCapture:  capturePause(p.Surfaces.Global()),
 		PauseInTerminal:    terminalPause(ctx, p.Surfaces.Global()),
 		TurnInFlight:       turnInFlight(fleet),
@@ -1965,6 +1968,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the prompt handler: %w", err)
 	}
+	enqueueCompactions.bind(handler)
 	// THE COLD-GATE BACKLOG (owner request, 2026-10-26): a shown workspace
 	// whose cold gate has stood over a day of weekday time is moved into the
 	// backlog, drawn as the Backlog, once per gate.
