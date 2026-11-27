@@ -295,6 +295,13 @@ type DB interface {
 	// RecordWork is the one write of a workspace's idle clock: real work of
 	// a cause happened at an instant (lastwork.go).
 	RecordWork(ctx context.Context, id WorkspaceID, at time.Time, cause WorkCause) error
+	// HoldMergeRestoreModel records the model a workspace returns to when
+	// its merge ends without landing, keeping one already held
+	// (mergerestoremodel.go).
+	HoldMergeRestoreModel(ctx context.Context, id WorkspaceID, model string) error
+	// TakeMergeRestoreModel answers and clears the model a workspace returns
+	// to, false when no merge switched it (mergerestoremodel.go).
+	TakeMergeRestoreModel(ctx context.Context, id WorkspaceID) (string, bool, error)
 	// SetShimPID records, or clears with nil, the pid of the shim process
 	// serving a workspace's session. The rollout's intent manifest names it.
 	SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error

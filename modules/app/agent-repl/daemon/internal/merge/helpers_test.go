@@ -85,6 +85,10 @@ type fakeDB struct {
 
 	wsm.DB
 
+	// restoreModels are the models each workspace returns to when its merge
+	// ends without landing (HoldMergeRestoreModel).
+	restoreModels map[ids.WorkspaceID]string
+
 	// workspaceErr, when set, is what every Workspace read answers.
 	workspaceErr error
 
@@ -398,6 +402,7 @@ func newFakeDB() *fakeDB {
 		jobs:          map[ids.WorkspaceID]wsm.CreationJob{},
 		jobDecodeErrs: map[ids.WorkspaceID]error{},
 		sessions:      map[ids.WorkspaceID]wsm.Session{},
+		restoreModels: map[ids.WorkspaceID]string{},
 		leases:        map[ids.WorkspaceID]wsm.Lease{},
 		turns:         map[ids.WorkspaceID][]wsm.Turn{},
 		ledger:        map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
@@ -1075,6 +1080,29 @@ func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.Creatio
 	}
 	job, ok := f.jobs[id]
 	return job, ok, nil
+}
+
+// testSessionModel is the model every registered workspace's session runs on.
+const testSessionModel = "opus"
+
+func (f *fakeDB) HoldMergeRestoreModel(_ context.Context, id ids.WorkspaceID, model string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if model == "" {
+		return fmt.Errorf("fakeDB: hold the restore model of %s: no model was named", id)
+	}
+	if _, held := f.restoreModels[id]; !held {
+		f.restoreModels[id] = model
+	}
+	return nil
+}
+
+func (f *fakeDB) TakeMergeRestoreModel(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	model, held := f.restoreModels[id]
+	delete(f.restoreModels, id)
+	return model, held, nil
 }
 
 func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
@@ -4083,6 +4111,17 @@ type harness struct {
 	// duringCompactGate, when set, runs inside CompactColdGate, outside the
 	// harness's lock: what happens while an answer is under way.
 	duringCompactGate func(ws ids.WorkspaceID)
+	// queueCompactions is every workspace compacted as its merge entered the
+	// queue, in order, and queueCompactionErr what CompactForQueue answers.
+	queueCompactions   []ids.WorkspaceID
+	queueCompactionErr error
+	// duringQueueCompaction, when set, runs inside CompactForQueue, outside
+	// the harness's lock: what stands while the compaction runs.
+	duringQueueCompaction func()
+	// modelSwitches is every model switch asked for, in order, and
+	// modelSwitchErr what SetModel answers.
+	modelSwitches  []modelSwitch
+	modelSwitchErr error
 	// handBacks records every merge outcome handed back to its workspace.
 	handBacks *fakeHandBacks
 	// names is the async merge name check.
@@ -4463,6 +4502,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefHookPrompt] = []string{"prompt"}
+	h.briefs[BriefEnqueueCompaction] = nil
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
@@ -4542,7 +4582,7 @@ func (h *harness) deps() Deps {
 				return err
 			}
 			h.db.mu.Lock()
-			h.db.sessions[ws] = wsm.Session{Workspace: ws}
+			h.db.sessions[ws] = wsm.Session{Workspace: ws, Model: testSessionModel}
 			h.db.mu.Unlock()
 			return nil
 		},
@@ -4643,6 +4683,22 @@ func (h *harness) deps() Deps {
 			}
 			return err == nil && !abandoned, err
 		},
+		CompactForQueue: func(_ context.Context, ws ids.WorkspaceID, _ string) error {
+			h.mu.Lock()
+			h.queueCompactions = append(h.queueCompactions, ws)
+			during, err := h.duringQueueCompaction, h.queueCompactionErr
+			h.mu.Unlock()
+			if during != nil {
+				during()
+			}
+			return err
+		},
+		SetModel: func(_ context.Context, ws ids.WorkspaceID, model string) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.modelSwitches = append(h.modelSwitches, modelSwitch{ws: ws, model: model})
+			return h.modelSwitchErr
+		},
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
 		TurnInFlight: func(ids.WorkspaceID) (ids.TurnID, bool) {
@@ -4719,6 +4775,12 @@ func (h *harness) loadBrief(name string, values map[string]string) (string, erro
 	return text, nil
 }
 
+// modelSwitch is one model switch a merge asked of a workspace's session.
+type modelSwitch struct {
+	ws    ids.WorkspaceID
+	model string
+}
+
 // register records a workspace with the geometry a merge needs.
 func (h *harness) register(ws ids.WorkspaceID, name string) {
 	h.db.mu.Lock()
@@ -4730,7 +4792,7 @@ func (h *harness) register(ws ids.WorkspaceID, name string) {
 			SourceBranch: "feature", SourceDir: h.sourceD, TargetDir: h.targetD, Origin: "create",
 		},
 	}
-	h.db.sessions[ws] = wsm.Session{Workspace: ws}
+	h.db.sessions[ws] = wsm.Session{Workspace: ws, Model: testSessionModel}
 	h.git.mu.Lock()
 	h.git.branches[h.sourceD] = "feature"
 	// ONE REPOSITORY: every worktree of it reports the target's common dir.
@@ -5021,7 +5083,7 @@ func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string 
 	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: name, Dir: dir, Branch: branch, Repo: theRepository}
 	h.db.jobs[ws] = wsm.CreationJob{Workspace: ws, Layout: wsm.MergeLayout{
 		SourceBranch: branch, SourceDir: dir, TargetDir: h.targetD, Origin: "create"}}
-	h.db.sessions[ws] = wsm.Session{Workspace: ws}
+	h.db.sessions[ws] = wsm.Session{Workspace: ws, Model: testSessionModel}
 	h.db.mu.Unlock()
 	h.git.mu.Lock()
 	h.git.branches[dir] = branch

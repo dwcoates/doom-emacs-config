@@ -298,6 +298,7 @@ var mergeQueueOrigins = func() map[string]bool {
 	origins := maps.Clone(mergeStartedOrigins)
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK.String()] = true
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER.String()] = true
+	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION.String()] = true
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE.String()] = true
 	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK.String()] = true
 	return origins

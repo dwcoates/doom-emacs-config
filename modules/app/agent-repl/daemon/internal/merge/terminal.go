@@ -282,6 +282,9 @@ func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, 
 		return
 	}
 	out.Branch = record.Branch
+	// THE WORKSPACE IS HANDED BACK ON ITS OWN MODEL: the switch its merge's
+	// enqueue made is undone ahead of the handback (enqueuecompaction.go).
+	o.restoreModel(ctx, ws)
 	if err := o.deps.HandBacks.HandBack(ctx, ws, record, out); err != nil {
 		o.log(ctx, ws).Debug("daemon.merge.handback", "the handback of an in-place merge failed; its owner recorded why", dlog.Context{
 			"workspace": string(ws), "outcome": out.Kind.String(), "error": err.Error()})

@@ -390,6 +390,16 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 		o.withdrawFinished(ctx, ws, wait.repo, failure)
 		return
 	}
+	// THE WORKSPACE ENTERS THE QUEUE COMPACTED, ON SONNET
+	// (enqueuecompaction.go): nothing the queue sends can reach it before.
+	if err := o.compactForQueue(ctx, ws); err != nil {
+		if ctx.Err() != nil {
+			log.Info(op, "the merge request was withdrawn during its enqueue compaction", dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			return
+		}
+		log.Error(op, "the enqueue compaction failed; the request stays recorded for the next boot", dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return
+	}
 	if err := o.queueRequest(ctx, ws, wait.repo); err != nil {
 		log.Error(op, "could not put the merge request in line", dlog.Context{"workspace": string(ws), "error": err.Error()})
 	}

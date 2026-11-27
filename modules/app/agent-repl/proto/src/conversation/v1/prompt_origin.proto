@@ -301,4 +301,17 @@ enum PromptOrigin {
   // (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
   // Drawn as the daemon's prompt to its own backlogged workspace.
   PROMPT_ORIGIN_PRODUCTION_MEDIATION = 55 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
+  // The daemon's `/compact` of a workspace whose own merge is about to enter
+  // its repository's merge queue (agentrepl.v1.FinishWorkspace, through the
+  // queue). Submitted once the finish stage has run and awaited before the
+  // merge takes its place in line, so every keep-alive while it waits and
+  // every turn the queue hands it (a failing test gate, a conflict) reads the
+  // compacted conversation. Its instructions keep what remediation needs: the
+  // work's motivation and purpose, and its technically tricky parts. The
+  // session then switches to the latest Sonnet, and back to the model it ran
+  // before when the merge ends without landing. A merge that lands directly
+  // (a deploy remediation's) is never compacted. It is a context cut like any
+  // `/compact`: no prompt bubble, and the compaction's status, footer and
+  // separator drawn as for one the user typed.
+  PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION = 56 [(spend_cause) = VENDOR_CALL_CAUSE_COMPACTION];
 }

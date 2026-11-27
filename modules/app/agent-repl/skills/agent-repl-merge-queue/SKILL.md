@@ -39,6 +39,14 @@ Before finishing `here`:
   surface it. NEVER finish the workspace instead.
 - Every change is committed with its tests passing; work left uncommitted when
   the turn ends fails the merge.
+- Once the finish stage has run, and before the merge goes in line, this
+  workspace's conversation is compacted for remediation and its session
+  switched to the latest Sonnet. No flag controls it.
+  - Keep-alives while the merge waits, and every test-failure or conflict
+    turn the queue hands back, run on that compacted Sonnet context.
+  - A merge that ends without landing hands the workspace back on the model
+    it ran before, with no second compaction.
+  - A deploy remediation's finish, which lands directly, is never compacted.
 
 Before a landing child:
 

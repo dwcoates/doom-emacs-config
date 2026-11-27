@@ -271,6 +271,7 @@ func DaemonSubsystem(origin conversationv1.PromptOrigin) (string, bool) {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED:

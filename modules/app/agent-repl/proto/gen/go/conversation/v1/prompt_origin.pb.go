@@ -305,6 +305,19 @@ const (
 	// (repoconfig.v1.LifecycleConfig.production_checks). Nothing waits on it.
 	// Drawn as the daemon's prompt to its own backlogged workspace.
 	PromptOrigin_PROMPT_ORIGIN_PRODUCTION_MEDIATION PromptOrigin = 55
+	// The daemon's `/compact` of a workspace whose own merge is about to enter
+	// its repository's merge queue (agentrepl.v1.FinishWorkspace, through the
+	// queue). Submitted once the finish stage has run and awaited before the
+	// merge takes its place in line, so every keep-alive while it waits and
+	// every turn the queue hands it (a failing test gate, a conflict) reads the
+	// compacted conversation. Its instructions keep what remediation needs: the
+	// work's motivation and purpose, and its technically tricky parts. The
+	// session then switches to the latest Sonnet, and back to the model it ran
+	// before when the merge ends without landing. A merge that lands directly
+	// (a deploy remediation's) is never compacted. It is a context cut like any
+	// `/compact`: no prompt bubble, and the compaction's status, footer and
+	// separator drawn as for one the user typed.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION PromptOrigin = 56
 )
 
 // Enum value maps for PromptOrigin.
@@ -364,6 +377,7 @@ var (
 		53: "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE",
 		54: "PROMPT_ORIGIN_SLACK_THREAD_NOTICE",
 		55: "PROMPT_ORIGIN_PRODUCTION_MEDIATION",
+		56: "PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -420,6 +434,7 @@ var (
 		"PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE":  53,
 		"PROMPT_ORIGIN_SLACK_THREAD_NOTICE":         54,
 		"PROMPT_ORIGIN_PRODUCTION_MEDIATION":        55,
+		"PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION":    56,
 	}
 )
 
@@ -454,7 +469,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xf7\x12\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1\x1a\"conversation/v1/vendor_spend.proto*\xa9\x13\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x1a\x04\x98\xa6\x1d\x02\x12*\n" +
@@ -510,7 +525,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x1a\x04\x98\xa6\x1d\x05\x122\n" +
 	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105\x1a\x04\x98\xa6\x1d\x06\x12+\n" +
 	"!PROMPT_ORIGIN_SLACK_THREAD_NOTICE\x106\x1a\x04\x98\xa6\x1d\x06\x12,\n" +
-	"\"PROMPT_ORIGIN_PRODUCTION_MEDIATION\x107\x1a\x04\x98\xa6\x1d\x06\"\x04\b!\x10!*\x18PROMPT_ORIGIN_MERGE_PICKB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\"PROMPT_ORIGIN_PRODUCTION_MEDIATION\x107\x1a\x04\x98\xa6\x1d\x06\x120\n" +
+	"&PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION\x108\x1a\x04\x98\xa6\x1d\b\"\x04\b!\x10!*\x18PROMPT_ORIGIN_MERGE_PICKB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

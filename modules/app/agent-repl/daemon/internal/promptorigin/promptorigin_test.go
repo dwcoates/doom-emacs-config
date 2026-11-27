@@ -251,6 +251,7 @@ var noAgentTurnOrigins = map[conversationv1.PromptOrigin]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME: true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT:           true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER:         true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION:    true,
 }
 
 func TestStartsAgentTurnClassifiesEveryNamedOrigin(t *testing.T) {

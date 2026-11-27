@@ -177,7 +177,8 @@ func StartsAgentTurn(origin conversationv1.PromptOrigin) bool {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_ENQUEUE_COMPACTION:
 		return false
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE,
