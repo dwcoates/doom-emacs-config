@@ -34,7 +34,7 @@ func processTable() ([]procEntry, error) {
 			// lost, and one caught between its fork and its exec is passed
 			// over: it cannot be this run's.
 			if args, ok := readArgsOnce(pid); ok {
-				entries = append(entries, procEntry{pid: pid, args: args})
+				entries = append(entries, procEntry{pid: pid, ppid: int(p.Eproc.Ppid), args: args})
 			}
 			continue
 		}
@@ -45,7 +45,7 @@ func processTable() ([]procEntry, error) {
 		if !live {
 			continue
 		}
-		entries = append(entries, procEntry{pid: pid, args: args})
+		entries = append(entries, procEntry{pid: pid, ppid: int(p.Eproc.Ppid), args: args})
 	}
 	return entries, nil
 }

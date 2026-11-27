@@ -93,8 +93,12 @@ func TestKillNeverSignalsAReapedProcess(t *testing.T) {
 // directory: nothing external, no git, no vendor.
 func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 	tests := []struct {
-		name      string
-		spare     bool
+		name string
+		// spare declares the stand-in the test's own.
+		spare bool
+		// child makes the subject a child of the stand-in, not the
+		// stand-in itself.
+		child     bool
 		wantStray bool
 	}{
 		{
@@ -107,14 +111,34 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			spare:     false,
 			wantStray: true,
 		},
+		{
+			name:      "a child of a pid declared the test's own is not a stray",
+			spare:     true,
+			child:     true,
+			wantStray: false,
+		},
+		{
+			name:      "a child of an undeclared pid naming the state directory is a stray",
+			spare:     false,
+			child:     true,
+			wantStray: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a child whose argv carries the state directory, the
+			// Arrange: a process whose argv carries the state directory, the
 			// same way the store's and the sidecar's --log paths do.
 			stateDir := t.TempDir()
-			cmd := standIn(t, idleShell+" # --log "+stateDir+"/logs/x.log")
+			logArg := "# --log " + stateDir + "/logs/x.log"
+			var cmd *exec.Cmd
+			subject := 0
+			if tc.child {
+				cmd, subject = standInWithChild(t, logArg)
+			} else {
+				cmd = standIn(t, idleShell+" "+logArg)
+				subject = cmd.Process.Pid
+			}
 			if tc.spare {
 				SpareFromStrayReaping(t, cmd.Process.Pid)
 			}
@@ -124,18 +148,38 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 			strays := d.StrayPIDs()
 
 			// Assert.
-			found := false
-			for _, pid := range strays {
-				if pid == cmd.Process.Pid {
-					found = true
-				}
-			}
-			if found != tc.wantStray {
-				t.Fatalf("the child (pid %d) is among the strays = %v, want %v (strays: %v)",
-					cmd.Process.Pid, found, tc.wantStray, strays)
+			if found := slices.Contains(strays, subject); found != tc.wantStray {
+				t.Fatalf("pid %d is among the strays = %v, want %v (strays: %v)",
+					subject, found, tc.wantStray, strays)
 			}
 		})
 	}
+}
+
+// standInWithChild starts a stand-in shell running one child shell whose
+// argv carries arg, both blocked on the stand-in's held-open stdin, and
+// answers the stand-in and the child's pid. The child prints its pid once it
+// runs its own argv, so it exists, exec'd, when this returns.
+func standInWithChild(t *testing.T, arg string) (*exec.Cmd, int) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("the child's pid pipe: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	// A BACKGROUND CHILD'S STDIN IS /dev/null unless redirected, so the
+	// stand-in's stdin is handed to it explicitly, through fd 3.
+	cmd := standInTo(t, w, `exec 3<&0; /bin/sh -c 'echo $$; read line' "$1" <&3 & wait`, "stand-in", arg)
+	_ = w.Close()
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read the child's pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("the child's pid %q: %v", line, err)
+	}
+	return cmd, pid
 }
 
 // sleepLoop is a stand-in shell's loop: it always has a `sleep 1` running.

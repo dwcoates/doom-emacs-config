@@ -11,11 +11,36 @@ import (
 	"syscall"
 )
 
-// procEntry is one process-table entry: its pid and its argv joined by
-// spaces, the shape `ps -o args=` prints.
+// procEntry is one process-table entry: its pid, its parent's pid, and its
+// argv joined by spaces, the shape `ps -o args=` prints.
 type procEntry struct {
 	pid  int
+	ppid int
 	args string
+}
+
+// descendantsOf answers every process in entries descended from pid, its
+// children and theirs, transitively. pid itself is not among them.
+func descendantsOf(entries []procEntry, pid int) []int {
+	children := make(map[int][]int, len(entries))
+	for _, e := range entries {
+		if e.pid != e.ppid {
+			children[e.ppid] = append(children[e.ppid], e.pid)
+		}
+	}
+	var out []int
+	seen := map[int]bool{pid: true}
+	for queue := []int{pid}; len(queue) > 0; queue = queue[1:] {
+		for _, child := range children[queue[0]] {
+			if seen[child] {
+				continue
+			}
+			seen[child] = true
+			out = append(out, child)
+			queue = append(queue, child)
+		}
+	}
+	return out
 }
 
 // THE PROCESS TABLE IS READ IN-PROCESS, NOT BY EXEC'ING ps. A stray sweep

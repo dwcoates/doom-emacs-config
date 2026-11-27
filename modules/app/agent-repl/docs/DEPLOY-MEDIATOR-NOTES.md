@@ -199,6 +199,13 @@ Its brief names this file, and it is the mediator's to write.
   the binary through `requirements.sh ensure-service` before the service is
   defined and started, so one seen again is a defect in that verb or its
   caller (`deploy.Restarter.ensureLoaded`).
+- A `daemon.wifirpc.client.watch` record "standing watch ended; its standing is
+  unreachable until the watch is reopened and served" whose cause is an
+  `unexpected EOF`, within a second of the persistent-wifi service's own
+  "exiting cleanly" record, is the deploy replacing the service's binary under
+  the daemon's watch, which the client reopens at once; since 2026-11-27 it is
+  INFO, and the follow's faults (a connection that never serves, or none
+  within the first-standing bound) are its ERROR records.
 - An Emacs `elisp.wire.contract-breach message=<Message> field=<arm>
   reason=unknown field` right after a landing that added that arm to the proto
   means the landing taught the daemon the arm and not Emacs: the elisp codec

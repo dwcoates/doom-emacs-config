@@ -173,7 +173,12 @@ func (c *Client) Run(ctx context.Context) error {
 			c.log.Debug(opClientWatch, "the persistent-wifi service refused the standing watch; it is reopened on a fresh connection", dlog.Context{"cause": errString(err)})
 			continue
 		}
-		c.log.Warn(opClientWatch, "the persistent-wifi service's standing watch ended; its standing is unreachable until the watch is reopened and served", dlog.Context{"cause": errString(err)})
+		// A served watch ending is the service restarting under it (a deploy
+		// replacing its binary ends every stream it serves) and the reopen is
+		// the designed handover, so the record is INFO; the faults of the
+		// follow (a connection that never serves) are the ERROR records above
+		// and in watchFirst.
+		c.log.Info(opClientWatch, "the persistent-wifi service's standing watch ended; its standing is unreachable until the watch is reopened and served", dlog.Context{"cause": errString(err)})
 	}
 }
 

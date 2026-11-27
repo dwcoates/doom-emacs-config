@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -110,6 +111,19 @@ func ensureWifiService(t testing.TB, d *Daemon) string {
 	wifiServices.Store(d.StateDir, &wifiHost{socket: socket, hostToolsDir: d.HostToolsDir, lid: d.Lid, powerSource: d.PowerSource})
 	t.Cleanup(func() {
 		wifiServices.Delete(d.StateDir)
+		// THE SERVICE'S DESCENDANTS ARE AWAITED WITH IT. They are spared
+		// with it (listStrays), so no reap stops them: they are the host
+		// tools its scripts run, which its drain cancels, so their exits
+		// are part of its stop and fall under the same bound.
+		table, err := processTable()
+		if err != nil {
+			t.Errorf("harness: list the persistent-wifi service's descendants before its stop: %v", err)
+		}
+		descendants := descendantsOf(table, cmd.Process.Pid)
+		argsOf := make(map[int]string, len(table))
+		for _, e := range table {
+			argsOf[e.pid] = e.args
+		}
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		// THE BOUND IS ON THE GRANTED CLOCK: the service is this binary's
 		// child, so a host too busy to schedule it never reads as a hang.
@@ -122,6 +136,42 @@ func ensureWifiService(t testing.TB, d *Daemon) string {
 			<-exited
 			t.Errorf("harness: the persistent-wifi service did not exit within %s granted of SIGTERM (its drain is 5s); killed: %v", wifiServiceStopBound, grantedclock.Explain(wait))
 		}
+		for _, pid := range descendants {
+			if err := WaitProcessExit(wait, pid); err != nil {
+				stopStrandedDescendant(t, pid, argsOf[pid], err)
+			}
+		}
 	})
 	return socket
+}
+
+// stopStrandedDescendant reports and kills a descendant of the
+// persistent-wifi service still alive when the service's stop bound fired,
+// waitErr being why its wait ended. One whose argv no longer matches the
+// snapshot taken before the stop exited and had its pid recycled into a
+// stranger's process, which is left alone.
+func stopStrandedDescendant(t testing.TB, pid int, args string, waitErr error) {
+	t.Helper()
+	table, err := processTable()
+	if err != nil {
+		t.Errorf("harness: list the processes to find the persistent-wifi service's descendant %d (%s), whose exit was not seen: %v (its wait: %v)", pid, args, err, waitErr)
+		return
+	}
+	for _, e := range table {
+		if e.pid != pid {
+			continue
+		}
+		if e.args != args {
+			return
+		}
+		t.Errorf("harness: the persistent-wifi service's descendant %d (%s) outlived the service's stop bound of %s; killed: %v", pid, args, wifiServiceStopBound, waitErr)
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			t.Errorf("harness: SIGKILL the persistent-wifi service's descendant %d: %v", pid, err)
+			return
+		}
+		if err := WaitProcessExit(context.Background(), pid); err != nil {
+			t.Errorf("harness: await the SIGKILLed descendant %d's exit: %v", pid, err)
+		}
+		return
+	}
 }

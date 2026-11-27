@@ -254,3 +254,35 @@ func TestRootPeersAnswerTheOtherDaemonsOnOneStateRoot(t *testing.T) {
 		t.Fatalf("others(a) after b left = %v, want none", withoutB)
 	}
 }
+
+// TestSparedThroughAncestry pins that a spared process's descendants are
+// spared with it, and that the walk ends on a broken or looping chain.
+func TestSparedThroughAncestry(t *testing.T) {
+	// 10 is spared; 11 is its child, 12 its grandchild; 20 -> 21 is a chain
+	// that never reaches it; 30 is its own parent.
+	parents := map[int]int{10: 1, 11: 10, 12: 11, 20: 1, 21: 20, 30: 30, 1: 0}
+	spared := func(pid int) bool { return pid == 10 }
+	tests := []struct {
+		name string
+		pid  int
+		want bool
+	}{
+		{name: "the spared pid itself", pid: 10, want: true},
+		{name: "a direct child", pid: 11, want: true},
+		{name: "a grandchild", pid: 12, want: true},
+		{name: "a chain that does not reach a spared pid", pid: 21, want: false},
+		{name: "a pid absent from the table", pid: 99, want: false},
+		{name: "a process that is its own parent", pid: 30, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := sparedThroughAncestry(tc.pid, parents, spared)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("sparedThroughAncestry(%d) = %v, want %v", tc.pid, got, tc.want)
+			}
+		})
+	}
+}
