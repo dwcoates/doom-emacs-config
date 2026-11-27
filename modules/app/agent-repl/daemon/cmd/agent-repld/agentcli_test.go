@@ -68,6 +68,8 @@ type cliClient struct {
 	registered *agentreplv1.RegisterRepositoryResponse
 	// remote answers UpdateRemoteControlMode, a success when nil.
 	remote *agentreplv1.UpdateRemoteControlModeResponse
+	// topbar answers the topbar setters (topbarsettings_test.go), a success when a field is nil.
+	topbar topbarAnswers
 	// prompted answers SubmitPrompt, an empty answer when nil.
 	prompted *agentreplv1.SubmitPromptResponse
 	// closed answers CloseWorkspace and withdrawn WithdrawWorkspaceClose,

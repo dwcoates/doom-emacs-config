@@ -193,7 +193,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"prompt":                 {usage: "prompt [-as-user] [-slack-forward URL] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
-		"set":                    {usage: "set WS [-backlogged|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
+		"set":                    {usage: "set WS [-backlogged|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-permission-mode MODE] [-effort low|medium|high|xhigh|max] [-account LOGIN_ROOT] [-default-model M] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
 		"summary":                {usage: "summary WS -long LONG_SUMMARY -short SHORT_SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
@@ -283,6 +283,7 @@ var cliNouns = map[string]map[string]cliCommand{
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
 		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER] [-daemon ADDRESS]", run: runtimeRollOutLanding},
+		"persistent-wifi":  {usage: "persistent-wifi on|off", run: runtimePersistentWifi},
 		"health":           {usage: "health", run: runtimeHealth},
 		"prune-storage":    {usage: "prune-storage [-preview]", run: runtimePruneStorage},
 		"reap-worktrees":   {usage: "reap-worktrees [-preview] [-force]", run: runtimeReapWorktrees},
@@ -1106,6 +1107,10 @@ func workspaceSet(c *cliCall, args []string) int {
 	remoteControl := fs.String("remote-control", "", "on or off: whether the workspace's session is reachable from claude.ai")
 	queueBypass := fs.String("queue-bypass", "", "on or off: whether the workspace holds its repository's queue bypass mode")
 	bypassContext := fs.String("context", "", "with -queue-bypass on: full, compacted, existing or existing-plus-compacted, how the bypass session gets its context")
+	permissionMode := fs.String("permission-mode", "", "the permission mode the session switches to, one the topbar's picker serves")
+	effort := fs.String("effort", "", "the reasoning effort: "+strings.Join(effortWords, ", "))
+	account := fs.String("account", "", "the login root the session spends as, one the topbar's account cell serves")
+	defaultModel := fs.String("default-model", "", "the model every new session on the workspace's login starts under, a name from the catalog")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
@@ -1185,6 +1190,54 @@ func workspaceSet(c *cliCall, args []string) int {
 			resp, err := c.client.UpdateRemoteControlMode(c.ctx, connect.NewRequest(req))
 			return answerDescribed(c, resp, err, func(msg *agentreplv1.UpdateRemoteControlModeResponse) (string, error) {
 				return describeRemoteControlRefusal(named, msg.GetError())
+			})
+		})
+	}
+	if *permissionMode != "" {
+		req, err := permissionModeRequest(ref, *permissionMode)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.SetPermissionMode(c.ctx, connect.NewRequest(req))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetPermissionModeResponse) (string, error) {
+				return describePermissionModeRefusal(named, *permissionMode, msg.GetError())
+			})
+		})
+	}
+	if *effort != "" {
+		req, err := effortRequest(ref, *effort)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.SetEffort(c.ctx, connect.NewRequest(req))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetEffortResponse) (string, error) {
+				return describeEffortRefusal(named, *effort, msg.GetError())
+			})
+		})
+	}
+	if *account != "" {
+		req, err := accountRequest(ref, *account)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.SelectAccount(c.ctx, connect.NewRequest(req))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SelectAccountResponse) (string, error) {
+				return describeSelectAccountRefusal(named, *account, msg.GetError())
+			})
+		})
+	}
+	if *defaultModel != "" {
+		req, err := defaultModelRequest(ref, *defaultModel)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.SetDefaultModel(c.ctx, connect.NewRequest(req))
+			return answerDescribed(c, resp, err, func(msg *agentreplv1.SetDefaultModelResponse) (string, error) {
+				return describeDefaultModelRefusal(named, *defaultModel, msg.GetError())
 			})
 		})
 	}
