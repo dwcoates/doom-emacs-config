@@ -346,8 +346,14 @@ func TestClientRunFollowsEveryStandingAndReopensAfterTheServiceRestarts(t *testi
 	if err := <-runErr; err != nil {
 		t.Fatalf("Run() error = %v, want nil once its context ends", err)
 	}
-	if got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn, Operation: opClientWatch}); len(got) != 1 {
-		t.Fatalf("WARN records = %+v, want the one reopened watch", got)
+	if got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opClientWatch}); len(got) != 1 {
+		t.Fatalf("INFO records = %+v, want the one reopened watch", got)
+	}
+	if got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); len(got) != 0 {
+		t.Fatalf("WARN records = %+v, want none: a served watch reopening after a restart is no fault", got)
+	}
+	if got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); len(got) != 0 {
+		t.Fatalf("ERROR records = %+v, want none", got)
 	}
 }
 
