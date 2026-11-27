@@ -18,3 +18,5 @@ A workspace whose own merge enters the merge queue is compacted for remediation 
   - The model switch and its restore need no wire change: both go through the prompt queue's existing set-model session act, and the model to restore is a daemon-store fact, not a protocol one.
   - Every switch over the origins that lists `PROMPT_ORIGIN_MERGE_COMPACT_AFTER` as a context cut lists the new arm too (`promptorigin.go`, `promptqueue/deliver.go`, `resolve/feed/prompt.go`).
   - The enqueue now waits for the compaction's turn to end before the merge takes its place in line, so a merge's place is taken after the compaction rather than at the finish.
+  - The model to restore lives in the daemon store as `workspaces.merge_restore_model` (layout 224), held before the compaction and kept when already held, so a request re-run after a restart never records Sonnet as the model to return to.
+  - The compaction is `merge.Deps.CompactForQueue`, which answers only once the compaction's turn has ended; the switch and the restore are `merge.Deps.SetModel`, the workspace verbs' queued set-model act.
