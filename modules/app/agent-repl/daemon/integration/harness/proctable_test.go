@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -61,7 +62,8 @@ func TestParseProcArgs2(t *testing.T) {
 }
 
 // TestProcessTableListsALiveChildWithItsArgv asserts the table names a process
-// this test started, under its own pid, with the argv it was started with.
+// this test started, under its own pid, with the argv it was started with and
+// this process as its parent.
 func TestProcessTableListsALiveChildWithItsArgv(t *testing.T) {
 	// Arrange: a child that waits on its stdin, so it lives until released.
 	marker := "proctable-marker-" + t.Name()
@@ -86,6 +88,9 @@ func TestProcessTableListsALiveChildWithItsArgv(t *testing.T) {
 		if p.pid == cmd.Process.Pid {
 			if !strings.Contains(p.args, marker) {
 				t.Fatalf("pid %d argv = %q, want it to name %q", p.pid, p.args, marker)
+			}
+			if p.ppid != os.Getpid() {
+				t.Fatalf("pid %d ppid = %d, want this process (%d)", p.pid, p.ppid, os.Getpid())
 			}
 			return
 		}
@@ -131,6 +136,40 @@ func TestExitedMidRead(t *testing.T) {
 			// Assert
 			if got != c.want {
 				t.Fatalf("exitedMidRead(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
+	}
+}
+
+// TestDescendantsOf pins the transitive walk of a table's parent links.
+func TestDescendantsOf(t *testing.T) {
+	// 10 has children 11 and 12; 12 has 13; 20 is unrelated, as is its
+	// child 21; 30 has none; 40 is its own parent.
+	table := []procEntry{
+		{pid: 10, ppid: 1}, {pid: 11, ppid: 10}, {pid: 12, ppid: 10}, {pid: 13, ppid: 12},
+		{pid: 20, ppid: 1}, {pid: 21, ppid: 20}, {pid: 30, ppid: 1}, {pid: 40, ppid: 40},
+	}
+	tests := []struct {
+		name string
+		pid  int
+		want []int
+	}{
+		{name: "children and a grandchild", pid: 10, want: []int{11, 12, 13}},
+		{name: "a grandchild alone", pid: 12, want: []int{13}},
+		{name: "none", pid: 30, want: nil},
+		{name: "unrelated processes are not included", pid: 20, want: []int{21}},
+		{name: "a process that is its own parent has none", pid: 40, want: nil},
+		{name: "a pid absent from the table has none", pid: 99, want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := descendantsOf(table, tc.pid)
+
+			// Assert.
+			slices.Sort(got)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("descendantsOf(%d) = %v, want %v", tc.pid, got, tc.want)
 			}
 		})
 	}

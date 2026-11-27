@@ -2329,7 +2329,8 @@ var (
 )
 
 // SpareFromStrayReaping declares that a pid belongs to the TEST rather than to
-// the daemon's process tree, so no Daemon's ReapStrays will signal it. The
+// the daemon's process tree, so no Daemon's ReapStrays will signal it, nor any
+// of its descendants (see listStrays): stopping them is the test's. The
 // exemption is dropped at the end of the test that declared it, because the pid
 // is free for reuse the moment that process is reaped.
 func SpareFromStrayReaping(t testing.TB, pid int) {
@@ -2633,7 +2634,14 @@ type stray struct {
 
 // listStrays reads the process table for every process naming this run's
 // state directory, excluding the harness's own process and every pid a test
-// declared its own.
+// declared its own, together with that pid's descendants.
+//
+// A SPARED PROCESS'S DESCENDANTS ARE ITS OWN. A child it has forked and not
+// yet exec'd carries its argv, state directory and all, under a new pid that
+// was never declared: the persistent-wifi service's host-tool child read as a
+// leaked copy of the service (2026-11-26,
+// TestBootRefusesWithoutAnAccountRoot/no_default_config_dir). Its exec'd
+// children are its to stop, and the test that owns it awaits them.
 func (d *Daemon) listStrays() ([]stray, error) {
 	if d.StateDir == "" {
 		return nil, nil
@@ -2642,15 +2650,37 @@ func (d *Daemon) listStrays() ([]stray, error) {
 	if err != nil {
 		return nil, err
 	}
+	parents := make(map[int]int, len(table))
+	for _, p := range table {
+		parents[p.pid] = p.ppid
+	}
 	self := os.Getpid()
 	var strays []stray
 	for _, p := range table {
-		if !namesPath(p.args, d.StateDir) || p.pid == self || SparedFromStrayReaping(p.pid) {
+		if !namesPath(p.args, d.StateDir) || p.pid == self || sparedThroughAncestry(p.pid, parents, SparedFromStrayReaping) {
 			continue
 		}
 		strays = append(strays, stray{pid: p.pid, args: strings.TrimSpace(p.args)})
 	}
 	return strays, nil
+}
+
+// sparedThroughAncestry reports whether pid, or any ancestor of it in the
+// parent chain parents records, is spared. The walk ends at a pid the table
+// does not hold, at a process that is its own parent, or after len(parents)
+// hops, so no cycle in a table read mid-change can hold it.
+func sparedThroughAncestry(pid int, parents map[int]int, spared func(int) bool) bool {
+	for at, hops := pid, 0; hops <= len(parents); hops++ {
+		if spared(at) {
+			return true
+		}
+		parent, known := parents[at]
+		if !known || parent == at {
+			return false
+		}
+		at = parent
+	}
+	return false
 }
 
 // namesPath reports whether line names dir itself or a path beneath it: an

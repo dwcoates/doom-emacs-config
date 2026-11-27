@@ -31,7 +31,18 @@ func processTable() ([]procEntry, error) {
 		if len(argv) == 0 {
 			continue
 		}
-		entries = append(entries, procEntry{pid: pid, args: strings.Join(argv, " ")})
+		stat, err := tree.Stat(pid)
+		switch {
+		case errors.Is(err, procstat.ErrGone):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("read the stat of pid %d: %w", pid, err)
+		}
+		ppid, err := stat.Uint(procstat.FieldPPID)
+		if err != nil {
+			return nil, fmt.Errorf("read the parent of pid %d: %w", pid, err)
+		}
+		entries = append(entries, procEntry{pid: pid, ppid: int(ppid), args: strings.Join(argv, " ")})
 	}
 	return entries, nil
 }
