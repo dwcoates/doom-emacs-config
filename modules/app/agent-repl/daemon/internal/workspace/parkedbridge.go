@@ -148,8 +148,29 @@ func (f *Fleet) bridgedShimAtGate(ctx context.Context, log dlog.Logger, ws ids.W
 	f.mu.RLock()
 	standing, gated := f.coldGates[ws]
 	f.mu.RUnlock()
+	// A GATE THE SHIM'S EXIT CLEARED IS RAISED AGAIN FROM ITS RECORD. A cold
+	// park stops the shim the gate was projected from, and Fleet.Stop drops
+	// the gate it projected from memory (2026-11-27 03:26:34, main (doom): the
+	// park's bridge request found no gate and spawned nothing, leaving the
+	// parked workspace unreachable from claude.ai until a prompt revived it).
+	// The recorded gate (recordGate) outlives the shim, so bridging reads it
+	// whenever memory holds none, whatever order the exit and the request ran in.
+	if !gated {
+		raised, err := f.raiseRecordedGateOnly(ctx, ws)
+		if err != nil {
+			f.parkedBridgeFailed(ctx, log, ws, "could not raise the parked workspace's recorded cold gate", err.Error())
+			return nil, nil, "", false
+		}
+		if raised {
+			log.Info(opParkedBridge, "the parked workspace's gate was no longer standing in memory; raised it from its record to bridge it", nil)
+			f.mu.RLock()
+			standing, gated = f.coldGates[ws]
+			f.mu.RUnlock()
+		}
+	}
 	if !gated || standing.answering {
-		log.Debug(opParkedBridge, "no unanswered cold gate stands; nothing is bridged", dlog.Context{"gated": gated})
+		log.Info(opParkedBridge, "the parked workspace is in remote control but no unanswered cold gate stands; nothing is bridged, and claude.ai cannot reach it",
+			dlog.Context{"gated": gated, "answering": standing.answering})
 		return nil, nil, "", false
 	}
 	vendorSessionID := standing.served.VendorSessionID
