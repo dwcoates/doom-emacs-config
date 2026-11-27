@@ -31,7 +31,7 @@ func TestAnAgentsMergeOntoAgentReplsMasterTagsItsLandingAndDrawsTheVersion(t *te
 	requireRPCAnswered(t, "FinishWorkspace", resp, err)
 	// The agent's own merge enters the queue compacted, so the session is
 	// handed the context cut first and the merge waits for its turn to end.
-	if cut := s.awaitStartTurn(t, 1); cut != "/compact" && !strings.HasPrefix(cut, "/compact") {
+	if cut := s.awaitStartTurn(t, 1); !strings.HasPrefix(cut, "/compact") {
 		t.Fatalf("the enqueue compaction's StartTurn.said = %q, want the /compact literal", cut)
 	}
 	s.f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
