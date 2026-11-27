@@ -427,6 +427,8 @@ var migrations = []migration{
 	// IT IS ADDITIVE: the previous build reads the carried origin and the
 	// queue entries without their retired bubble (retiredasyncmerges.go).
 	{To: 223, Name: "retired_async_merge_rows", Kind: MigrationAdditive, DDL: retiredAsyncMergeRowsDDL, Rewrite: retireAsyncMergeQueueEntries},
+	// IT IS ADDITIVE: one nullable column the previous build never names.
+	{To: 224, Name: "merge_restore_model", Kind: MigrationAdditive, DDL: mergeRestoreModelDDL},
 }
 
 // sessionsBroughtUpAtDDL is the layout-209 addition: when a bring-up for work
