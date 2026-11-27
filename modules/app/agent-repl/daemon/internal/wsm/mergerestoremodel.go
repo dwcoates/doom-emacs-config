@@ -3,7 +3,6 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
@@ -50,17 +49,13 @@ func (s *store) HoldMergeRestoreModel(ctx context.Context, id WorkspaceID, model
 func (s *store) TakeMergeRestoreModel(ctx context.Context, id WorkspaceID) (string, bool, error) {
 	var model sql.NullString
 	err := s.write(ctx, "daemon.wsm.take_merge_restore_model", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT merge_restore_model FROM workspaces WHERE id = ?`, id).Scan(&model)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
-		if err != nil {
-			return fmt.Errorf("wsm: read the restore model of workspace %s: %w", id, err)
+		if err := scanWorkspaceRow(ctx, tx, id, "merge_restore_model", &model); err != nil {
+			return err
 		}
 		if !model.Valid {
 			return nil
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE workspaces SET merge_restore_model = NULL WHERE id = ?`, id)
+		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET merge_restore_model = NULL WHERE id = ?`, id)
 		return err
 	})
 	if err != nil {
