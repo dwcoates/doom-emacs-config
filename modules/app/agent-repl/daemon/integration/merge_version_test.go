@@ -3,11 +3,13 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/harness"
 )
@@ -27,6 +29,17 @@ func TestAnAgentsMergeOntoAgentReplsMasterTagsItsLandingAndDrawsTheVersion(t *te
 			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Minor{Minor: &agentreplv1.MergeWorkspaceVersionIncrementMinor{}}}
 	})))
 	requireRPCAnswered(t, "FinishWorkspace", resp, err)
+	// The agent's own merge enters the queue compacted, so the session is
+	// handed the context cut first and the merge waits for its turn to end.
+	if cut := s.awaitStartTurn(t, 1); cut != "/compact" && !strings.HasPrefix(cut, "/compact") {
+		t.Fatalf("the enqueue compaction's StartTurn.said = %q, want the /compact literal", cut)
+	}
+	s.f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
+			Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+		}},
+	}))
+	pushConcludedTurn(s.f.shim, mainAgent, "compacted")
 	merge := s.awaitConcluded(t, root)
 	s.d.AwaitLandingDeployed()
 
