@@ -333,7 +333,7 @@ func everyDescribedRefusal() []describedRefusal {
 				return describeGatherStatusRefusal("g", e.(*agentreplv1.GetGatherStatusError))
 			}},
 	}
-	for _, group := range [][]describedRefusal{workspaceRefusals, workspaceSettingRefusals, lifecycleRefusals, createRefusals, queueRefusals, productionRefusals, subscriptionRefusals, slackRefusals, runtimeRefusals} {
+	for _, group := range [][]describedRefusal{workspaceRefusals, workspaceSettingRefusals, lifecycleRefusals, createRefusals, queueRefusals, productionRefusals, subscriptionRefusals, slackRefusals, runtimeRefusals, topbarSettingRefusals} {
 		all = append(all, group...)
 	}
 	return all
