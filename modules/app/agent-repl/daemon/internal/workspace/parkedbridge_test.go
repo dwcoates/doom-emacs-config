@@ -549,3 +549,100 @@ func TestARefusalFromAShimStoodDownWhileItsBridgeOpenedIsNoFailure(t *testing.T)
 		t.Fatal("no gate stands, want the gate standing")
 	}
 }
+
+// parkedThenStopped parks w1 in the given remote-control mode into its cold
+// gate, then stops it as a cold park's shim exit does: the shim is gone and
+// the gate projected from it is cleared from memory, while its record stands.
+func parkedThenStopped(t *testing.T, on bool) (*fleetFixture, ids.WorkspaceID) {
+	t.Helper()
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.setRemote(ws, wsm.RemoteControl{On: on})
+	f.client.response = coldResponse()
+	f.client.bridgeFrames = make(chan *shimv1.HoldParkedBridgeResponse)
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if on {
+		f.client.bridgeFrames <- openedFrame("bridge-0")
+	}
+	if err := f.fleet.Stop(context.Background(), ws, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	close(f.client.bridgeFrames)
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the fleet's detached work did not finish")
+	}
+	if _, ok := f.fleet.ColdGate(ws); ok {
+		t.Fatal("the gate still stands in memory after the shim's stop")
+	}
+	return f, ws
+}
+
+func TestAColdParkOfARemoteControlWorkspaceWhoseGateTheShimExitClearedSpawnsTheBridgeShim(t *testing.T) {
+	// Arrange.
+	f, ws := parkedThenStopped(t, true)
+	spawnsBefore, bridgesBefore := len(f.supervisor.spawns), len(f.client.bridges)
+	f.client.bridgeFrames = make(chan *shimv1.HoldParkedBridgeResponse)
+
+	// Act.
+	f.fleet.BridgeGate(context.Background(), ws)
+	f.client.bridgeFrames <- openedFrame("bridge-1")
+	settled(t, f)
+
+	// Assert.
+	if got := len(f.supervisor.spawns) - spawnsBefore; got != 1 {
+		t.Fatalf("spawns %d, want one shim spawned to hold the bridge", got)
+	}
+	if got := len(f.client.bridges) - bridgesBefore; got != 1 {
+		t.Fatalf("bridges asked %d, want one", got)
+	}
+	if _, ok := f.fleet.ColdGate(ws); !ok {
+		t.Fatal("no gate stands, want the gate raised again from its record")
+	}
+	if _, ok := bridgeRecord(f, dlog.LevelInfo, "the parked workspace's gate was no longer standing in memory; raised it from its record to bridge it"); !ok {
+		t.Fatal("no INFO record states the gate was raised from its record to be bridged")
+	}
+}
+
+func TestAColdParkOutOfRemoteControlSpawnsNoBridgeShim(t *testing.T) {
+	// Arrange.
+	f, ws := parkedThenStopped(t, false)
+	spawnsBefore := len(f.supervisor.spawns)
+
+	// Act.
+	f.fleet.BridgeGate(context.Background(), ws)
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the fleet's detached work did not finish")
+	}
+
+	// Assert.
+	if got := len(f.supervisor.spawns) - spawnsBefore; got != 0 || len(f.client.bridges) != 0 {
+		t.Fatalf("spawns %d, bridges %d; want neither", got, len(f.client.bridges))
+	}
+}
+
+func TestAParkedRemoteControlWorkspaceWithNoGateAnywhereIsLoggedAsUnbridged(t *testing.T) {
+	// Arrange: remote control on, no gate in memory or recorded.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.db.setRemote(ws, wsm.RemoteControl{On: true})
+
+	// Act.
+	f.fleet.BridgeGate(context.Background(), ws)
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the fleet's detached work did not finish")
+	}
+
+	// Assert.
+	rec, ok := bridgeRecord(f, dlog.LevelInfo, "the parked workspace is in remote control but no unanswered cold gate stands; nothing is bridged, and claude.ai cannot reach it")
+	if !ok {
+		t.Fatal("no INFO record states the remote-control workspace is left unbridged")
+	}
+	if rec.Context["gated"] != false || rec.Context["answering"] != false {
+		t.Fatalf("record context %v, want gated and answering false", rec.Context)
+	}
+	if f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("spawn attempts %d, want none", f.supervisor.spawnAttempts)
+	}
+}

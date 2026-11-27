@@ -54,6 +54,21 @@ func (f *Fleet) recordGate(ctx context.Context, log dlog.Logger, ws ids.Workspac
 // raiseRecordedGate raises WS's recorded cold gate with no shim, answering
 // whether one was recorded. It runs under the workspace's start gate.
 func (f *Fleet) raiseRecordedGate(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	raised, err := f.raiseRecordedGateOnly(ctx, ws)
+	if !raised || err != nil {
+		return raised, err
+	}
+	// A WORKSPACE IN REMOTE CONTROL is bridged at its recorded gate, as at
+	// every other (parkedbridge.go); any other keeps no shim.
+	f.settleGateShim(ctx, ws)
+	return true, nil
+}
+
+// raiseRecordedGateOnly raises WS's recorded cold gate in memory and on its
+// views, answering whether one was recorded, and settles nothing of its shim:
+// a caller already bridging the gate (bridgedShimAtGate) is the one that
+// decides. It runs under the workspace's start gate.
+func (f *Fleet) raiseRecordedGateOnly(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 	log := f.logFor(ctx, ws)
 	rec, found, err := f.deps.DB.ColdGate(ctx, ws)
 	if err != nil {
@@ -68,9 +83,6 @@ func (f *Fleet) raiseRecordedGate(ctx context.Context, ws ids.WorkspaceID) (bool
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepColdGate})
 	log.Info(opColdGate, "raised the workspace's recorded cold gate; no session is started until it is answered",
 		dlog.Context{"vendor_session_id": rec.VendorSessionID, "context_tokens": rec.Cold.GetContextTokens()})
-	// A WORKSPACE IN REMOTE CONTROL is bridged at its recorded gate, as at
-	// every other (parkedbridge.go); any other keeps no shim.
-	f.settleGateShim(ctx, ws)
 	return true, nil
 }
 
